@@ -1,0 +1,51 @@
+import { z } from 'zod';
+import { money } from './common.js';
+
+/**
+ * Variante de produto. Lote (batch) e validade são OBRIGATÓRIOS no cadastro
+ * por exigência de rastreabilidade de cosméticos (Requisito 4.1).
+ */
+export const createVariantSchema = z
+  .object({
+    sku: z.string().trim().min(1, 'SKU obrigatório'),
+    barcode: z.string().trim().min(1).optional(),
+    description: z.string().trim().min(1, 'Descrição da variante obrigatória'),
+    costPrice: money,
+    salePrice: money,
+    stockQty: z.number().int().min(0).default(0),
+    batch: z.string().trim().min(1, 'Lote obrigatório'),
+    validity: z.coerce.date({ invalid_type_error: 'Validade inválida' }),
+  })
+  .refine((v) => v.salePrice >= v.costPrice, {
+    message: 'Preço de venda não pode ser menor que o custo',
+    path: ['salePrice'],
+  });
+export type CreateVariantInput = z.infer<typeof createVariantSchema>;
+
+export const createProductSchema = z.object({
+  name: z.string().trim().min(2, 'Nome do produto obrigatório'),
+  brand: z.string().trim().min(1, 'Marca obrigatória'),
+  group: z.string().trim().min(1, 'Grupo obrigatório'),
+  subgroup: z.string().trim().min(1).optional(),
+  variants: z.array(createVariantSchema).min(1, 'Informe ao menos uma variante'),
+});
+export type CreateProductInput = z.infer<typeof createProductSchema>;
+
+export const updateProductSchema = z.object({
+  name: z.string().trim().min(2).optional(),
+  brand: z.string().trim().min(1).optional(),
+  group: z.string().trim().min(1).optional(),
+  subgroup: z.string().trim().min(1).nullish(),
+});
+export type UpdateProductInput = z.infer<typeof updateProductSchema>;
+
+/** Atualização avulsa de uma variante (preço, estoque manual, lote, validade). */
+export const updateVariantSchema = z.object({
+  description: z.string().trim().min(1).optional(),
+  barcode: z.string().trim().min(1).nullish(),
+  costPrice: money.optional(),
+  salePrice: money.optional(),
+  batch: z.string().trim().min(1).optional(),
+  validity: z.coerce.date().optional(),
+});
+export type UpdateVariantInput = z.infer<typeof updateVariantSchema>;

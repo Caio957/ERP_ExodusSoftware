@@ -1,0 +1,22 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: exodus-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: exodus
+      POSTGRES_PASSWORD: exodus
+      POSTGRES_DB: exodus
+    ports:
+      - "5432:5432"
+    volumes:
+      - exodus-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U exodus -d exodus"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  exodus-pgdata:
+    driver: local

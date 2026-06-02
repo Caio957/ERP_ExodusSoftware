@@ -1,0 +1,24 @@
+{
+  "name": "exodus-software",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Exodus Software - ERP gerencial para lojas de maquiagem e cosméticos",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:migrate": "npm run prisma:migrate -w @exodus/api",
+    "db:generate": "npm run prisma:generate -w @exodus/api",
+    "db:seed": "npm run prisma:seed -w @exodus/api",
+    "dev:api": "npm run dev -w @exodus/api",
+    "dev:web": "npm run dev -w @exodus/web",
+    "build": "npm run build -w @exodus/shared && npm run build -w @exodus/api && npm run build -w @exodus/web",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

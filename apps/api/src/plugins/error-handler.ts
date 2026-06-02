@@ -1,0 +1,95 @@
+import fp from 'fastify-plugin';
+import { ZodError } from 'zod';
+import { Prisma } from '@prisma/client';
+import { hasZodFastifySchemaValidationErrors } from 'fastify-type-provider-zod';
+import { AppError } from '../lib/errors.js';
+
+/**
+ * Hook global de tratamento de exceções (Requisito 4.8).
+ * Captura QUALQUER erro não tratado, registra rota + payload + erro exato
+ * e devolve uma resposta JSON padronizada — sem vazar stack em produção.
+ */
+export const errorHandlerPlugin = fp(async (app) => {
+  app.setErrorHandler((error, request, reply) => {
+    const base = {
+      method: request.method,
+      url: request.url,
+      params: request.params,
+      query: request.query,
+      body: request.body,
+    };
+
+    // 1. Erros de validação (Zod via fastify-type-provider-zod)
+    if (hasZodFastifySchemaValidationErrors(error)) {
+      request.log.warn({ ...base, validation: error.validation }, 'Falha de validação');
+      return reply.status(400).send({
+        statusCode: 400,
+        code: 'VALIDATION_ERROR',
+        message: 'Dados inválidos',
+        issues: error.validation,
+      });
+    }
+
+    // 2. ZodError lançado manualmente (ex.: dentro de um service)
+    if (error instanceof ZodError) {
+      request.log.warn({ ...base, issues: error.issues }, 'Falha de validação (Zod)');
+      return reply.status(400).send({
+        statusCode: 400,
+        code: 'VALIDATION_ERROR',
+        message: 'Dados inválidos',
+        issues: error.issues,
+      });
+    }
+
+    // 3. Erros de aplicação conhecidos
+    if (error instanceof AppError) {
+      request.log.info({ ...base, code: error.code }, error.message);
+      return reply.status(error.statusCode).send({
+        statusCode: error.statusCode,
+        code: error.code,
+        message: error.message,
+        details: error.details,
+      });
+    }
+
+    // 4. Erros conhecidos do Prisma
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === 'P2002') {
+        const target = (error.meta?.target as string[] | undefined)?.join(', ');
+        request.log.warn({ ...base, prisma: error.code }, 'Violação de unicidade');
+        return reply.status(409).send({
+          statusCode: 409,
+          code: 'UNIQUE_CONSTRAINT',
+          message: `Registro já existe${target ? ` (${target})` : ''}`,
+        });
+      }
+      if (error.code === 'P2025') {
+        return reply.status(404).send({
+          statusCode: 404,
+          code: 'NOT_FOUND',
+          message: 'Registro não encontrado',
+        });
+      }
+    }
+
+    // 5. Erro inesperado — loga TUDO para manutenção técnica
+    request.log.error({ ...base, err: error }, 'Erro não tratado');
+    const isProd = process.env.NODE_ENV === 'production';
+    const err = error as { statusCode?: number; message?: string };
+    const status = err.statusCode ?? 500;
+    return reply.status(status).send({
+      statusCode: status,
+      code: 'INTERNAL_ERROR',
+      message: isProd ? 'Erro interno do servidor' : err.message ?? 'Erro interno',
+    });
+  });
+
+  // Rota não encontrada padronizada
+  app.setNotFoundHandler((request, reply) => {
+    reply.status(404).send({
+      statusCode: 404,
+      code: 'ROUTE_NOT_FOUND',
+      message: `Rota ${request.method} ${request.url} não existe`,
+    });
+  });
+});

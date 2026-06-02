@@ -1,0 +1,120 @@
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { api } from '../lib/api';
+
+const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+interface Account {
+  id: string;
+  type: string;
+  description: string;
+  amount: number;
+  dueDate: string;
+  status: string;
+  person?: { name: string } | null;
+}
+
+export function FinancialPage() {
+  const qc = useQueryClient();
+  const [type, setType] = useState<'PAYABLE' | 'RECEIVABLE'>('PAYABLE');
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['financial', type],
+    queryFn: () => api.get<{ items: Account[] }>(`/api/financial?type=${type}&pageSize=100`),
+  });
+
+  const pay = useMutation({
+    mutationFn: (id: string) => api.post(`/api/financial/${id}/pay`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['financial'] }),
+  });
+
+  const totalPending =
+    data?.items.filter((a) => a.status !== 'PAID').reduce((acc, a) => acc + a.amount, 0) ?? 0;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex gap-2">
+          <button
+            className={type === 'PAYABLE' ? 'btn-primary' : 'btn-ghost'}
+            onClick={() => setType('PAYABLE')}
+          >
+            Contas a Pagar
+          </button>
+          <button
+            className={type === 'RECEIVABLE' ? 'btn-primary' : 'btn-ghost'}
+            onClick={() => setType('RECEIVABLE')}
+          >
+            Contas a Receber
+          </button>
+        </div>
+        <div className="text-right text-sm">
+          <div className="text-slate-400">Pendente</div>
+          <div className="text-lg font-bold">{brl(totalPending)}</div>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="p-8 text-center text-slate-500">Carregando...</div>
+      ) : (
+        <div className="card overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-slate-400">
+                <th className="py-2">Descrição</th>
+                <th>Pessoa</th>
+                <th>Vencimento</th>
+                <th className="text-right">Valor</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {data?.items.map((a) => (
+                <tr key={a.id}>
+                  <td className="py-2">{a.description}</td>
+                  <td className="text-slate-500">{a.person?.name ?? '—'}</td>
+                  <td>{new Date(a.dueDate).toLocaleDateString('pt-BR')}</td>
+                  <td className="text-right font-medium">{brl(a.amount)}</td>
+                  <td>
+                    <StatusTag status={a.status} />
+                  </td>
+                  <td className="text-right">
+                    {a.status !== 'PAID' && (
+                      <button
+                        className="text-xs font-medium text-brand-700 underline"
+                        onClick={() => pay.mutate(a.id)}
+                      >
+                        Dar baixa
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {data?.items.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-slate-400">
+                    Nenhum lançamento.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatusTag({ status }: { status: string }) {
+  const map: Record<string, string> = {
+    PAID: 'bg-emerald-100 text-emerald-700',
+    PENDING: 'bg-amber-100 text-amber-700',
+    LATE: 'bg-rose-100 text-rose-700',
+  };
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${map[status] ?? 'bg-slate-100'}`}>
+      {status}
+    </span>
+  );
+}

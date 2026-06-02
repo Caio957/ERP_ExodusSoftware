@@ -1,0 +1,245 @@
+// ============================================================================
+// Exodus Software - Prisma Schema
+// ----------------------------------------------------------------------------
+// Base fornecida no briefing, CORRIGIDA e ESTENDIDA (decisão aprovada):
+//  [+] User.passwordHash            -> auth JWT/bcrypt (model original não tinha)
+//  [+] ProductVariant.batch         -> lote obrigatório (rastreabilidade 4.1)
+//  [+] Person endereço + relações   -> BrasilAPI (4.2) e integridade
+//  [~] Person.document opcional      -> clientes de balcão sem CPF; @unique
+//                                       continua válido (NULLs não colidem no PG)
+//  [+] SupplierProductMapping       -> De/Para fornecedor↔variante (4.3)
+//  [+] Relações faltantes           -> Invoice→supplier, CashRegister→user,
+//                                       Sale→user/client, FinancialAccount→invoice/person
+//  [+] StockMovement                -> razão (ledger) de estoque p/ auditoria e 4.6
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 1. USUÁRIOS E RBAC ---------------------------------------------------------
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         String // 'ADMIN' | 'CASHIER'
+  createdAt    DateTime @default(now())
+
+  cashRegisters CashRegister[]
+  sales         Sale[]
+}
+
+// 2. PRODUTOS E VARIAÇÕES ----------------------------------------------------
+model Product {
+  id        String   @id @default(uuid())
+  name      String
+  brand     String
+  group     String
+  subgroup  String?
+  variants  ProductVariant[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([name])
+  @@index([brand])
+}
+
+model ProductVariant {
+  id          String    @id @default(uuid())
+  productId   String
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sku         String    @unique
+  barcode     String?   @unique
+  description String
+  costPrice   Decimal   @db.Decimal(10, 2)
+  salePrice   Decimal   @db.Decimal(10, 2)
+  stockQty    Int       @default(0)
+  batch       String // lote (obrigatório p/ cosméticos)
+  validity    DateTime?
+
+  invoiceItems    InvoiceItem[]
+  saleItems       SaleItem[]
+  supplierMaps    SupplierProductMapping[]
+  stockMovements  StockMovement[]
+
+  @@index([productId])
+  @@index([barcode])
+}
+
+// 3. PESSOAS -----------------------------------------------------------------
+model Person {
+  id       String  @id @default(uuid())
+  type     String // 'CLIENT' | 'SUPPLIER'
+  name     String
+  document String? @unique // CPF/CNPJ - opcional p/ balcão
+  email    String?
+  phone    String?
+
+  // Endereço (autocompletado via BrasilAPI no cadastro de fornecedor)
+  zipCode  String?
+  street   String?
+  number   String?
+  district String?
+  city     String?
+  state    String?
+
+  invoices          Invoice[]                @relation("SupplierInvoices")
+  sales             Sale[]                   @relation("ClientSales")
+  financialAccounts FinancialAccount[]
+  supplierMaps      SupplierProductMapping[]
+
+  @@index([type])
+  @@index([name])
+}
+
+// 4. ENTRADA DE NOTAS FISCAIS ------------------------------------------------
+model Invoice {
+  id          String   @id @default(uuid())
+  supplierId  String
+  supplier    Person   @relation("SupplierInvoices", fields: [supplierId], references: [id])
+  accessKey   String   @unique
+  issueDate   DateTime
+  totalAmount Decimal  @db.Decimal(10, 2)
+  createdAt   DateTime @default(now())
+
+  items             InvoiceItem[]
+  financialAccounts FinancialAccount[]
+
+  @@index([supplierId])
+}
+
+model InvoiceItem {
+  id        String         @id @default(uuid())
+  invoiceId String
+  invoice   Invoice        @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id])
+  quantity  Int
+  unitCost  Decimal        @db.Decimal(10, 2)
+  cfop      String // registrado como veio no XML (flexível) - 4.3
+
+  @@index([invoiceId])
+  @@index([variantId])
+}
+
+// De/Para: associa o código/EAN do fornecedor a uma variante local (4.3).
+model SupplierProductMapping {
+  id               String         @id @default(uuid())
+  supplierId       String
+  supplier         Person         @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  supplierItemCode String // cProd do XML
+  supplierBarcode  String? // cEAN do XML
+  variantId        String
+  variant          ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  createdAt        DateTime       @default(now())
+
+  @@unique([supplierId, supplierItemCode])
+  @@index([variantId])
+}
+
+// 5. CAIXA E VENDAS ----------------------------------------------------------
+model CashRegister {
+  id          String    @id @default(uuid())
+  userId      String // operador do caixa
+  user        User      @relation(fields: [userId], references: [id])
+  openedAt    DateTime  @default(now())
+  closedAt    DateTime?
+  initialCash Decimal   @db.Decimal(10, 2)
+  finalCash   Decimal?  @db.Decimal(10, 2)
+  status      String // 'OPEN' | 'CLOSED'
+
+  transactions CashTransaction[]
+  sales        Sale[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model CashTransaction {
+  id             String       @id @default(uuid())
+  cashRegisterId String
+  cashRegister   CashRegister @relation(fields: [cashRegisterId], references: [id], onDelete: Cascade)
+  type           String // 'SUPPLY' | 'BLEED'
+  amount         Decimal      @db.Decimal(10, 2)
+  description    String
+  createdAt      DateTime     @default(now())
+
+  @@index([cashRegisterId])
+}
+
+model Sale {
+  id             String       @id @default(uuid())
+  cashRegisterId String
+  cashRegister   CashRegister @relation(fields: [cashRegisterId], references: [id])
+  userId         String? // operador que registrou
+  user           User?        @relation(fields: [userId], references: [id])
+  clientId       String?
+  client         Person?      @relation("ClientSales", fields: [clientId], references: [id])
+  totalAmount    Decimal      @db.Decimal(10, 2)
+  paymentMethod  String // 'PIX' | 'CREDIT' | 'DEBIT' | 'CASH'
+  syncStatus     String       @default("SYNCED") // 'PENDING' | 'SYNCED'
+  // Idempotência da fila offline (Dexie): evita venda duplicada na sync (4.4)
+  clientRef      String?      @unique
+  soldAt         DateTime     @default(now())
+  createdAt      DateTime     @default(now())
+
+  items SaleItem[]
+
+  @@index([cashRegisterId])
+  @@index([soldAt])
+}
+
+model SaleItem {
+  id        String         @id @default(uuid())
+  saleId    String
+  sale      Sale           @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id])
+  quantity  Int
+  unitPrice Decimal        @db.Decimal(10, 2)
+
+  @@index([saleId])
+  @@index([variantId])
+}
+
+// Razão de movimentações de estoque (auditoria + base p/ sugestão de compra)
+model StockMovement {
+  id        String         @id @default(uuid())
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  type      String // 'IN' | 'OUT' | 'ADJUST'
+  quantity  Int // positivo p/ IN, negativo p/ OUT
+  reason    String // 'SALE' | 'INVOICE' | 'MANUAL'
+  refId     String? // id da venda/nota de origem
+  createdAt DateTime       @default(now())
+
+  @@index([variantId])
+  @@index([createdAt])
+}
+
+// 6. FINANCEIRO --------------------------------------------------------------
+model FinancialAccount {
+  id          String    @id @default(uuid())
+  type        String // 'PAYABLE' | 'RECEIVABLE'
+  description String
+  amount      Decimal   @db.Decimal(10, 2)
+  dueDate     DateTime
+  paidAt      DateTime?
+  status      String // 'PENDING' | 'PAID' | 'LATE'
+
+  // Duplicatas da NFe alimentam Contas a Pagar automaticamente (4.3)
+  invoiceId String?
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  personId  String?
+  person    Person?  @relation(fields: [personId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([dueDate])
+  @@index([invoiceId])
+}
