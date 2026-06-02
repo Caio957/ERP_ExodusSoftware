@@ -11,8 +11,9 @@
 
 - **Última atualização:** 2026-06-02
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
-- **Fase atual:** Fundação concluída e validada por tipos/build. Migração ainda
-  não aplicada a banco real (bloqueio de ambiente — ver §12).
+- **Repositório:** https://github.com/Caio957/ERP_ExodusSoftware (branch `main`).
+- **Fase atual:** Fundação concluída e validada por tipos/build, **versionada no
+  GitHub**. Migração ainda não aplicada a banco real (bloqueio de ambiente — ver §12).
 
 ---
 
@@ -231,6 +232,8 @@ Outras decisões:
   `/health` 200 · login inválido 400 (Zod) · `/auth/me` sem token 401 · rota
   inexistente 404.
 - ✅ Frontend `vite build` OK + PWA (`sw.js`, `manifest.webmanifest`).
+- ✅ **Versionamento**: repositório publicado no GitHub (branch `main`), com
+  `.gitignore`/`.gitattributes`; segredos (`apps/api/.env`) fora do versionamento.
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 - ⬜ **Execução contra banco real**: pendente do Docker (§12).
 
