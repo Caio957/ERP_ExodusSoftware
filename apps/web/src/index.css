@@ -9,32 +9,112 @@
     height: 100%;
   }
   body {
-    @apply bg-slate-100 text-slate-900 antialiased;
+    @apply bg-slate-50 text-slate-900 antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+    /* Fundo com leve brilho de marca nos cantos (radial gradients). */
+    background-image:
+      radial-gradient(1100px 560px at 100% -5%, rgb(168 85 247 / 0.10), transparent 55%),
+      radial-gradient(900px 520px at -5% 105%, rgb(236 72 153 / 0.08), transparent 55%);
+    background-attachment: fixed;
     /* Evita seleção acidental durante o toque no balcão. */
     -webkit-tap-highlight-color: transparent;
+  }
+  h1,
+  h2,
+  h3 {
+    font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+    @apply tracking-tight;
+  }
+  ::selection {
+    @apply bg-brand-200 text-brand-900;
+  }
+  /* Scrollbar discreta */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(203 213 225) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-300;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-400;
   }
 }
 
 @layer components {
+  /* ---------------- Botões ---------------- */
   .btn {
-    @apply inline-flex min-h-touch items-center justify-center gap-2 rounded-xl px-5
-      text-base font-semibold transition active:scale-[0.98] disabled:opacity-50;
+    @apply inline-flex min-h-touch select-none items-center justify-center gap-2 rounded-xl px-5
+      text-base font-semibold transition-all duration-150 active:scale-[0.97]
+      disabled:pointer-events-none disabled:opacity-50;
   }
   .btn-primary {
-    @apply btn bg-brand-600 text-white hover:bg-brand-700;
+    @apply btn bg-brand-gradient text-white shadow-brand
+      hover:brightness-[1.06] hover:shadow-elevated;
+  }
+  .btn-secondary {
+    @apply btn bg-brand-50 text-brand-700 ring-1 ring-inset ring-brand-200 hover:bg-brand-100;
   }
   .btn-ghost {
-    @apply btn bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50;
+    @apply btn bg-white text-slate-700 shadow-soft ring-1 ring-slate-200/70 hover:bg-slate-50;
   }
   .btn-danger {
-    @apply btn bg-rose-600 text-white hover:bg-rose-700;
+    @apply btn bg-rose-600 text-white shadow-soft hover:bg-rose-700;
   }
-  .input {
-    @apply min-h-touch w-full rounded-xl border border-slate-300 bg-white px-4 text-base
-      outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30;
+  .btn-success {
+    @apply btn bg-emerald-600 text-white shadow-soft hover:bg-emerald-700;
   }
+
+  /* ---------------- Campos ---------------- */
+  .input,
+  .select {
+    @apply min-h-touch w-full rounded-xl border border-slate-200 bg-white px-4 text-base
+      text-slate-900 shadow-sm outline-none transition
+      placeholder:text-slate-400
+      focus:border-brand-400 focus:ring-4 focus:ring-brand-500/15;
+  }
+  .label {
+    @apply mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500;
+  }
+
+  /* ---------------- Superfícies ---------------- */
   .card {
-    @apply rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200;
+    @apply rounded-2xl border border-white/60 bg-white p-5 shadow-soft;
+  }
+  .card-hover {
+    @apply card transition-all duration-200 hover:-translate-y-0.5 hover:shadow-elevated;
+  }
+  .glass {
+    @apply rounded-2xl border border-white/40 bg-white/70 shadow-soft backdrop-blur-xl;
+  }
+
+  /* ---------------- Selos / chips ---------------- */
+  .badge {
+    @apply inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold;
+  }
+  .badge-success {
+    @apply badge bg-emerald-100 text-emerald-700;
+  }
+  .badge-warning {
+    @apply badge bg-amber-100 text-amber-700;
+  }
+  .badge-danger {
+    @apply badge bg-rose-100 text-rose-700;
+  }
+  .badge-brand {
+    @apply badge bg-brand-100 text-brand-700;
+  }
+  .badge-neutral {
+    @apply badge bg-slate-100 text-slate-600;
+  }
+
+  /* Título de seção/página */
+  .page-title {
+    @apply text-2xl font-bold text-slate-900;
   }
 }
 

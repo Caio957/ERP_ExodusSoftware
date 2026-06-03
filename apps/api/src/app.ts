@@ -1,6 +1,8 @@
+import { existsSync } from 'node:fs';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
+import fastifyStatic from '@fastify/static';
 import {
   serializerCompiler,
   validatorCompiler,
@@ -45,6 +47,18 @@ export function buildApp() {
 
   // Rotas de negócio sob /api
   app.register(registerRoutes, { prefix: '/api' });
+
+  /**
+   * Monolito (deploy Railway): a própria API serve o PWA já compilado.
+   * Quando WEB_DIST aponta para o build do front (apps/web/dist), os assets
+   * são servidos estaticamente e as rotas de navegação do SPA caem no
+   * fallback de index.html definido no error-handler (notFoundHandler).
+   */
+  const webDist = process.env.WEB_DIST;
+  if (webDist && existsSync(webDist)) {
+    app.register(fastifyStatic, { root: webDist, prefix: '/', wildcard: false });
+    app.log.info(`🖥️  Servindo PWA estático de ${webDist}`);
+  }
 
   return app;
 }

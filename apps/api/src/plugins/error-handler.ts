@@ -84,8 +84,19 @@ export const errorHandlerPlugin = fp(async (app) => {
     });
   });
 
-  // Rota não encontrada padronizada
+  // Rota não encontrada
   app.setNotFoundHandler((request, reply) => {
+    /**
+     * SPA fallback (monolito): se @fastify/static estiver ativo (produção) e a
+     * requisição for navegação do front (GET fora de /api), devolve o index.html
+     * para o React Router resolver a rota no cliente. APIs continuam com 404 JSON.
+     */
+    const sendFile = (reply as { sendFile?: (path: string) => unknown }).sendFile;
+    const isApiPath = request.url.startsWith('/api') || request.url === '/health';
+    if (!isApiPath && request.method === 'GET' && typeof sendFile === 'function') {
+      return reply.sendFile('index.html');
+    }
+
     reply.status(404).send({
       statusCode: 404,
       code: 'ROUTE_NOT_FOUND',

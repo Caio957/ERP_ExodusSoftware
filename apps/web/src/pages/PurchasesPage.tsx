@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { TrendingUp, FileDown } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { XmlImport } from '../components/XmlImport';
 
@@ -32,16 +33,21 @@ export function PurchasesPage() {
   });
 
   return (
-    <div className="space-y-4">
-      <div className="flex gap-2">
+    <div className="space-y-5">
+      <div>
+        <h1 className="page-title">Compras</h1>
+        <p className="text-sm text-slate-500">Sugestão de reposição e entrada de notas fiscais.</p>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
         <button
           className={tab === 'sugestao' ? 'btn-primary' : 'btn-ghost'}
           onClick={() => setTab('sugestao')}
         >
-          📈 Sugestão de compra
+          <TrendingUp className="h-5 w-5" /> Sugestão de compra
         </button>
         <button className={tab === 'xml' ? 'btn-primary' : 'btn-ghost'} onClick={() => setTab('xml')}>
-          📥 Importar XML (NFe)
+          <FileDown className="h-5 w-5" /> Importar XML (NFe)
         </button>
       </div>
 

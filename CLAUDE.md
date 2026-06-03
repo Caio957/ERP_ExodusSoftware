@@ -13,7 +13,13 @@
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Repositório:** https://github.com/Caio957/ERP_ExodusSoftware (branch `main`).
 - **Fase atual:** Fundação concluída e validada por tipos/build, **versionada no
-  GitHub**. Migração ainda não aplicada a banco real (bloqueio de ambiente — ver §12).
+  GitHub**. **Banco real operacional**: Docker Desktop instalado, Postgres 16 no ar,
+  migração `0_init` aplicada, seed executado e **fluxo end-to-end validado contra o
+  banco** (login → abrir caixa → criar produto → vender → baixa de estoque +
+  `StockMovement`). **Interface redesenhada** (design system "beauty" com gradientes,
+  ícones `lucide-react` e fontes). **Deploy Railway preparado (monolito)**: a API serve
+  o PWA via `@fastify/static` + `Dockerfile` + `railway.json` (validado localmente).
+  Falta apenas autenticar no Railway e disparar o deploy (ver §12.1).
 
 ---
 
@@ -234,17 +240,32 @@ Outras decisões:
 - ✅ Frontend `vite build` OK + PWA (`sw.js`, `manifest.webmanifest`).
 - ✅ **Versionamento**: repositório publicado no GitHub (branch `main`), com
   `.gitignore`/`.gitattributes`; segredos (`apps/api/.env`) fora do versionamento.
+- ✅ **Execução contra banco real** (2026-06-02): Docker Desktop instalado;
+  `db:up` (Postgres 16 healthy) → `db:migrate` (migração `0_init` aplicada,
+  Prisma Client v5.22.0 gerado) → `db:seed` (admin/caixa criados). API sobe e
+  **login real do ADMIN retorna JWT**; rota autenticada `/auth/me` responde 200.
+- ✅ **Fluxo end-to-end real** (2026-06-02): abrir caixa → criar produto+variante →
+  buscar → registrar venda (2×R$29,90 = R$59,80) → **baixa de estoque 10→8** e
+  ledger `StockMovement` (`IN +10 MANUAL`, `OUT -2 SALE`).
+- ✅ **Interface redesenhada** (2026-06-02): design system "beauty" (tema Tailwind
+  com paleta brand/accent, fontes Inter + Plus Jakarta Sans, sombras, animações),
+  ícones `lucide-react`, Login/Layout/PDV refeitos e demais páginas polidas.
+  `vite build` OK.
+- ✅ **Monolito de produção validado localmente** (2026-06-02): `node dist/server.js`
+  com `WEB_DIST` → `GET /` e `GET /pdv` servem o PWA (fallback SPA), `/api/*` mantém
+  404 JSON, `/health` 200. Pronto para Railway via `Dockerfile`/`railway.json`.
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
-- ⬜ **Execução contra banco real**: pendente do Docker (§12).
 
 ---
 
 ## 12. Pendências, bloqueios e dívidas técnicas
 
-1. **[BLOQUEIO] Docker não instalado** na máquina (nem `psql`). A migração foi
-   **gerada offline** (`prisma migrate diff`) mas **não aplicada**. Concluir:
-   instalar Docker Desktop → `npm run db:up` → `npm run db:migrate` → `npm run db:seed`.
-   Alternativa imediata: apontar `DATABASE_URL` para Supabase e `migrate deploy`.
+1. ~~**[BLOQUEIO] Docker não instalado**~~ **RESOLVIDO (2026-06-02)**: Docker Desktop
+   instalado (v29.4.3), Postgres 16 no ar via `db:up`, migração `0_init` aplicada por
+   `db:migrate` e seed executado. Fluxo end-to-end validado contra o banco real.
+   **Deploy Railway (monolito) preparado** — falta apenas `railway login` (passo
+   interativo do usuário), criar o serviço + Postgres no Railway e setar `JWT_SECRET`
+   e `DATABASE_URL` (referência do Postgres do Railway). Ver §15.
 2. **`npm audit`**: 3 vulnerabilidades reportadas (1 moderada, 2 críticas) em deps
    transitivas — revisar antes de produção.
 3. **Sem testes automatizados** (Vitest/Supertest) — só smoke test manual.
@@ -290,6 +311,39 @@ Gostaríamos de análise crítica especialmente sobre:
 5. Tela de devoluções e ajustes de estoque (com `StockMovement`).
 6. Endurecer segurança (refresh token, rate limit, validação do XML).
 7. Resolver `npm audit`.
+
+---
+
+## 15. Deploy no Railway (monolito)
+
+Arquitetura escolhida: **1 serviço web (API Fastify que também serve o PWA) + 1
+Postgres gerenciado**. Mais barato e sem CORS. Artefatos no repo: `Dockerfile`,
+`.dockerignore`, `railway.json`. A API serve o front via `@fastify/static` quando a
+env `WEB_DIST` aponta para `apps/web/dist` (já setada no `Dockerfile`).
+
+**Como subir (passos do usuário — exigem login interativo):**
+
+```bash
+railway login                      # abre o navegador (só o usuário faz)
+railway init                       # cria/seleciona o projeto
+railway add --database postgres    # provisiona o Postgres gerenciado
+# No painel do serviço web, em Variables, definir:
+#   JWT_SECRET=<segredo forte com 16+ chars>
+#   DATABASE_URL=${{Postgres.DATABASE_URL}}   (referência ao Postgres do projeto)
+#   (PORT é injetada automaticamente pelo Railway; HOST/NODE_ENV/WEB_DIST vêm do Dockerfile)
+railway up                         # build via Dockerfile + deploy
+railway domain                     # gera o domínio público
+```
+
+Alternativa recomendada para uso contínuo: conectar o repositório GitHub no painel
+do Railway (deploy automático a cada push em `main`).
+
+Observações:
+- O `start` roda `prisma migrate deploy` antes de `node dist/server.js` — migrações
+  aplicadas automaticamente no banco do Railway a cada deploy.
+- O **seed não roda no deploy**; criar o ADMIN inicial manualmente (rodar o seed
+  apontando `DATABASE_URL` para o Railway, ou um endpoint/admin one-off).
+- Custo: Railway não tem tier gratuito permanente; o monolito minimiza serviços.
 
 ---
 

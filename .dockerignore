@@ -1,0 +1,29 @@
+# Dependências e artefatos (reinstalados/recompilados na imagem)
+node_modules
+**/node_modules
+dist
+**/dist
+.vite
+**/.vite
+
+# Segredos e ambiente local
+.env
+**/.env
+*.local
+
+# Git e metadados
+.git
+.gitignore
+.gitattributes
+
+# Editor / OS
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Docker local (Postgres de desenvolvimento não vai para a imagem)
+docker-compose.yml
+
+# Documentação que não afeta o build
+*.md

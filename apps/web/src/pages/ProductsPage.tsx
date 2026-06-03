@@ -8,6 +8,7 @@ import {
   priceFromMargin,
   priceFromMarkup,
 } from '@exodus/shared';
+import { Plus, Search, Package, Tag } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -33,35 +34,51 @@ export function ProductsPage() {
   });
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3">
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="page-title">Produtos</h1>
+          <p className="text-sm text-slate-500">Catálogo, preços e estoque da loja.</p>
+        </div>
+        <button className="btn-primary" onClick={() => setShowForm(true)}>
+          <Plus className="h-5 w-5" /> Novo produto
+        </button>
+      </div>
+
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
         <input
-          className="input flex-1"
+          className="input pl-12"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Buscar produto, marca ou SKU..."
         />
-        <button className="btn-primary" onClick={() => setShowForm(true)}>
-          + Novo produto
-        </button>
       </div>
 
       {isLoading ? (
-        <div className="p-8 text-center text-slate-500">Carregando...</div>
+        <div className="grid h-40 place-items-center text-slate-500">Carregando...</div>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {data?.items.map((p) => (
-            <div key={p.id} className="card">
-              <div className="text-xs text-slate-400">
-                {p.brand} · {p.group}
+            <div key={p.id} className="card-hover">
+              <div className="mb-2 flex items-center gap-2">
+                <span className="badge-brand">{p.brand}</span>
+                <span className="badge-neutral">{p.group}</span>
               </div>
-              <div className="font-semibold">{p.name}</div>
-              <ul className="mt-2 space-y-1 text-sm">
+              <div className="font-display text-base font-bold">{p.name}</div>
+              <ul className="mt-3 space-y-1.5 text-sm">
                 {p.variants.map((v) => (
-                  <li key={v.id} className="flex justify-between">
-                    <span className="text-slate-600">{v.description}</span>
-                    <span className="font-medium">
-                      {brl(v.salePrice)} · {v.stockQty}un
+                  <li
+                    key={v.id}
+                    className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-1.5"
+                  >
+                    <span className="flex items-center gap-1.5 text-slate-600">
+                      <Tag className="h-3.5 w-3.5 text-slate-400" />
+                      {v.description}
+                    </span>
+                    <span className="font-semibold text-slate-800">
+                      {brl(v.salePrice)}
+                      <span className="ml-1 font-normal text-slate-400">· {v.stockQty}un</span>
                     </span>
                   </li>
                 ))}
@@ -69,7 +86,13 @@ export function ProductsPage() {
             </div>
           ))}
           {data?.items.length === 0 && (
-            <p className="col-span-full py-8 text-center text-slate-400">Nenhum produto encontrado.</p>
+            <div className="col-span-full grid place-items-center rounded-2xl border-2 border-dashed border-slate-200 py-14 text-center">
+              <div>
+                <Package className="mx-auto mb-3 h-12 w-12 text-slate-300" />
+                <p className="font-semibold text-slate-600">Nenhum produto encontrado</p>
+                <p className="text-sm text-slate-400">Cadastre o primeiro produto da loja.</p>
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -138,9 +161,17 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="max-h-[92vh] w-full max-w-2xl overflow-auto rounded-2xl bg-white p-5">
-        <h2 className="mb-4 text-lg font-bold">Novo produto</h2>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
+      <div className="max-h-[92vh] w-full max-w-2xl animate-scale-in overflow-auto rounded-2xl bg-white p-6 shadow-elevated">
+        <div className="mb-5 flex items-center gap-3">
+          <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-100 text-brand-600">
+            <Package className="h-6 w-6" />
+          </span>
+          <div>
+            <h2 className="font-display text-lg font-bold">Novo produto</h2>
+            <p className="text-sm text-slate-500">Cadastre o produto e a primeira variante.</p>
+          </div>
+        </div>
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="Nome" value={form.name} onChange={set('name')} />
@@ -155,8 +186,8 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
           <Field label="Estoque inicial" type="number" value={form.stockQty} onChange={set('stockQty')} />
         </div>
 
-        <div className="mt-4 rounded-xl bg-slate-50 p-3">
-          <div className="mb-2 text-sm font-semibold text-slate-600">Precificação</div>
+        <div className="mt-4 rounded-xl border border-brand-100 bg-brand-50/60 p-4">
+          <div className="mb-2 text-sm font-semibold text-brand-700">Precificação (margem ⇄ markup)</div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <NumField
               label="Custo (R$)"
@@ -220,7 +251,7 @@ function Field({
 }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium text-slate-500">{label}</span>
+      <span className="label">{label}</span>
       <input className="input" {...props} />
     </label>
   );
@@ -237,7 +268,7 @@ function NumField({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium text-slate-500">{label}</span>
+      <span className="label">{label}</span>
       <input
         className="input"
         type="number"

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowDownCircle, ArrowUpCircle, CheckCircle2 } from 'lucide-react';
 import { api } from '../lib/api';
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -32,25 +33,34 @@ export function FinancialPage() {
     data?.items.filter((a) => a.status !== 'PAID').reduce((acc, a) => acc + a.amount, 0) ?? 0;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="space-y-5">
+      <div>
+        <h1 className="page-title">Financeiro</h1>
+        <p className="text-sm text-slate-500">Contas a pagar e a receber da loja.</p>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex gap-2">
           <button
             className={type === 'PAYABLE' ? 'btn-primary' : 'btn-ghost'}
             onClick={() => setType('PAYABLE')}
           >
-            Contas a Pagar
+            <ArrowUpCircle className="h-5 w-5" /> A Pagar
           </button>
           <button
             className={type === 'RECEIVABLE' ? 'btn-primary' : 'btn-ghost'}
             onClick={() => setType('RECEIVABLE')}
           >
-            Contas a Receber
+            <ArrowDownCircle className="h-5 w-5" /> A Receber
           </button>
         </div>
-        <div className="text-right text-sm">
-          <div className="text-slate-400">Pendente</div>
-          <div className="text-lg font-bold">{brl(totalPending)}</div>
+        <div className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-right shadow-soft">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            Total pendente
+          </div>
+          <div className={`text-xl font-bold ${type === 'PAYABLE' ? 'text-rose-600' : 'text-emerald-600'}`}>
+            {brl(totalPending)}
+          </div>
         </div>
       </div>
 
@@ -82,10 +92,10 @@ export function FinancialPage() {
                   <td className="text-right">
                     {a.status !== 'PAID' && (
                       <button
-                        className="text-xs font-medium text-brand-700 underline"
+                        className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100"
                         onClick={() => pay.mutate(a.id)}
                       >
-                        Dar baixa
+                        <CheckCircle2 className="h-3.5 w-3.5" /> Dar baixa
                       </button>
                     )}
                   </td>

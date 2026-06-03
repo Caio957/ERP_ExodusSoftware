@@ -1,8 +1,15 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { loginSchema } from '@exodus/shared';
+import { Sparkles, Mail, Lock, ArrowRight, ShieldCheck, Zap, WifiOff } from 'lucide-react';
 import { useAuth } from '../store/auth';
 import { ApiError } from '../lib/api';
+
+const highlights = [
+  { icon: Zap, title: 'PDV ágil', desc: 'Venda em segundos com leitor de código de barras.' },
+  { icon: WifiOff, title: 'Funciona offline', desc: 'Continue vendendo mesmo sem internet.' },
+  { icon: ShieldCheck, title: 'Controle total', desc: 'Estoque, caixa e financeiro num só lugar.' },
+];
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -34,53 +41,124 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-900 p-4">
-      <div className="w-full max-w-sm">
-        <div className="mb-6 text-center text-white">
-          <div className="mx-auto mb-3 grid h-16 w-16 place-items-center rounded-2xl bg-brand-600 text-3xl font-bold">
+    <div className="grid min-h-screen lg:grid-cols-2">
+      {/* Painel de marca */}
+      <aside className="relative hidden overflow-hidden bg-brand-gradient lg:flex lg:flex-col lg:justify-between lg:p-12 lg:text-white">
+        {/* Brilhos decorativos */}
+        <div className="pointer-events-none absolute -right-24 -top-24 h-96 w-96 rounded-full bg-white/10 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-32 -left-16 h-96 w-96 rounded-full bg-accent-500/30 blur-3xl" />
+
+        <div className="relative flex items-center gap-3">
+          <span className="grid h-12 w-12 place-items-center rounded-2xl bg-white/15 text-2xl font-bold backdrop-blur-sm ring-1 ring-white/30">
             E
+          </span>
+          <div>
+            <div className="font-display text-xl font-extrabold leading-none">Exodus</div>
+            <div className="text-sm text-white/70">Software</div>
           </div>
-          <h1 className="text-2xl font-bold">Exodus Software</h1>
-          <p className="text-slate-400">Acesso ao sistema</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="card space-y-4">
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-600">E-mail</label>
-            <input
-              className="input"
-              type="email"
-              value={email}
-              autoComplete="username"
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@exodus.local"
-            />
+        <div className="relative max-w-md">
+          <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-sm font-medium backdrop-blur-sm">
+            <Sparkles className="h-4 w-4" /> ERP para lojas de cosméticos
           </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-600">Senha</label>
-            <input
-              className="input"
-              type="password"
-              value={password}
-              autoComplete="current-password"
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-            />
-          </div>
-
-          {error && (
-            <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>
-          )}
-
-          <button className="btn-primary w-full" disabled={loading}>
-            {loading ? 'Entrando...' : 'Entrar'}
-          </button>
-
-          <p className="text-center text-xs text-slate-400">
-            Demo: admin@exodus.local / admin12345
+          <h1 className="font-display text-4xl font-extrabold leading-tight">
+            Sua loja de beleza, no controle total.
+          </h1>
+          <p className="mt-4 text-lg text-white/80">
+            Estoque, vendas e caixa em uma experiência pensada para o balcão.
           </p>
-        </form>
-      </div>
+
+          <ul className="mt-8 space-y-4">
+            {highlights.map((h) => (
+              <li key={h.title} className="flex items-start gap-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/15 ring-1 ring-white/20">
+                  <h.icon className="h-5 w-5" />
+                </span>
+                <div>
+                  <div className="font-semibold">{h.title}</div>
+                  <div className="text-sm text-white/70">{h.desc}</div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="relative text-sm text-white/60">
+          © {new Date().getFullYear()} Exodus Software · Feito para o varejo de beleza
+        </div>
+      </aside>
+
+      {/* Formulário */}
+      <main className="flex items-center justify-center p-6 sm:p-10">
+        <div className="w-full max-w-sm animate-fade-in">
+          {/* Marca compacta (mobile) */}
+          <div className="mb-8 flex flex-col items-center text-center lg:hidden">
+            <div className="mb-3 grid h-16 w-16 place-items-center rounded-2xl bg-brand-gradient text-3xl font-bold text-white shadow-brand">
+              E
+            </div>
+            <h1 className="font-display text-2xl font-extrabold">Exodus Software</h1>
+            <p className="text-slate-500">ERP para lojas de cosméticos</p>
+          </div>
+
+          <div className="mb-6 hidden lg:block">
+            <h2 className="font-display text-3xl font-bold">Bem-vinda de volta 👋</h2>
+            <p className="mt-1 text-slate-500">Entre para começar a vender.</p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="label">E-mail</label>
+              <div className="relative">
+                <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                <input
+                  className="input pl-11"
+                  type="email"
+                  value={email}
+                  autoComplete="username"
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="admin@exodus.local"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="label">Senha</label>
+              <div className="relative">
+                <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                <input
+                  className="input pl-11"
+                  type="password"
+                  value={password}
+                  autoComplete="current-password"
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                />
+              </div>
+            </div>
+
+            {error && (
+              <div className="animate-scale-in rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-medium text-rose-700">
+                {error}
+              </div>
+            )}
+
+            <button className="btn-primary w-full" disabled={loading}>
+              {loading ? (
+                'Entrando...'
+              ) : (
+                <>
+                  Entrar <ArrowRight className="h-5 w-5" />
+                </>
+              )}
+            </button>
+          </form>
+
+          <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50/80 p-3 text-center text-xs text-slate-500">
+            <span className="font-semibold text-slate-600">Acesso demo:</span> admin@exodus.local
+            / admin12345
+          </div>
+        </div>
+      </main>
     </div>
   );
 }

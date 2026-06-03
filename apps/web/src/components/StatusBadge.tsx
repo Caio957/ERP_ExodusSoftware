@@ -1,4 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
+import { Wifi, WifiOff, RefreshCw, AlertTriangle } from 'lucide-react';
 import { db } from '../lib/db';
 import { useOnline } from '../hooks/useOnline';
 import { flushQueue } from '../lib/sync';
@@ -19,26 +20,24 @@ export function StatusBadge() {
 
   return (
     <div className="flex items-center gap-2 text-sm">
-      <span
-        className={`inline-flex items-center gap-1 rounded-full px-3 py-1 font-medium ${
-          online ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-        }`}
-      >
-        <span className={`h-2 w-2 rounded-full ${online ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-        {online ? 'Online' : 'Offline'}
+      <span className={online ? 'badge-success' : 'badge-warning'}>
+        {online ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
+        <span className="hidden sm:inline">{online ? 'Online' : 'Offline'}</span>
       </span>
       {pending > 0 && (
         <button
           onClick={() => void flushQueue()}
-          className="rounded-full bg-brand-100 px-3 py-1 font-medium text-brand-700"
+          className="badge-brand transition hover:bg-brand-200"
           title="Sincronizar agora"
         >
-          {pending} na fila ↻
+          <RefreshCw className="h-3.5 w-3.5" />
+          {pending} na fila
         </button>
       )}
       {failed > 0 && (
-        <span className="rounded-full bg-rose-100 px-3 py-1 font-medium text-rose-700">
-          {failed} com erro
+        <span className="badge-danger" title="Vendas com erro de sincronização">
+          <AlertTriangle className="h-3.5 w-3.5" />
+          {failed}
         </span>
       )}
     </div>
