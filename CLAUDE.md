@@ -9,17 +9,15 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-06-02
+- **Última atualização:** 2026-06-04
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Repositório:** https://github.com/Caio957/ERP_ExodusSoftware (branch `main`).
-- **Fase atual:** Fundação concluída e validada por tipos/build, **versionada no
-  GitHub**. **Banco real operacional**: Docker Desktop instalado, Postgres 16 no ar,
-  migração `0_init` aplicada, seed executado e **fluxo end-to-end validado contra o
-  banco** (login → abrir caixa → criar produto → vender → baixa de estoque +
-  `StockMovement`). **Interface redesenhada** (design system "beauty" com gradientes,
-  ícones `lucide-react` e fontes). **Deploy Railway preparado (monolito)**: a API serve
-  o PWA via `@fastify/static` + `Dockerfile` + `railway.json` (validado localmente).
-  Falta apenas autenticar no Railway e disparar o deploy (ver §12.1).
+- **URL de produção:** https://exodus-web-production.up.railway.app
+- **Fase atual:** Sistema em **produção no Railway** (projeto `exodus-software`,
+  conta helomramos40@gmail.com). Banco PostgreSQL gerenciado no Railway, migrações
+  aplicadas automaticamente a cada deploy, seed do ADMIN executado. Interface
+  redesenhada (design system "beauty"). Múltiplas ondas de funcionalidades entregues
+  e validadas em produção em 2026-06-03/04 (ver §11 e §15).
 
 ---
 
@@ -53,40 +51,42 @@
 ERP_ExodusSoftware/
 ├── package.json                # workspaces + scripts orquestradores
 ├── docker-compose.yml          # Postgres 16 (volume persistente)
+├── Dockerfile                  # imagem monolito para Railway
+├── railway.json                # config Railway (builder Dockerfile, healthcheck)
+├── .dockerignore
 ├── tsconfig.base.json          # config TS estrita compartilhada
-├── .env.example                # modelo de variáveis
-├── README.md                   # guia de execução
 ├── CLAUDE.md                   # ESTE documento
 ├── packages/
 │   └── shared/                 # contratos compartilhados back ↔ front
 │       └── src/
 │           ├── enums.ts        # enums de domínio (z.enum)
 │           ├── pricing.ts      # margem/markup bidirecional (puro)
-│           └── schemas/        # Zod: auth, person, product, invoice, sale, cash, financial, common
+│           └── schemas/        # auth, person, product, invoice, sale, cash, financial, settings, common
 ├── apps/
 │   ├── api/                    # Backend Fastify
 │   │   ├── prisma/
 │   │   │   ├── schema.prisma   # modelo de dados (ver §9)
 │   │   │   ├── seed.ts         # usuários de exemplo
-│   │   │   └── migrations/0_init/migration.sql  # migração inicial (gerada offline)
-│   │   ├── scripts/smoke.ts    # smoke test via app.inject()
+│   │   │   └── migrations/     # 0_init + add_lot_validity_control + add_settings
 │   │   └── src/
 │   │       ├── server.ts       # bootstrap + shutdown gracioso
-│   │       ├── app.ts          # buildApp(): plugins, type provider Zod, rotas
+│   │       ├── app.ts          # buildApp(): plugins, rotas, @fastify/static (monolito)
 │   │       ├── env.ts          # validação de env com Zod (fail-fast)
 │   │       ├── lib/            # prisma, errors, password, serialize
-│   │       ├── plugins/        # auth (JWT+RBAC), error-handler global
+│   │       ├── plugins/        # auth (JWT+RBAC), error-handler + SPA fallback
 │   │       ├── services/       # nfe-parser, sales (idempotência)
-│   │       └── routes/         # auth, products, persons, invoices, sales, cash, financial, purchase-suggestions
+│   │       └── routes/         # auth, products, persons, invoices, sales, cash,
+│   │                           # financial, purchase-suggestions, settings
 │   └── web/                    # PWA React
 │       └── src/
 │           ├── main.tsx        # QueryClient + ErrorBoundary + startSyncEngine
 │           ├── App.tsx         # rotas + ProtectedRoute (RBAC)
-│           ├── lib/            # api (fetch+JWT), token, db (Dexie), sync, products
+│           ├── lib/            # api (fetch+JWT+DELETE), token, db (Dexie), sync, products
 │           ├── hooks/          # useOnline, useBarcodeScanner
 │           ├── store/          # auth (Zustand persist)
-│           ├── components/     # Layout, ProtectedRoute, ErrorBoundary, StatusBadge, ThermalReceipt, XmlImport
-│           └── pages/          # Login, Pdv, Products, Cash, Purchases, Financial
+│           ├── components/     # Layout, ProtectedRoute, ErrorBoundary, StatusBadge,
+│           │                   # ThermalReceipt, XmlImport (upload de arquivo)
+│           └── pages/          # Login, Pdv, Products, Cash, Purchases, Financial, Settings
 ```
 
 ---
@@ -113,32 +113,54 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
 
 ### Backend
 - ✅ **Infra**: env tipado, Prisma singleton, CORS, Helmet, logger (pino-pretty em dev).
+  `@fastify/static` serve o PWA em produção (monolito Railway).
 - ✅ **Auth/RBAC**: `/auth/login`, `/auth/register` (ADMIN), `/auth/me`; guards
   `authenticate` e `authorize(roles)`.
 - ✅ **Error handler global** (§Req 4.8): trata Zod, AppError, Prisma (P2002/P2025)
-  e erros inesperados, logando rota + payload; 404 padronizado.
-- ✅ **Produtos**: CRUD, busca por barcode (PDV), criação com variantes + estoque
-  inicial (StockMovement).
+  e erros inesperados; 404 padronizado; SPA fallback para rotas do front.
+- ✅ **Produtos**: CRUD completo; filtros por `search`, `brand`, `group`, `subgroup`;
+  busca vazia retorna todos; variantes com lote/validade **opcionais** (controlado
+  por `Product.tracksLotValidity`); `DELETE` com proteção (bloqueia se houver
+  vendas ou notas vinculadas).
 - ✅ **Pessoas**: CRUD cliente/fornecedor (document opcional).
-- ✅ **Entrada de XML/NFe** (§4.3): `/invoices/parse` (normaliza + resolve De/Para
-  por mapping e por EAN), `/invoices/confirm` (cria nota, dá entrada no estoque,
-  salva De/Para, gera Contas a Pagar das duplicatas), `/invoices/mappings`.
+- ✅ **Entrada de XML/NFe** (§4.3): `/invoices/parse`, `/invoices/confirm`,
+  `/invoices/mappings`, `/invoices/manual` (compra sem XML: dá entrada de estoque,
+  cria nota interna, cria fornecedor se novo).
 - ✅ **Vendas**: `/sales` e `/sales/sync` (lote offline) com **idempotência por
   `clientRef`**; baixa de estoque + razão.
-- ✅ **Caixa**: abrir, sangria/suprimento, fechar (com diferença); **resumo só ADMIN**.
-- ✅ **Financeiro**: listar/criar/baixar contas (ADMIN).
+- ✅ **Caixa**: abrir, sangria/suprimento, fechar; `/current` retorna `expectedCash`
+  (saldo atual em tempo real); **resumo só ADMIN**.
+- ✅ **Financeiro**: listar/criar/baixar contas; `/installments` (gera N parcelas com
+  intervalo configurável); `PUT`/`DELETE` protegidos por origem (bloqueia títulos
+  originados de nota/entrada via `invoiceId`).
+- ✅ **Configurações**: `/settings/product-form` (GET autenticado, PUT ADMIN) —
+  armazena quais campos do produto são obrigatórios (subgrupo, código de barras,
+  lote/validade padrão) na tabela `Setting` (chave/valor JSON).
 - ✅ **Sugestão de compra** (§4.6): média de vendas na janela × lead time.
 
 ### Frontend
 - ✅ **Shell**: ErrorBoundary, Layout touch, ProtectedRoute (RBAC), StatusBadge
-  (online/fila).
-- ✅ **Login** + store de auth com persistência.
+  (online/fila com ícones lucide-react).
+- ✅ **Login**: layout split (painel de marca + formulário), botão "preencher demo",
+  `autoCapitalize=none`, trim na validação.
 - ✅ **PDV** (§4.4): scanner de teclado, busca, carrinho, 4 formas de pagamento,
-  **fila offline (Dexie)** com sucesso imediato, modal de recibo.
-- ✅ **Produtos**: lista + form de criação com **margem/markup bidirecional**.
-- ✅ **Caixa**: abertura/sangria/suprimento/fechamento.
-- ✅ **Compras**: sugestão de compra + **importação de XML com De/Para inline**.
-- ✅ **Financeiro**: contas a pagar/receber + baixa.
+  **fila offline (Dexie)** com sucesso imediato, modal de recibo. Caixa fechado
+  mostra tela de bloqueio.
+- ✅ **Produtos**: filtros (marca/grupo/subgrupo) + busca; editar produto e variantes;
+  excluir (com confirmação + bloqueio por origem); formulário com asteriscos `*` nos
+  campos obrigatórios; toggle **"controlar lote e validade"** (lote/validade só
+  obrigatórios quando marcado); campos obrigatórios lidos da config da loja.
+- ✅ **Caixa**: card gradiente mostra **saldo atual** (`expectedCash`) atualizado após
+  cada movimentação; suprimento/sangria com ícones; fechamento com resumo.
+- ✅ **Compras**: sugestão de compra; importação de XML por **upload de arquivo .xml**
+  (sem colar texto); **compra manual** (fornecedor, data, produto, qtd, preço,
+  lote/validade condicional → dá entrada de estoque).
+- ✅ **Financeiro**: lançamento manual a pagar/receber com **geração de N parcelas**
+  (divide o total, última absorve arredondamento, vencimentos a cada X dias); editar
+  e excluir títulos manuais; títulos originados de nota/entrada exibem 🔒 e são
+  bloqueados no backend.
+- ✅ **Configurações** (ADMIN): toggles para exigir subgrupo, código de barras e
+  ativar controle de lote/validade por padrão em novos produtos.
 - ✅ **Recibo térmico** 58/80mm + `window.print()` (§4.7).
 - ✅ **PWA**: manifest + Service Worker (Workbox) com cache de app shell e API.
 
@@ -171,13 +193,15 @@ O schema Prisma do briefing foi **mantido como base, porém corrigido e estendid
 | Mudança | Motivo |
 |--------|--------|
 | `User.passwordHash` | O model original não tinha campo de senha; necessário para JWT/bcrypt. |
-| `ProductVariant.batch` (lote, obrigatório) | Rastreabilidade de cosméticos (§4.1). |
+| `ProductVariant.batch` (nullable) | Lote agora **opcional** — obrigatório só quando `Product.tracksLotValidity = true` (configurável por produto). |
+| `Product.tracksLotValidity` (booleano) | Liga/desliga exigência de lote/validade por produto (migração `add_lot_validity_control`). |
 | `Person.document` opcional (mantém `@unique`) | Clientes de balcão sem CPF; no Postgres, múltiplos `NULL` não colidem. |
 | Campos de endereço em `Person` | Autocompletar via BrasilAPI (§4.2). |
 | `SupplierProductMapping` (nova) | Persistir o **De/Para** fornecedor↔variante (§4.3). |
 | Relações faltantes | `Invoice→supplier`, `CashRegister→user`, `Sale→user/client`, `FinancialAccount→invoice/person`. |
 | `StockMovement` (nova) | Razão (ledger) de estoque para auditoria e base da sugestão de compra. |
 | `Sale.clientRef @unique` + `soldAt` | Idempotência da fila offline e data real da venda. |
+| `Setting` (nova) | Configurações da loja em chave/valor JSON (migração `add_settings`). |
 
 Outras decisões:
 - **CFOP flexível** (§4.3): registrado exatamente como vem no XML, sem bloquear a
@@ -194,17 +218,21 @@ Outras decisões:
 | Req | Descrição | Implementação | Status |
 |-----|-----------|---------------|--------|
 | 4.1 | Margem/Markup bidirecional | `packages/shared/src/pricing.ts`, `pages/ProductsPage.tsx` | ✅ |
-| 4.1 | Lote/validade obrigatórios | `ProductVariant.batch`, `schemas/product.ts` | ✅ |
-| 4.2 | BrasilAPI (CNPJ) | Campos de endereço no schema/Zod prontos | 🟡 (falta o autocomplete no front) |
-| 4.3 | Entrada de XML + De/Para | `services/nfe-parser.ts`, `routes/invoices.ts`, `components/XmlImport.tsx` | ✅ |
+| 4.1 | Lote/validade configurável | `Product.tracksLotValidity`, `schemas/product.ts`, toggle no formulário | ✅ |
+| 4.2 | BrasilAPI (CNPJ) | Campos de endereço no schema/Zod prontos | 🟡 (falta autocomplete no front) |
+| 4.3 | Entrada de XML + De/Para | `services/nfe-parser.ts`, `routes/invoices.ts`, `components/XmlImport.tsx` (upload) | ✅ |
+| 4.3 | Compra manual (sem XML) | `routes/invoices.ts` (`/manual`), `pages/PurchasesPage.tsx` | ✅ |
 | 4.3 | CFOP flexível | `InvoiceItem.cfop` | ✅ |
 | 4.3 | Contas a Pagar das duplicatas | `routes/invoices.ts` (confirm) | ✅ |
 | 4.4 | PDV offline-first | `lib/db.ts`, `lib/sync.ts`, `hooks/useBarcodeScanner.ts`, `PdvPage.tsx` | ✅ |
-| 4.5 | Caixa (abrir/fechar/sangria/suprimento) | `routes/cash.ts`, `CashPage.tsx` | ✅ |
+| 4.5 | Caixa (abrir/fechar/sangria/suprimento) | `routes/cash.ts`, `CashPage.tsx` (saldo em tempo real) | ✅ |
 | 4.5 | Resumo financeiro só ADMIN | `routes/cash.ts` (`/summary`), `routes/financial.ts` | ✅ |
 | 4.6 | Sugestão de compra | `routes/purchase-suggestions.ts`, `PurchasesPage.tsx` | ✅ |
 | 4.7 | Recibo 58/80mm + print | `components/ThermalReceipt.tsx` | ✅ |
 | 4.8 | Resiliência/Logs | `plugins/error-handler.ts`, `components/ErrorBoundary.tsx` | ✅ |
+| — | Produtos: filtros + editar + excluir | `routes/products.ts` (GET filtros, DELETE protegido), `ProductsPage.tsx` | ✅ |
+| — | Financeiro: parcelas + editar/excluir | `routes/financial.ts` (`/installments`, PUT/DELETE), `FinancialPage.tsx` | ✅ |
+| — | Configurações da loja (ADMIN) | `routes/settings.ts`, `pages/SettingsPage.tsx`, `Setting` model | ✅ |
 
 ---
 
@@ -213,9 +241,11 @@ Outras decisões:
 `User`, `Product` 1—N `ProductVariant`, `Person` (CLIENT|SUPPLIER),
 `Invoice` 1—N `InvoiceItem`, `SupplierProductMapping`, `CashRegister` 1—N
 `CashTransaction`/`Sale`, `Sale` 1—N `SaleItem`, `StockMovement`,
-`FinancialAccount`. Campos `role`, `type`, `status`, `paymentMethod` etc. são
-`String` no Prisma (flexibilidade) mas **validados por `z.enum`** na borda
-(`packages/shared/src/enums.ts`). Detalhe completo: `apps/api/prisma/schema.prisma`.
+`FinancialAccount`, `Setting` (chave/valor). Campos `role`, `type`, `status`,
+`paymentMethod` etc. são `String` no Prisma (flexibilidade) mas **validados por
+`z.enum`** na borda (`packages/shared/src/enums.ts`). Detalhe completo:
+`apps/api/prisma/schema.prisma`. Migrações: `0_init`, `add_lot_validity_control`,
+`add_settings`.
 
 ---
 
@@ -233,50 +263,36 @@ Outras decisões:
 
 ## 11. Validações já executadas
 
-- ✅ `npm run typecheck` (shared + api + web) → **0 erros**.
-- ✅ Backend `tsup` build OK + **smoke test** (`apps/api/scripts/smoke.ts`):
-  `/health` 200 · login inválido 400 (Zod) · `/auth/me` sem token 401 · rota
-  inexistente 404.
+- ✅ `npm run typecheck` (shared + api + web) → **0 erros** (validado em todas as ondas).
+- ✅ Backend `tsup` build OK + smoke test: `/health` 200 · login inválido 400 · 401/404 padronizados.
 - ✅ Frontend `vite build` OK + PWA (`sw.js`, `manifest.webmanifest`).
-- ✅ **Versionamento**: repositório publicado no GitHub (branch `main`), com
-  `.gitignore`/`.gitattributes`; segredos (`apps/api/.env`) fora do versionamento.
-- ✅ **Execução contra banco real** (2026-06-02): Docker Desktop instalado;
-  `db:up` (Postgres 16 healthy) → `db:migrate` (migração `0_init` aplicada,
-  Prisma Client v5.22.0 gerado) → `db:seed` (admin/caixa criados). API sobe e
-  **login real do ADMIN retorna JWT**; rota autenticada `/auth/me` responde 200.
-- ✅ **Fluxo end-to-end real** (2026-06-02): abrir caixa → criar produto+variante →
-  buscar → registrar venda (2×R$29,90 = R$59,80) → **baixa de estoque 10→8** e
-  ledger `StockMovement` (`IN +10 MANUAL`, `OUT -2 SALE`).
-- ✅ **Interface redesenhada** (2026-06-02): design system "beauty" (tema Tailwind
-  com paleta brand/accent, fontes Inter + Plus Jakarta Sans, sombras, animações),
-  ícones `lucide-react`, Login/Layout/PDV refeitos e demais páginas polidas.
-  `vite build` OK.
-- ✅ **Monolito de produção validado localmente** (2026-06-02): `node dist/server.js`
-  com `WEB_DIST` → `GET /` e `GET /pdv` servem o PWA (fallback SPA), `/api/*` mantém
-  404 JSON, `/health` 200. Pronto para Railway via `Dockerfile`/`railway.json`.
+- ✅ **Versionamento**: repositório publicado no GitHub (branch `main`); segredos fora do versionamento.
+- ✅ **Execução contra banco real** (2026-06-02): Docker Desktop instalado; `db:up` → `db:migrate` (Prisma Client v5.22.0) → `db:seed`. Login real do ADMIN retorna JWT; `/auth/me` responde 200.
+- ✅ **Fluxo end-to-end real** (2026-06-02): login → abrir caixa → criar produto → registrar venda (2×R$29,90 = R$59,80) → **baixa de estoque 10→8** + `StockMovement`.
+- ✅ **Interface redesenhada** (2026-06-02): design system "beauty" (paleta brand/accent, Inter + Plus Jakarta Sans, gradientes, lucide-react). Todas as páginas redesenhadas. `vite build` OK.
+- ✅ **Deploy Railway** (2026-06-03): projeto `exodus-software` criado (conta helomramos40@gmail.com), Postgres gerenciado provisionado, serviço `exodus-web` com `JWT_SECRET` e `DATABASE_URL`. Build via Dockerfile: `prisma migrate deploy` + `node dist/server.js`. URL: https://exodus-web-production.up.railway.app.
+- ✅ **Onda 1 — Produtos & Caixa** (2026-06-04): filtros (marca/grupo/subgrupo), busca vazia lista todos, editar/excluir produto com proteção de origem, asteriscos em campos obrigatórios, toggle controle lote/validade, `Product.tracksLotValidity` (migração aplicada no Railway). Caixa mostra saldo atual (`expectedCash`). Validado em produção.
+- ✅ **Onda 2 — Configurações** (2026-06-04): tela `/configuracoes` (ADMIN), model `Setting`, rota `/api/settings/product-form`. Toggles: subgrupo obrigatório, código de barras obrigatório, lote/validade por padrão. Formulário de produto lê a config. Validado em produção.
+- ✅ **Onda 3 — Compras** (2026-06-04): importação de XML por **upload de arquivo** (não cola texto); compra manual (fornecedor, data, produto, qtd, preço, lote/validade → dá entrada de estoque via `/api/invoices/manual`). Validado em produção.
+- ✅ **Onda 4 — Financeiro** (2026-06-04): lançamento manual com **parcelas** (N parcelas × intervalo, última absorve arredondamento); editar/excluir títulos; proteção de origem (bloqueia títulos com `invoiceId`). Validado em produção (3 parcelas de 33,33/33,33/33,34).
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---
 
 ## 12. Pendências, bloqueios e dívidas técnicas
 
-1. ~~**[BLOQUEIO] Docker não instalado**~~ **RESOLVIDO (2026-06-02)**: Docker Desktop
-   instalado (v29.4.3), Postgres 16 no ar via `db:up`, migração `0_init` aplicada por
-   `db:migrate` e seed executado. Fluxo end-to-end validado contra o banco real.
-   **Deploy Railway (monolito) preparado** — falta apenas `railway login` (passo
-   interativo do usuário), criar o serviço + Postgres no Railway e setar `JWT_SECRET`
-   e `DATABASE_URL` (referência do Postgres do Railway). Ver §15.
-2. **`npm audit`**: 3 vulnerabilidades reportadas (1 moderada, 2 críticas) em deps
-   transitivas — revisar antes de produção.
-3. **Sem testes automatizados** (Vitest/Supertest) — só smoke test manual.
-4. **BrasilAPI** ainda não integrada no formulário de fornecedor (§4.2).
-5. **Cadastro de produto** cria 1 variante por vez (multi-variante a fazer).
-6. **Pagamento único por venda** (sem split de pagamento) — conforme briefing.
-7. **Estoque pode ficar negativo** em vendas offline (decisão consciente: a loja já
-   entregou o produto; sinaliza ajuste). Avaliar política de bloqueio/alerta.
-8. **JWT sem refresh token** e sem revogação (expira em 12h).
-9. **Recibo**: layout 58/80mm pronto, mas **não testado em impressora térmica real**.
-10. **Ícones PWA** usam um único SVG (sem PNGs 192/512 dedicados).
+1. ~~**[BLOQUEIO] Docker não instalado**~~ **RESOLVIDO (2026-06-02)**.
+2. ~~**Deploy Railway não configurado**~~ **RESOLVIDO (2026-06-03)**: sistema em produção em https://exodus-web-production.up.railway.app.
+3. **`npm audit`**: 3 vulnerabilidades reportadas (1 moderada, 2 críticas) em deps transitivas — revisar antes de escalar.
+4. **Sem testes automatizados** (Vitest/Supertest) — apenas smoke test manual.
+5. **BrasilAPI** ainda não integrada no formulário de fornecedor (§4.2).
+6. **Cadastro de produto** cria 1 variante por vez (multi-variante a fazer).
+7. **Pagamento único por venda** (sem split de pagamento) — conforme briefing.
+8. **Estoque pode ficar negativo** em vendas offline (decisão consciente). Avaliar política de bloqueio/alerta.
+9. **JWT sem refresh token** e sem revogação (expira em 12h).
+10. **Recibo**: layout 58/80mm pronto, mas **não testado em impressora térmica real**.
+11. **Ícones PWA** usam um único SVG (sem PNGs 192/512 dedicados).
+12. **Tela de Suprimento/Sangria** usa `window.prompt()` nativo — substituir por modal próprio para melhor UX no tablet.
 
 ---
 
@@ -304,46 +320,38 @@ Gostaríamos de análise crítica especialmente sobre:
 
 ## 14. Próximos passos sugeridos (ordem proposta)
 
-1. Subir banco (Docker/Supabase) e validar fluxos end-to-end reais.
+1. Substituir `window.prompt()` da Sangria/Suprimento por modal próprio (UX de tablet).
 2. Suíte de testes: Vitest (unit em `pricing`/`nfe-parser`) + integração das rotas.
-3. Integração BrasilAPI no cadastro de fornecedor.
-4. Cadastro multi-variante de produto + edição de estoque/preço.
-5. Tela de devoluções e ajustes de estoque (com `StockMovement`).
-6. Endurecer segurança (refresh token, rate limit, validação do XML).
-7. Resolver `npm audit`.
+3. Integração BrasilAPI no cadastro de fornecedor (autocomplete de CNPJ).
+4. Cadastro multi-variante de produto (formulário dinâmico de variantes).
+5. Tela de devoluções e ajustes de estoque manual (com `StockMovement` tipo ADJUST).
+6. Endurecer segurança: refresh token, rate limiting, validação XXE no parser XML.
+7. Resolver `npm audit` (3 vulnerabilidades em deps transitivas).
+8. Conectar GitHub no painel Railway para auto-deploy a cada push em `main`.
 
 ---
 
-## 15. Deploy no Railway (monolito)
+## 15. Deploy no Railway (monolito) — ATIVO
 
-Arquitetura escolhida: **1 serviço web (API Fastify que também serve o PWA) + 1
-Postgres gerenciado**. Mais barato e sem CORS. Artefatos no repo: `Dockerfile`,
-`.dockerignore`, `railway.json`. A API serve o front via `@fastify/static` quando a
-env `WEB_DIST` aponta para `apps/web/dist` (já setada no `Dockerfile`).
+**URL de produção:** https://exodus-web-production.up.railway.app
 
-**Como subir (passos do usuário — exigem login interativo):**
+**Credenciais de acesso:** admin@exodus.local / admin12345 · caixa@exodus.local / caixa12345
 
+**Estrutura Railway (conta helomramos40@gmail.com, projeto `exodus-software`):**
+- Serviço `exodus-web`: build via `Dockerfile`, healthcheck `/health`, variáveis `JWT_SECRET` e `DATABASE_URL=${{Postgres.DATABASE_URL}}`.
+- Banco `Postgres` gerenciado pelo Railway.
+- `PORT` é injetada automaticamente; `HOST`, `NODE_ENV`, `WEB_DIST` vêm do Dockerfile.
+- O CMD roda `prisma migrate deploy` antes de `node dist/server.js` → migrações aplicadas automaticamente a cada deploy.
+
+**Para redeployar após mudanças:**
 ```bash
-railway login                      # abre o navegador (só o usuário faz)
-railway init                       # cria/seleciona o projeto
-railway add --database postgres    # provisiona o Postgres gerenciado
-# No painel do serviço web, em Variables, definir:
-#   JWT_SECRET=<segredo forte com 16+ chars>
-#   DATABASE_URL=${{Postgres.DATABASE_URL}}   (referência ao Postgres do projeto)
-#   (PORT é injetada automaticamente pelo Railway; HOST/NODE_ENV/WEB_DIST vêm do Dockerfile)
-railway up                         # build via Dockerfile + deploy
-railway domain                     # gera o domínio público
+# Com RAILWAY_API_TOKEN na env:
+railway up --service exodus-web --detach --message "descricao do deploy"
 ```
 
-Alternativa recomendada para uso contínuo: conectar o repositório GitHub no painel
-do Railway (deploy automático a cada push em `main`).
+**⚠️ IMPORTANTE:** o projeto `soothing-strength` (sistema de sobrancelhas do usuário) está na mesma conta e **JAMAIS deve ser tocado**. Antes de qualquer comando Railway, confirmar com `railway status` que o projeto é `exodus-software`.
 
-Observações:
-- O `start` roda `prisma migrate deploy` antes de `node dist/server.js` — migrações
-  aplicadas automaticamente no banco do Railway a cada deploy.
-- O **seed não roda no deploy**; criar o ADMIN inicial manualmente (rodar o seed
-  apontando `DATABASE_URL` para o Railway, ou um endpoint/admin one-off).
-- Custo: Railway não tem tier gratuito permanente; o monolito minimiza serviços.
+**Custo:** Railway não tem tier gratuito permanente. O monolito (1 serviço + 1 Postgres) minimiza os serviços faturados.
 
 ---
 
