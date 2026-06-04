@@ -7,6 +7,7 @@ import { saleRoutes } from './sales.js';
 import { cashRoutes } from './cash.js';
 import { financialRoutes } from './financial.js';
 import { purchaseSuggestionRoutes } from './purchase-suggestions.js';
+import { settingsRoutes } from './settings.js';
 
 /** Registra todos os grupos de rotas sob seus respectivos prefixos. */
 export async function registerRoutes(app: FastifyInstance) {
@@ -18,4 +19,5 @@ export async function registerRoutes(app: FastifyInstance) {
   await app.register(cashRoutes, { prefix: '/cash' });
   await app.register(financialRoutes, { prefix: '/financial' });
   await app.register(purchaseSuggestionRoutes, { prefix: '/purchase-suggestions' });
+  await app.register(settingsRoutes, { prefix: '/settings' });
 }

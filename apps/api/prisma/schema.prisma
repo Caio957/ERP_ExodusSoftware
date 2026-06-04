@@ -226,6 +226,13 @@ model StockMovement {
   @@index([createdAt])
 }
 
+// Configurações da loja (chave/valor JSON) — ex.: campos obrigatórios do produto.
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
 // 6. FINANCEIRO --------------------------------------------------------------
 model FinancialAccount {
   id          String    @id @default(uuid())

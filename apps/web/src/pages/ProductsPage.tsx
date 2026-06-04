@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   marginFromPrice,
@@ -7,6 +7,7 @@ import {
   markupToMargin,
   priceFromMargin,
   priceFromMarkup,
+  type ProductFormSettings,
 } from '@exodus/shared';
 import { Plus, Search, Package, Tag, Pencil, Trash2, X, ShieldCheck, Filter } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
@@ -230,6 +231,17 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
   const [tracksLotValidity, setTracksLotValidity] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
+  // Config da loja: define quais campos são obrigatórios (Onda 2).
+  const { data: settings } = useQuery({
+    queryKey: ['settings', 'product-form'],
+    queryFn: () => api.get<ProductFormSettings>('/api/settings/product-form'),
+  });
+  const subgroupRequired = settings?.subgroupRequired ?? false;
+  const barcodeRequired = settings?.barcodeRequired ?? false;
+  useEffect(() => {
+    if (settings) setTracksLotValidity(settings.defaultTracksLotValidity);
+  }, [settings]);
+
   // Precificação com cálculo bidirecional (Requisito 4.1)
   const [cost, setCost] = useState(0);
   const [salePrice, setSalePrice] = useState(0);
@@ -267,6 +279,14 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
 
   function submit() {
     setLocalError(null);
+    if (subgroupRequired && !form.subgroup.trim()) {
+      setLocalError('Subgrupo é obrigatório (definido nas Configurações).');
+      return;
+    }
+    if (barcodeRequired && !form.barcode.trim()) {
+      setLocalError('Código de barras é obrigatório (definido nas Configurações).');
+      return;
+    }
     if (tracksLotValidity && (!form.batch.trim() || !form.validity)) {
       setLocalError('Lote e validade são obrigatórios quando o controle está ativado.');
       return;
@@ -294,9 +314,14 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
           <Field label="Nome" required value={form.name} onChange={set('name')} />
           <Field label="Marca" required value={form.brand} onChange={set('brand')} />
           <Field label="Grupo" required value={form.group} onChange={set('group')} />
-          <Field label="Subgrupo" value={form.subgroup} onChange={set('subgroup')} />
+          <Field label="Subgrupo" required={subgroupRequired} value={form.subgroup} onChange={set('subgroup')} />
           <Field label="SKU" required value={form.sku} onChange={set('sku')} />
-          <Field label="Código de barras" value={form.barcode} onChange={set('barcode')} />
+          <Field
+            label="Código de barras"
+            required={barcodeRequired}
+            value={form.barcode}
+            onChange={set('barcode')}
+          />
           <Field label="Descrição da variante" required value={form.description} onChange={set('description')} />
           <Field label="Estoque inicial" type="number" value={form.stockQty} onChange={set('stockQty')} />
         </div>

@@ -9,3 +9,4 @@ export * from './schemas/invoice.js';
 export * from './schemas/sale.js';
 export * from './schemas/cash.js';
 export * from './schemas/financial.js';
+export * from './schemas/settings.js';

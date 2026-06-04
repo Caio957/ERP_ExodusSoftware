@@ -7,6 +7,7 @@ import { ProductsPage } from './pages/ProductsPage';
 import { CashPage } from './pages/CashPage';
 import { PurchasesPage } from './pages/PurchasesPage';
 import { FinancialPage } from './pages/FinancialPage';
+import { SettingsPage } from './pages/SettingsPage';
 
 export function App() {
   return (
@@ -25,6 +26,7 @@ export function App() {
             <Route element={<ProtectedRoute roles={['ADMIN']} />}>
               <Route path="/compras" element={<PurchasesPage />} />
               <Route path="/financeiro" element={<FinancialPage />} />
+              <Route path="/configuracoes" element={<SettingsPage />} />
             </Route>
           </Route>
         </Route>

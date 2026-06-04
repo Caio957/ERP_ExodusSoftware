@@ -5,6 +5,7 @@ import {
   Wallet,
   Truck,
   BarChart3,
+  Settings,
   LogOut,
   type LucideIcon,
 } from 'lucide-react';
@@ -17,6 +18,7 @@ const navItems: { to: string; label: string; icon: LucideIcon; adminOnly?: boole
   { to: '/caixa', label: 'Caixa', icon: Wallet },
   { to: '/compras', label: 'Compras', icon: Truck, adminOnly: true },
   { to: '/financeiro', label: 'Financeiro', icon: BarChart3, adminOnly: true },
+  { to: '/configuracoes', label: 'Config', icon: Settings, adminOnly: true },
 ];
 
 function initials(name?: string) {
