@@ -196,7 +196,8 @@ model Sale {
   soldAt         DateTime     @default(now())
   createdAt      DateTime     @default(now())
 
-  items SaleItem[]
+  items             SaleItem[]
+  financialAccounts FinancialAccount[] // contas a receber geradas (venda a prazo)
 
   @@index([cashRegisterId])
   @@index([soldAt])
@@ -252,8 +253,12 @@ model FinancialAccount {
   invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
   personId  String?
   person    Person?  @relation(fields: [personId], references: [id], onDelete: SetNull)
+  // Origem em venda a prazo (contas a receber). Removido ao editar/excluir a venda.
+  saleId    String?
+  sale      Sale?    @relation(fields: [saleId], references: [id], onDelete: SetNull)
 
   @@index([status])
   @@index([dueDate])
   @@index([invoiceId])
+  @@index([saleId])
 }

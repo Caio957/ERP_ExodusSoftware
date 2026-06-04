@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { createSaleSchema, syncSalesSchema, paginationQuery } from '@exodus/shared';
+import { createSaleSchema, syncSalesSchema, updateSaleSchema, paginationQuery } from '@exodus/shared';
 import { prisma } from '../lib/prisma.js';
 import { serializeDecimals } from '../lib/serialize.js';
-import { createSale } from '../services/sales.js';
+import { createSale, updateSale, deleteSale } from '../services/sales.js';
 import { NotFoundError } from '../lib/errors.js';
 
 export async function saleRoutes(app: FastifyInstance) {
@@ -72,6 +72,29 @@ export async function saleRoutes(app: FastifyInstance) {
       });
       if (!sale) throw new NotFoundError('Venda');
       return serializeDecimals(sale);
+    },
+  );
+
+  // Edita a venda por completo (estorna estoque + refaz financeiro). Só ADMIN.
+  r.put(
+    '/:id',
+    {
+      preHandler: app.authorize(['ADMIN']),
+      schema: { params: z.object({ id: z.string().uuid() }), body: updateSaleSchema },
+    },
+    async (req) => {
+      const sale = await updateSale(req.params.id, req.body);
+      return serializeDecimals(sale);
+    },
+  );
+
+  // Exclui a venda (estorna estoque + remove financeiro vinculado). Só ADMIN.
+  r.delete(
+    '/:id',
+    { preHandler: app.authorize(['ADMIN']), schema: { params: z.object({ id: z.string().uuid() }) } },
+    async (req, reply) => {
+      await deleteSale(req.params.id);
+      return reply.status(204).send();
     },
   );
 }

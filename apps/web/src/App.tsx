@@ -8,6 +8,7 @@ import { CashPage } from './pages/CashPage';
 import { PurchasesPage } from './pages/PurchasesPage';
 import { FinancialPage } from './pages/FinancialPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { SalesPage } from './pages/SalesPage';
 
 export function App() {
   return (
@@ -24,6 +25,7 @@ export function App() {
 
             {/* Rotas exclusivas de ADMIN (RBAC - Requisito 4.5) */}
             <Route element={<ProtectedRoute roles={['ADMIN']} />}>
+              <Route path="/vendas" element={<SalesPage />} />
               <Route path="/compras" element={<PurchasesPage />} />
               <Route path="/financeiro" element={<FinancialPage />} />
               <Route path="/configuracoes" element={<SettingsPage />} />

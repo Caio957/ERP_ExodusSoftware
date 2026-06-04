@@ -35,3 +35,18 @@ export const syncSalesSchema = z.object({
   sales: z.array(createSaleSchema).min(1),
 });
 export type SyncSalesInput = z.infer<typeof syncSalesSchema>;
+
+/**
+ * Edição "por completo" de uma venda já registrada (PDV-C). Substitui itens,
+ * valores e forma de pagamento. O backend estorna o estoque anterior, remove o
+ * financeiro vinculado e regrava tudo de forma consistente.
+ */
+export const updateSaleSchema = z.object({
+  paymentMethod: PaymentMethod,
+  clientId: z.string().uuid().nullish(),
+  items: z.array(saleItemSchema).min(1, 'Venda sem itens'),
+  discount: money.default(0),
+  surcharge: money.default(0),
+  notes: z.string().trim().max(500).nullish(),
+});
+export type UpdateSaleInput = z.infer<typeof updateSaleSchema>;
