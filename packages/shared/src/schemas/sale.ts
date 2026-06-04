@@ -14,6 +14,11 @@ export const createSaleSchema = z.object({
   paymentMethod: PaymentMethod,
   clientId: z.string().uuid().optional(),
   items: z.array(saleItemSchema).min(1, 'Venda sem itens'),
+  /** Desconto e acréscimo aplicados sobre o subtotal (valores em R$). */
+  discount: money.default(0),
+  surcharge: money.default(0),
+  /** Observação livre da venda. */
+  notes: z.string().trim().max(500).optional(),
   /**
    * Identificador gerado no cliente (PDV offline). Usado como chave de
    * idempotência: ao sincronizar a fila do Dexie, evita registrar a mesma

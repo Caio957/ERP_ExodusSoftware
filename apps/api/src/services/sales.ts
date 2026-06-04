@@ -26,10 +26,14 @@ export async function createSale(input: CreateSaleInput, userId: string) {
   if (!register) throw new NotFoundError('Caixa');
   if (register.status !== 'OPEN') throw new BusinessError('Caixa não está aberto');
 
-  const total = input.items.reduce(
+  const subtotal = input.items.reduce(
     (acc, it) => acc.add(new Prisma.Decimal(it.unitPrice).mul(it.quantity)),
     new Prisma.Decimal(0),
   );
+  const discount = new Prisma.Decimal(input.discount ?? 0);
+  const surcharge = new Prisma.Decimal(input.surcharge ?? 0);
+  const total = subtotal.sub(discount).add(surcharge);
+  if (total.lessThan(0)) throw new BusinessError('Desconto maior que o total da venda');
 
   try {
     const sale = await prisma.$transaction(async (tx) => {
@@ -39,7 +43,11 @@ export async function createSale(input: CreateSaleInput, userId: string) {
           userId,
           clientId: input.clientId ?? null,
           paymentMethod: input.paymentMethod,
+          subtotal,
+          discount,
+          surcharge,
           totalAmount: total,
+          notes: input.notes ?? null,
           syncStatus: 'SYNCED',
           clientRef: input.clientRef ?? null,
           soldAt: input.soldAt ?? new Date(),

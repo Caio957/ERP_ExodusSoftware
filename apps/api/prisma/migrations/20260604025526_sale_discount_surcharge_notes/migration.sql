@@ -1,0 +1,6 @@
+-- AlterTable
+ALTER TABLE "Sale" ADD COLUMN     "discount" DECIMAL(10,2) NOT NULL DEFAULT 0,
+ADD COLUMN     "notes" TEXT,
+ADD COLUMN     "subtotal" DECIMAL(10,2) NOT NULL DEFAULT 0,
+ADD COLUMN     "surcharge" DECIMAL(10,2) NOT NULL DEFAULT 0;
+

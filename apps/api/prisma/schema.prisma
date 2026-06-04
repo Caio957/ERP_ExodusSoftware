@@ -184,7 +184,11 @@ model Sale {
   user           User?        @relation(fields: [userId], references: [id])
   clientId       String?
   client         Person?      @relation("ClientSales", fields: [clientId], references: [id])
-  totalAmount    Decimal      @db.Decimal(10, 2)
+  subtotal       Decimal      @default(0) @db.Decimal(10, 2) // soma dos itens (bruto)
+  discount       Decimal      @default(0) @db.Decimal(10, 2) // desconto em R$
+  surcharge      Decimal      @default(0) @db.Decimal(10, 2) // acréscimo em R$
+  totalAmount    Decimal      @db.Decimal(10, 2) // líquido: subtotal - desconto + acréscimo
+  notes          String? // observação livre da venda
   paymentMethod  String // 'PIX' | 'CREDIT' | 'DEBIT' | 'CASH'
   syncStatus     String       @default("SYNCED") // 'PENDING' | 'SYNCED'
   // Idempotência da fila offline (Dexie): evita venda duplicada na sync (4.4)
