@@ -148,8 +148,12 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   subtotal (entrada em R$ e em %), **observação** livre da venda, 4 formas de
   pagamento, **fila offline (Dexie)** com sucesso imediato, modal de recibo. Caixa
   fechado mostra tela de bloqueio.
-  🟡 Falta: múltiplas formas de pagamento + "A prazo" (PDV-B) e consulta/edição de
-  vendas (PDV-C).
+  🟡 Falta: múltiplas formas de pagamento + "A prazo" (PDV-B).
+- ✅ **Vendas** (ADMIN, `/vendas`): consulta das vendas (data, pagamento, cliente,
+  itens, total); **excluir** (estorna estoque + remove financeiro vinculado);
+  **editar por completo** (itens/qtd/preço/desconto/acréscimo/observação/pagamento) —
+  o backend estorna o estoque anterior, apaga o financeiro vinculado e regrava tudo
+  numa transação.
 - ✅ **Produtos**: filtros (marca/grupo/subgrupo) + busca; editar produto e variantes
   (asteriscos `*` também no modal Editar); excluir (com confirmação + bloqueio por
   origem); toggle **"controlar lote e validade"** (lote/validade só obrigatórios
@@ -295,6 +299,11 @@ Outras decisões:
   Migração aditiva `sale_discount_surcharge_notes` (Sale: subtotal/discount/surcharge/
   notes). `npm run build` OK. Commit `9344d19`. **Falta aplicar a migração no Railway**
   (próximo deploy).
+- ✅ **Onda PDV-C — Consulta/edição de vendas** (2026-06-04): tela `/vendas` (ADMIN)
+  com excluir (estorna estoque + remove financeiro) e editar por completo (itens,
+  desconto, acréscimo, observação, pagamento). Migração aditiva
+  `financial_account_sale_link` (FinancialAccount.saleId). `npm run build` OK.
+  Commit `7e6b652`. **Falta aplicar as migrações no Railway** (próximo deploy).
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---
