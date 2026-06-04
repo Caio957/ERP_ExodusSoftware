@@ -103,18 +103,21 @@ model Person {
 
 // 4. ENTRADA DE NOTAS FISCAIS ------------------------------------------------
 model Invoice {
-  id          String   @id @default(uuid())
-  supplierId  String
-  supplier    Person   @relation("SupplierInvoices", fields: [supplierId], references: [id])
-  accessKey   String   @unique
-  issueDate   DateTime
-  totalAmount Decimal  @db.Decimal(10, 2)
-  createdAt   DateTime @default(now())
+  id             String   @id @default(uuid())
+  supplierId     String
+  supplier       Person   @relation("SupplierInvoices", fields: [supplierId], references: [id])
+  accessKey      String   @unique
+  documentNumber Int? // nº sequencial do documento (compras manuais)
+  notes          String? // observação da compra
+  issueDate      DateTime
+  totalAmount    Decimal  @db.Decimal(10, 2)
+  createdAt      DateTime @default(now())
 
   items             InvoiceItem[]
   financialAccounts FinancialAccount[]
 
   @@index([supplierId])
+  @@index([documentNumber])
 }
 
 model InvoiceItem {

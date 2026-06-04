@@ -6,12 +6,15 @@ import {
   confirmInvoiceSchema,
   supplierMappingSchema,
   manualPurchaseSchema,
+  updateInvoiceSchema,
   paginationQuery,
 } from '@exodus/shared';
 import { prisma } from '../lib/prisma.js';
 import { serializeDecimals } from '../lib/serialize.js';
 import { parseNfeXml } from '../services/nfe-parser.js';
-import { ConflictError, NotFoundError } from '../lib/errors.js';
+import { BusinessError, ConflictError, NotFoundError } from '../lib/errors.js';
+
+const idParam = z.object({ id: z.string().uuid() });
 
 export async function invoiceRoutes(app: FastifyInstance) {
   const r = app.withTypeProvider<ZodTypeProvider>();
@@ -170,67 +173,159 @@ export async function invoiceRoutes(app: FastifyInstance) {
     '/manual',
     { preHandler: app.authorize(['ADMIN']), schema: { body: manualPurchaseSchema } },
     async (req, reply) => {
-      const {
-        supplierId,
-        supplierName,
-        purchaseDate,
-        variantId,
-        quantity,
-        unitCost,
-        tracksLotValidity,
-        batch,
-        validity,
-      } = req.body;
+      const { supplierId, supplierName, purchaseDate, notes, items, installments } = req.body;
 
-      const variant = await prisma.productVariant.findUnique({ where: { id: variantId } });
-      if (!variant) throw new NotFoundError('Produto');
+      const variantIds = [...new Set(items.map((i) => i.variantId))];
+      const variants = await prisma.productVariant.findMany({ where: { id: { in: variantIds } } });
+      if (variants.length !== variantIds.length) throw new NotFoundError('Produto');
+      const variantById = new Map(variants.map((v) => [v.id, v]));
+
+      // Validação opcional das parcelas: soma = total da compra.
+      const total = items.reduce((a, it) => a + it.quantity * it.unitCost, 0);
+      if (installments && installments.length) {
+        const instSum = installments.reduce((a, i) => a + i.amount, 0);
+        if (Math.abs(instSum - total) > 0.01) {
+          throw new BusinessError('A soma das parcelas difere do total da compra');
+        }
+      }
 
       const invoice = await prisma.$transaction(async (tx) => {
         // Fornecedor: usa o existente ou cria um novo.
         let supId = supplierId;
         if (!supId) {
-          const created = await tx.person.create({
-            data: { type: 'SUPPLIER', name: supplierName! },
-          });
+          const created = await tx.person.create({ data: { type: 'SUPPLIER', name: supplierName! } });
           supId = created.id;
         }
 
-        const total = Number((quantity * unitCost).toFixed(2));
+        // Nº de documento sequencial (D4).
+        const last = await tx.invoice.aggregate({ _max: { documentNumber: true } });
+        const documentNumber = (last._max.documentNumber ?? 0) + 1;
+
         const created = await tx.invoice.create({
           data: {
             supplierId: supId,
             accessKey: `MANUAL-${crypto.randomUUID()}`,
+            documentNumber,
+            notes: notes ?? null,
             issueDate: purchaseDate,
-            totalAmount: total,
-            items: { create: [{ variantId, quantity, unitCost, cfop: 'MANUAL' }] },
+            totalAmount: Number(total.toFixed(2)),
+            items: {
+              create: items.map((it) => ({
+                variantId: it.variantId,
+                quantity: it.quantity,
+                unitCost: it.unitCost,
+                cfop: 'MANUAL',
+              })),
+            },
           },
         });
 
-        await tx.productVariant.update({
-          where: { id: variantId },
-          data: {
-            stockQty: { increment: quantity },
-            costPrice: unitCost,
-            ...(tracksLotValidity ? { batch: batch ?? null, validity: validity ?? null } : {}),
-          },
-        });
-
-        // Marca o produto com controle de lote/validade quando solicitado.
-        if (tracksLotValidity) {
-          await tx.product.update({
-            where: { id: variant.productId },
-            data: { tracksLotValidity: true },
+        // Entrada de estoque + custo + (novo preço de venda) + lote/validade por item.
+        for (const it of items) {
+          const variant = variantById.get(it.variantId)!;
+          await tx.productVariant.update({
+            where: { id: it.variantId },
+            data: {
+              stockQty: { increment: it.quantity },
+              costPrice: it.unitCost,
+              ...(it.newSalePrice != null ? { salePrice: it.newSalePrice } : {}),
+              ...(it.tracksLotValidity ? { batch: it.batch ?? null, validity: it.validity ?? null } : {}),
+            },
+          });
+          if (it.tracksLotValidity) {
+            await tx.product.update({
+              where: { id: variant.productId },
+              data: { tracksLotValidity: true },
+            });
+          }
+          await tx.stockMovement.create({
+            data: { variantId: it.variantId, type: 'IN', quantity: it.quantity, reason: 'INVOICE', refId: created.id },
           });
         }
 
-        await tx.stockMovement.create({
-          data: { variantId, type: 'IN', quantity, reason: 'INVOICE', refId: created.id },
-        });
+        // Contas a pagar parceladas (D7).
+        if (installments && installments.length) {
+          await tx.financialAccount.createMany({
+            data: installments.map((inst, i) => ({
+              type: 'PAYABLE',
+              description: `Compra #${documentNumber} - parcela ${i + 1}/${installments.length}`,
+              amount: inst.amount,
+              dueDate: inst.dueDate,
+              status: 'PENDING',
+              invoiceId: created.id,
+              personId: supId,
+            })),
+          });
+        }
 
         return created;
       });
 
       return reply.status(201).send(serializeDecimals(invoice));
+    },
+  );
+
+  // Detalhe de uma compra/nota.
+  r.get('/:id', { preHandler: app.authenticate, schema: { params: idParam } }, async (req) => {
+    const invoice = await prisma.invoice.findUnique({
+      where: { id: req.params.id },
+      include: {
+        supplier: true,
+        items: { include: { variant: { include: { product: true } } } },
+        financialAccounts: true,
+      },
+    });
+    if (!invoice) throw new NotFoundError('Compra');
+    return serializeDecimals(invoice);
+  });
+
+  // Edição de metadados (observação, data, nº de documento). Não altera itens.
+  r.put(
+    '/:id',
+    { preHandler: app.authorize(['ADMIN']), schema: { params: idParam, body: updateInvoiceSchema } },
+    async (req) => {
+      const invoice = await prisma.invoice.update({
+        where: { id: req.params.id },
+        data: {
+          ...(req.body.notes !== undefined ? { notes: req.body.notes } : {}),
+          ...(req.body.purchaseDate ? { issueDate: req.body.purchaseDate } : {}),
+          ...(req.body.documentNumber !== undefined ? { documentNumber: req.body.documentNumber } : {}),
+        },
+      });
+      return serializeDecimals(invoice);
+    },
+  );
+
+  // Exclusão: estorna o estoque e remove as contas a pagar pendentes. Bloqueia
+  // se alguma conta a pagar da compra já foi baixada.
+  r.delete(
+    '/:id',
+    { preHandler: app.authorize(['ADMIN']), schema: { params: idParam } },
+    async (req, reply) => {
+      const invoice = await prisma.invoice.findUnique({
+        where: { id: req.params.id },
+        include: { items: true, financialAccounts: true },
+      });
+      if (!invoice) throw new NotFoundError('Compra');
+      if (invoice.financialAccounts.some((a) => a.status === 'PAID')) {
+        throw new BusinessError('Compra possui contas a pagar já baixadas e não pode ser excluída.');
+      }
+
+      await prisma.$transaction(async (tx) => {
+        for (const it of invoice.items) {
+          await tx.productVariant.update({
+            where: { id: it.variantId },
+            data: { stockQty: { decrement: it.quantity } },
+          });
+          await tx.stockMovement.create({
+            data: { variantId: it.variantId, type: 'OUT', quantity: -it.quantity, reason: 'INVOICE_DELETE', refId: invoice.id },
+          });
+        }
+        await tx.financialAccount.deleteMany({ where: { invoiceId: invoice.id } });
+        await tx.invoice.delete({ where: { id: invoice.id } });
+      });
+
+      return reply.status(204).send();
     },
   );
 

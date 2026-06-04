@@ -169,9 +169,12 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   movimentações** unindo vendas (leitura) + sangrias/suprimentos (editáveis/excluíveis
   só com o caixa aberto); **resumo de recebimentos por forma** (ADMIN); **histórico de
   caixas de outros dias** com detalhe e resumo; fechamento por modal.
-- ✅ **Compras**: sugestão de compra; importação de XML por **upload de arquivo .xml**
-  (sem colar texto); **compra manual** (fornecedor, data, produto, qtd, preço,
-  lote/validade condicional → dá entrada de estoque).
+- ✅ **Compras**: sugestão de compra; importação de XML por **upload de arquivo .xml**;
+  **compra manual multi-produto** (vários itens, observação, **nº de documento
+  sequencial**, **novo preço de venda por item** mostrando o atual, **lote/validade por
+  item**, e **contas a pagar parceladas** opcionais do total); **aba "Compras lançadas"**
+  para consultar, editar (observação) e **excluir** (estorna estoque + remove contas a
+  pagar pendentes; bloqueado se houver título já baixado).
 - ✅ **Financeiro**: lançamento manual a pagar/receber com **geração de N parcelas**
   (divide o total, última absorve arredondamento, vencimentos a cada X dias); editar
   e excluir títulos manuais; títulos originados de nota/entrada exibem 🔒 e são
@@ -325,6 +328,11 @@ Outras decisões:
   migração. Build OK.
 - ✅ **Auto-deploy Railway** (2026-06-04): serviço `exodus-web` vinculado ao GitHub
   (branch `main`) com **deploy automático a cada push**; migrações aplicadas no deploy.
+- ✅ **Onda Compra manual** (2026-06-04): multi-produto, observação, nº de documento
+  sequencial, novo preço de venda por item, lote/validade por item, contas a pagar
+  parceladas; aba de compras lançadas (detalhe/editar/excluir com estorno). Migração
+  aditiva `invoice_document_notes` (Invoice: documentNumber, notes). Endpoints
+  `GET/PUT/DELETE /invoices/:id`. `npm run build` OK.
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---

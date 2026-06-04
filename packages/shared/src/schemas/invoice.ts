@@ -74,42 +74,60 @@ export const confirmInvoiceSchema = z.object({
 export type ConfirmInvoiceInput = z.infer<typeof confirmInvoiceSchema>;
 
 /**
- * Compra manual (sem XML): dá entrada de estoque de uma variante existente,
- * informando fornecedor (existente ou novo), data, quantidade, custo e —
- * opcionalmente — controle de lote/validade.
+ * Item de uma compra manual. Permite informar um novo preço de venda (D5) e o
+ * controle de lote/validade por produto (D6).
+ */
+export const manualPurchaseItemSchema = z
+  .object({
+    variantId: z.string().uuid('Selecione o produto'),
+    quantity: positiveInt,
+    unitCost: money,
+    /** Novo preço de venda; se omitido, mantém o atual da variante. */
+    newSalePrice: money.optional(),
+    tracksLotValidity: z.boolean().default(false),
+    batch: z.string().trim().min(1).optional(),
+    validity: z.coerce.date().optional(),
+  })
+  .superRefine((d, ctx) => {
+    if (d.tracksLotValidity) {
+      if (!d.batch)
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['batch'], message: 'Lote obrigatório' });
+      if (!d.validity)
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['validity'], message: 'Validade obrigatória' });
+    }
+  });
+export type ManualPurchaseItemInput = z.infer<typeof manualPurchaseItemSchema>;
+
+/**
+ * Compra manual (sem XML): dá entrada de estoque de N produtos, gera nº de
+ * documento sequencial, observação e — opcionalmente — contas a pagar parceladas.
  */
 export const manualPurchaseSchema = z
   .object({
     supplierId: z.string().uuid().optional(),
     supplierName: z.string().trim().min(1).optional(),
     purchaseDate: z.coerce.date(),
-    variantId: z.string().uuid('Selecione o produto'),
-    quantity: positiveInt,
-    unitCost: money,
-    tracksLotValidity: z.boolean().default(false),
-    batch: z.string().trim().min(1).optional(),
-    validity: z.coerce.date().optional(),
+    notes: z.string().trim().max(500).optional(),
+    items: z.array(manualPurchaseItemSchema).min(1, 'Adicione ao menos um produto'),
+    /** Parcelas do contas a pagar (D7). Se vazio, não gera financeiro. */
+    installments: z
+      .array(z.object({ dueDate: z.coerce.date(), amount: money }))
+      .optional(),
   })
   .superRefine((d, ctx) => {
     if (!d.supplierId && !d.supplierName) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['supplierName'],
-        message: 'Informe o fornecedor',
-      });
-    }
-    if (d.tracksLotValidity) {
-      if (!d.batch)
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['batch'], message: 'Lote obrigatório' });
-      if (!d.validity)
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['validity'],
-          message: 'Validade obrigatória',
-        });
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['supplierName'], message: 'Informe o fornecedor' });
     }
   });
 export type ManualPurchaseInput = z.infer<typeof manualPurchaseSchema>;
+
+/** Edição de metadados de uma compra (observação, data, nº de documento). */
+export const updateInvoiceSchema = z.object({
+  notes: z.string().trim().max(500).nullish(),
+  purchaseDate: z.coerce.date().optional(),
+  documentNumber: z.number().int().positive().nullish(),
+});
+export type UpdateInvoiceInput = z.infer<typeof updateInvoiceSchema>;
 
 /** Cria/atualiza manualmente um vínculo De/Para fornecedor↔variante. */
 export const supplierMappingSchema = z.object({
