@@ -5,12 +5,13 @@ import {
   parseNfeSchema,
   confirmInvoiceSchema,
   supplierMappingSchema,
+  manualPurchaseSchema,
   paginationQuery,
 } from '@exodus/shared';
 import { prisma } from '../lib/prisma.js';
 import { serializeDecimals } from '../lib/serialize.js';
 import { parseNfeXml } from '../services/nfe-parser.js';
-import { ConflictError } from '../lib/errors.js';
+import { ConflictError, NotFoundError } from '../lib/errors.js';
 
 export async function invoiceRoutes(app: FastifyInstance) {
   const r = app.withTypeProvider<ZodTypeProvider>();
@@ -151,6 +152,80 @@ export async function invoiceRoutes(app: FastifyInstance) {
             })),
           });
         }
+
+        return created;
+      });
+
+      return reply.status(201).send(serializeDecimals(invoice));
+    },
+  );
+
+  /**
+   * POST /api/invoices/manual
+   * Compra manual (sem XML): cria uma nota interna, dá entrada de estoque na
+   * variante (StockMovement IN), atualiza custo e — se marcado — o controle de
+   * lote/validade. Fornecedor pode ser existente ou criado na hora.
+   */
+  r.post(
+    '/manual',
+    { preHandler: app.authorize(['ADMIN']), schema: { body: manualPurchaseSchema } },
+    async (req, reply) => {
+      const {
+        supplierId,
+        supplierName,
+        purchaseDate,
+        variantId,
+        quantity,
+        unitCost,
+        tracksLotValidity,
+        batch,
+        validity,
+      } = req.body;
+
+      const variant = await prisma.productVariant.findUnique({ where: { id: variantId } });
+      if (!variant) throw new NotFoundError('Produto');
+
+      const invoice = await prisma.$transaction(async (tx) => {
+        // Fornecedor: usa o existente ou cria um novo.
+        let supId = supplierId;
+        if (!supId) {
+          const created = await tx.person.create({
+            data: { type: 'SUPPLIER', name: supplierName! },
+          });
+          supId = created.id;
+        }
+
+        const total = Number((quantity * unitCost).toFixed(2));
+        const created = await tx.invoice.create({
+          data: {
+            supplierId: supId,
+            accessKey: `MANUAL-${crypto.randomUUID()}`,
+            issueDate: purchaseDate,
+            totalAmount: total,
+            items: { create: [{ variantId, quantity, unitCost, cfop: 'MANUAL' }] },
+          },
+        });
+
+        await tx.productVariant.update({
+          where: { id: variantId },
+          data: {
+            stockQty: { increment: quantity },
+            costPrice: unitCost,
+            ...(tracksLotValidity ? { batch: batch ?? null, validity: validity ?? null } : {}),
+          },
+        });
+
+        // Marca o produto com controle de lote/validade quando solicitado.
+        if (tracksLotValidity) {
+          await tx.product.update({
+            where: { id: variant.productId },
+            data: { tracksLotValidity: true },
+          });
+        }
+
+        await tx.stockMovement.create({
+          data: { variantId, type: 'IN', quantity, reason: 'INVOICE', refId: created.id },
+        });
 
         return created;
       });

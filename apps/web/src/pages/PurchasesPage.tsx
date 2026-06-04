@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { TrendingUp, FileDown } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { TrendingUp, FileDown, PackagePlus, Check } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { XmlImport } from '../components/XmlImport';
 
@@ -19,7 +19,7 @@ interface Suggestion {
 }
 
 export function PurchasesPage() {
-  const [tab, setTab] = useState<'sugestao' | 'xml'>('sugestao');
+  const [tab, setTab] = useState<'sugestao' | 'xml' | 'manual'>('sugestao');
   const [windowDays, setWindowDays] = useState(30);
   const [leadTimeDays, setLeadTimeDays] = useState(15);
 
@@ -48,6 +48,12 @@ export function PurchasesPage() {
         </button>
         <button className={tab === 'xml' ? 'btn-primary' : 'btn-ghost'} onClick={() => setTab('xml')}>
           <FileDown className="h-5 w-5" /> Importar XML (NFe)
+        </button>
+        <button
+          className={tab === 'manual' ? 'btn-primary' : 'btn-ghost'}
+          onClick={() => setTab('manual')}
+        >
+          <PackagePlus className="h-5 w-5" /> Compra manual
         </button>
       </div>
 
@@ -124,6 +130,277 @@ export function PurchasesPage() {
       )}
 
       {tab === 'xml' && <XmlImport />}
+
+      {tab === 'manual' && <ManualPurchase />}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Cadastro manual de compra (sem XML)
+// ---------------------------------------------------------------------------
+interface SupplierLite {
+  id: string;
+  name: string;
+}
+interface VariantHit {
+  id: string;
+  label: string;
+}
+
+function ManualPurchase() {
+  const qc = useQueryClient();
+  const [supplierName, setSupplierName] = useState('');
+  const [supplierId, setSupplierId] = useState<string | null>(null);
+  const [variant, setVariant] = useState<VariantHit | null>(null);
+  const [purchaseDate, setPurchaseDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [quantity, setQuantity] = useState('1');
+  const [unitCost, setUnitCost] = useState('0');
+  const [tracksLot, setTracksLot] = useState(false);
+  const [batch, setBatch] = useState('');
+  const [validity, setValidity] = useState('');
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  const { data: suppliers } = useQuery({
+    queryKey: ['suppliers', supplierName],
+    queryFn: () =>
+      api.get<{ items: SupplierLite[] }>(
+        `/api/persons?type=SUPPLIER&search=${encodeURIComponent(supplierName)}`,
+      ),
+    enabled: supplierName.trim().length >= 2 && !supplierId,
+  });
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.post('/api/invoices/manual', {
+        supplierId: supplierId ?? undefined,
+        supplierName: supplierId ? undefined : supplierName.trim(),
+        purchaseDate,
+        variantId: variant?.id,
+        quantity: Number(quantity),
+        unitCost: Number(unitCost),
+        tracksLotValidity: tracksLot,
+        batch: batch || undefined,
+        validity: validity || undefined,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['products'] });
+      setDone(true);
+      setVariant(null);
+      setQuantity('1');
+      setUnitCost('0');
+      setBatch('');
+      setValidity('');
+      setTracksLot(false);
+      window.setTimeout(() => setDone(false), 3000);
+    },
+  });
+
+  function submit() {
+    setLocalError(null);
+    if (!supplierId && supplierName.trim().length < 1) {
+      setLocalError('Informe o fornecedor.');
+      return;
+    }
+    if (!variant) {
+      setLocalError('Selecione o produto.');
+      return;
+    }
+    if (Number(quantity) <= 0) {
+      setLocalError('Quantidade deve ser maior que zero.');
+      return;
+    }
+    if (tracksLot && (!batch.trim() || !validity)) {
+      setLocalError('Lote e validade são obrigatórios quando o controle está ativado.');
+      return;
+    }
+    save.mutate();
+  }
+
+  return (
+    <div className="card max-w-2xl space-y-4">
+      <div className="flex items-center gap-2 font-semibold">
+        <PackagePlus className="h-5 w-5 text-brand-600" /> Nova compra manual
+      </div>
+
+      {/* Fornecedor */}
+      <div className="relative">
+        <span className="label">Fornecedor *</span>
+        <input
+          className="input"
+          value={supplierName}
+          onChange={(e) => {
+            setSupplierName(e.target.value);
+            setSupplierId(null);
+          }}
+          placeholder="Buscar ou digitar um novo fornecedor..."
+        />
+        {!supplierId && supplierName.trim().length >= 2 && suppliers && suppliers.items.length > 0 && (
+          <div className="absolute z-10 mt-1 max-h-40 w-full overflow-auto rounded-xl border border-slate-200 bg-white shadow-elevated">
+            {suppliers.items.map((s) => (
+              <button
+                key={s.id}
+                className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
+                onClick={() => {
+                  setSupplierId(s.id);
+                  setSupplierName(s.name);
+                }}
+              >
+                {s.name}
+              </button>
+            ))}
+          </div>
+        )}
+        {supplierId ? (
+          <span className="mt-1 inline-block text-xs text-emerald-600">✓ Fornecedor existente</span>
+        ) : (
+          supplierName.trim().length >= 1 && (
+            <span className="mt-1 inline-block text-xs text-amber-600">
+              Será cadastrado como novo fornecedor
+            </span>
+          )
+        )}
+      </div>
+
+      {/* Produto */}
+      <div>
+        <span className="label">Produto *</span>
+        {variant ? (
+          <div className="flex items-center justify-between rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+            <span>{variant.label}</span>
+            <button className="text-xs underline" onClick={() => setVariant(null)}>
+              trocar
+            </button>
+          </div>
+        ) : (
+          <ProductSearch onPick={(v) => setVariant(v)} />
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <label className="block">
+          <span className="label">Data da compra *</span>
+          <input
+            className="input"
+            type="date"
+            value={purchaseDate}
+            onChange={(e) => setPurchaseDate(e.target.value)}
+          />
+        </label>
+        <label className="block">
+          <span className="label">Quantidade *</span>
+          <input
+            className="input"
+            type="number"
+            inputMode="numeric"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+          />
+        </label>
+        <label className="block">
+          <span className="label">Preço de compra (R$) *</span>
+          <input
+            className="input"
+            type="number"
+            inputMode="decimal"
+            value={unitCost}
+            onChange={(e) => setUnitCost(e.target.value)}
+          />
+        </label>
+      </div>
+
+      <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <input
+          type="checkbox"
+          className="mt-0.5 h-5 w-5 accent-brand-600"
+          checked={tracksLot}
+          onChange={(e) => setTracksLot(e.target.checked)}
+        />
+        <span className="text-sm">
+          <span className="font-semibold text-slate-700">Controlar lote e validade</span>
+          <span className="block text-xs text-slate-500">
+            Registra lote/validade desta entrada e marca o produto.
+          </span>
+        </span>
+      </label>
+
+      {tracksLot && (
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block">
+            <span className="label">Lote *</span>
+            <input className="input" value={batch} onChange={(e) => setBatch(e.target.value)} />
+          </label>
+          <label className="block">
+            <span className="label">Validade *</span>
+            <input
+              className="input"
+              type="date"
+              value={validity}
+              onChange={(e) => setValidity(e.target.value)}
+            />
+          </label>
+        </div>
+      )}
+
+      {(localError || save.error instanceof ApiError) && (
+        <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          {localError ?? (save.error as ApiError).message}
+        </div>
+      )}
+
+      <div className="flex items-center justify-end gap-3">
+        {done && (
+          <span className="flex items-center gap-1 text-sm font-medium text-emerald-600">
+            <Check className="h-4 w-4" /> Entrada registrada!
+          </span>
+        )}
+        <button className="btn-primary" disabled={save.isPending} onClick={submit}>
+          {save.isPending ? 'Salvando...' : 'Registrar compra'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Busca de produto para selecionar a variante da compra manual. */
+function ProductSearch({ onPick }: { onPick: (v: VariantHit) => void }) {
+  const [term, setTerm] = useState('');
+  const { data } = useQuery({
+    queryKey: ['manual-product-search', term],
+    queryFn: () =>
+      api.get<{
+        items: Array<{ name: string; variants: Array<{ id: string; description: string; sku: string }> }>;
+      }>(`/api/products?search=${encodeURIComponent(term)}`),
+    enabled: term.trim().length >= 2,
+  });
+
+  return (
+    <div>
+      <input
+        className="input"
+        value={term}
+        onChange={(e) => setTerm(e.target.value)}
+        placeholder="Buscar produto cadastrado..."
+      />
+      {data && term.trim().length >= 2 && (
+        <div className="mt-1 max-h-44 overflow-auto rounded-xl border border-slate-200">
+          {data.items.flatMap((p) =>
+            p.variants.map((v) => (
+              <button
+                key={v.id}
+                className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
+                onClick={() => onPick({ id: v.id, label: `${p.name} — ${v.description} (${v.sku})` })}
+              >
+                {p.name} — {v.description} <span className="text-slate-400">({v.sku})</span>
+              </button>
+            )),
+          )}
+          {data.items.length === 0 && (
+            <div className="px-3 py-2 text-sm text-slate-400">Nenhum produto encontrado.</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

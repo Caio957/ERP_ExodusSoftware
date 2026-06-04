@@ -73,6 +73,44 @@ export const confirmInvoiceSchema = z.object({
 });
 export type ConfirmInvoiceInput = z.infer<typeof confirmInvoiceSchema>;
 
+/**
+ * Compra manual (sem XML): dá entrada de estoque de uma variante existente,
+ * informando fornecedor (existente ou novo), data, quantidade, custo e —
+ * opcionalmente — controle de lote/validade.
+ */
+export const manualPurchaseSchema = z
+  .object({
+    supplierId: z.string().uuid().optional(),
+    supplierName: z.string().trim().min(1).optional(),
+    purchaseDate: z.coerce.date(),
+    variantId: z.string().uuid('Selecione o produto'),
+    quantity: positiveInt,
+    unitCost: money,
+    tracksLotValidity: z.boolean().default(false),
+    batch: z.string().trim().min(1).optional(),
+    validity: z.coerce.date().optional(),
+  })
+  .superRefine((d, ctx) => {
+    if (!d.supplierId && !d.supplierName) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['supplierName'],
+        message: 'Informe o fornecedor',
+      });
+    }
+    if (d.tracksLotValidity) {
+      if (!d.batch)
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['batch'], message: 'Lote obrigatório' });
+      if (!d.validity)
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['validity'],
+          message: 'Validade obrigatória',
+        });
+    }
+  });
+export type ManualPurchaseInput = z.infer<typeof manualPurchaseSchema>;
+
 /** Cria/atualiza manualmente um vínculo De/Para fornecedor↔variante. */
 export const supplierMappingSchema = z.object({
   supplierId: z.string().uuid(),

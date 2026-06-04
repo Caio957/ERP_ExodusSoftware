@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { UploadCloud, FileText } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -24,17 +25,17 @@ interface ParsedNfe {
 }
 
 export function XmlImport() {
-  const [xml, setXml] = useState('');
   const [parsed, setParsed] = useState<ParsedNfe | null>(null);
   const [mapping, setMapping] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
+  const [fileName, setFileName] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
 
-  async function handleParse() {
+  async function handleParse(xmlContent: string) {
     setFeedback(null);
     setBusy(true);
     try {
-      const data = await api.post<ParsedNfe>('/api/invoices/parse', { xml });
+      const data = await api.post<ParsedNfe>('/api/invoices/parse', { xml: xmlContent });
       setParsed(data);
       const initial: Record<number, string> = {};
       data.items.forEach((it, i) => {
@@ -45,6 +46,19 @@ export function XmlImport() {
       setFeedback({ type: 'err', msg: err instanceof ApiError ? err.message : 'Falha ao processar XML' });
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // permite reimportar o mesmo arquivo
+    if (!file) return;
+    setFileName(file.name);
+    try {
+      const text = await file.text();
+      await handleParse(text);
+    } catch {
+      setFeedback({ type: 'err', msg: 'Não foi possível ler o arquivo selecionado.' });
     }
   }
 
@@ -89,7 +103,7 @@ export function XmlImport() {
 
       setFeedback({ type: 'ok', msg: 'Entrada confirmada! Estoque e Contas a Pagar atualizados.' });
       setParsed(null);
-      setXml('');
+      setFileName(null);
     } catch (err) {
       setFeedback({ type: 'err', msg: err instanceof ApiError ? err.message : 'Falha ao confirmar' });
     } finally {
@@ -101,18 +115,29 @@ export function XmlImport() {
     <div className="space-y-4">
       {!parsed && (
         <div className="card">
-          <label className="mb-1 block text-sm font-medium text-slate-600">
-            Cole o conteúdo do XML da NFe
+          <label className="label">Arquivo XML da nota de compra (NFe)</label>
+          <label className="mt-1 flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-300 p-10 text-center transition hover:border-brand-400 hover:bg-brand-50/40">
+            <UploadCloud className="h-10 w-10 text-brand-400" />
+            <span className="font-semibold text-slate-700">
+              {busy ? 'Processando...' : 'Clique para selecionar o arquivo .xml'}
+            </span>
+            <span className="text-xs text-slate-400">
+              {fileName ? (
+                <span className="inline-flex items-center gap-1 text-brand-600">
+                  <FileText className="h-3.5 w-3.5" /> {fileName}
+                </span>
+              ) : (
+                'Selecione o XML emitido pelo fornecedor'
+              )}
+            </span>
+            <input
+              type="file"
+              accept=".xml,text/xml,application/xml"
+              className="hidden"
+              disabled={busy}
+              onChange={handleFile}
+            />
           </label>
-          <textarea
-            className="input h-40 resize-y py-2 font-mono text-xs"
-            value={xml}
-            onChange={(e) => setXml(e.target.value)}
-            placeholder="<nfeProc>...</nfeProc>"
-          />
-          <button className="btn-primary mt-3" disabled={!xml || busy} onClick={handleParse}>
-            {busy ? 'Processando...' : 'Processar XML'}
-          </button>
         </div>
       )}
 
