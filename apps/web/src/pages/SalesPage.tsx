@@ -12,6 +12,8 @@ const methodLabel: Record<string, string> = {
   PIX: 'PIX',
   DEBIT: 'Débito',
   CREDIT: 'Crédito',
+  A_PRAZO: 'A prazo',
+  SPLIT: 'Múltiplas formas',
 };
 
 interface SaleListItem {
@@ -185,7 +187,11 @@ function EditSaleModal({
           quantity: it.quantity,
         })),
       );
-      setPaymentMethod(sale.paymentMethod);
+      // Edição simplifica para pagamento único; normaliza SPLIT/A_PRAZO p/ Dinheiro.
+      const single = (['CASH', 'PIX', 'DEBIT', 'CREDIT'] as string[]).includes(sale.paymentMethod)
+        ? sale.paymentMethod
+        : 'CASH';
+      setPaymentMethod(single);
       setDiscount(sale.discount);
       setSurcharge(sale.surcharge);
       setNotes(sale.notes ?? '');

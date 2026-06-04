@@ -9,6 +9,20 @@ export const saleItemSchema = z.object({
 });
 export type SaleItemInput = z.infer<typeof saleItemSchema>;
 
+/** Uma forma de pagamento da venda (split permite várias). */
+export const salePaymentSchema = z.object({
+  method: PaymentMethod,
+  amount: money.refine((v) => v > 0, 'Valor do pagamento deve ser maior que zero'),
+});
+export type SalePaymentInput = z.infer<typeof salePaymentSchema>;
+
+/** Parcela de uma venda "A prazo" (contas a receber). */
+export const saleInstallmentSchema = z.object({
+  dueDate: z.coerce.date(),
+  amount: money.refine((v) => v > 0, 'Valor da parcela deve ser maior que zero'),
+});
+export type SaleInstallmentInput = z.infer<typeof saleInstallmentSchema>;
+
 export const createSaleSchema = z.object({
   cashRegisterId: z.string().uuid(),
   paymentMethod: PaymentMethod,
@@ -19,6 +33,16 @@ export const createSaleSchema = z.object({
   surcharge: money.default(0),
   /** Observação livre da venda. */
   notes: z.string().trim().max(500).optional(),
+  /**
+   * Formas de pagamento. Quando omitido, assume pagamento único pelo
+   * `paymentMethod` no valor total. Permite split (várias formas).
+   */
+  payments: z.array(salePaymentSchema).optional(),
+  /**
+   * Parcelas da parte "A prazo" (gera contas a receber). Obrigatório quando
+   * houver pagamento com método `A_PRAZO`; exige também `clientId`.
+   */
+  installments: z.array(saleInstallmentSchema).optional(),
   /**
    * Identificador gerado no cliente (PDV offline). Usado como chave de
    * idempotência: ao sincronizar a fila do Dexie, evita registrar a mesma

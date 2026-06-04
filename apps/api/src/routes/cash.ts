@@ -20,9 +20,10 @@ async function computeExpectedCash(cashRegisterId: string) {
       where: { cashRegisterId, type: 'BLEED' },
       _sum: { amount: true },
     }),
-    prisma.sale.aggregate({
-      where: { cashRegisterId, paymentMethod: 'CASH' },
-      _sum: { totalAmount: true },
+    // Soma os PAGAMENTOS em dinheiro (não o total da venda) — trata split e a prazo.
+    prisma.salePayment.aggregate({
+      where: { method: 'CASH', sale: { cashRegisterId } },
+      _sum: { amount: true },
     }),
   ]);
   if (!register) throw new NotFoundError('Caixa');
@@ -30,7 +31,7 @@ async function computeExpectedCash(cashRegisterId: string) {
   const initial = toMoney(register.initialCash) ?? 0;
   const supply = toMoney(supplies._sum.amount) ?? 0;
   const bleed = toMoney(bleeds._sum.amount) ?? 0;
-  const cash = toMoney(cashSales._sum.totalAmount) ?? 0;
+  const cash = toMoney(cashSales._sum.amount) ?? 0;
   return { register, expectedCash: initial + supply - bleed + cash };
 }
 
@@ -108,10 +109,10 @@ export async function cashRoutes(app: FastifyInstance) {
     { preHandler: app.authorize(['ADMIN']), schema: { params: idParam } },
     async (req) => {
       const { register, expectedCash } = await computeExpectedCash(req.params.id);
-      const byMethod = await prisma.sale.groupBy({
-        by: ['paymentMethod'],
-        where: { cashRegisterId: register.id },
-        _sum: { totalAmount: true },
+      const byMethod = await prisma.salePayment.groupBy({
+        by: ['method'],
+        where: { sale: { cashRegisterId: register.id } },
+        _sum: { amount: true },
         _count: true,
       });
 
@@ -119,9 +120,9 @@ export async function cashRoutes(app: FastifyInstance) {
         cashRegister: serializeDecimals(register),
         expectedCash,
         salesByMethod: byMethod.map((m) => ({
-          paymentMethod: m.paymentMethod,
+          paymentMethod: m.method,
           count: m._count,
-          total: toMoney(m._sum.totalAmount) ?? 0,
+          total: toMoney(m._sum.amount) ?? 0,
         })),
       };
     },

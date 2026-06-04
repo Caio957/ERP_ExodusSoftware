@@ -43,6 +43,33 @@ export async function createSale(input: CreateSaleInput, userId: string) {
   const total = subtotal.sub(discount).add(surcharge);
   if (total.lessThan(0)) throw new BusinessError('Desconto maior que o total da venda');
 
+  // Formas de pagamento (default: pagamento único no valor total).
+  const payments =
+    input.payments && input.payments.length > 0
+      ? input.payments
+      : [{ method: input.paymentMethod, amount: total.toNumber() }];
+  const cent = new Prisma.Decimal('0.01');
+  const paidSum = payments.reduce((a, p) => a.add(new Prisma.Decimal(p.amount)), new Prisma.Decimal(0));
+  if (paidSum.sub(total).abs().greaterThan(cent)) {
+    throw new BusinessError('A soma das formas de pagamento difere do total da venda');
+  }
+
+  // Parte "A prazo" → gera contas a receber parceladas.
+  const aPrazoTotal = payments
+    .filter((p) => p.method === 'A_PRAZO')
+    .reduce((a, p) => a.add(new Prisma.Decimal(p.amount)), new Prisma.Decimal(0));
+  const installments = input.installments ?? [];
+  if (aPrazoTotal.greaterThan(0)) {
+    if (!input.clientId) throw new BusinessError('Venda a prazo exige um cliente');
+    if (installments.length === 0) throw new BusinessError('Informe as parcelas da venda a prazo');
+    const instSum = installments.reduce((a, i) => a.add(new Prisma.Decimal(i.amount)), new Prisma.Decimal(0));
+    if (instSum.sub(aPrazoTotal).abs().greaterThan(cent)) {
+      throw new BusinessError('A soma das parcelas difere do valor a prazo');
+    }
+  }
+
+  const legacyMethod = payments.length === 1 ? payments[0]!.method : 'SPLIT';
+
   try {
     const sale = await prisma.$transaction(async (tx) => {
       const created = await tx.sale.create({
@@ -50,7 +77,7 @@ export async function createSale(input: CreateSaleInput, userId: string) {
           cashRegisterId: input.cashRegisterId,
           userId,
           clientId: input.clientId ?? null,
-          paymentMethod: input.paymentMethod,
+          paymentMethod: legacyMethod,
           subtotal,
           discount,
           surcharge,
@@ -66,9 +93,27 @@ export async function createSale(input: CreateSaleInput, userId: string) {
               unitPrice: it.unitPrice,
             })),
           },
+          payments: {
+            create: payments.map((p) => ({ method: p.method, amount: p.amount })),
+          },
         },
-        include: { items: true },
+        include: { items: true, payments: true },
       });
+
+      // Contas a receber das parcelas a prazo.
+      if (aPrazoTotal.greaterThan(0)) {
+        await tx.financialAccount.createMany({
+          data: installments.map((inst, i) => ({
+            type: 'RECEIVABLE',
+            description: `Venda a prazo ${i + 1}/${installments.length}`,
+            amount: inst.amount,
+            dueDate: inst.dueDate,
+            status: 'PENDING',
+            saleId: created.id,
+            personId: input.clientId!,
+          })),
+        });
+      }
 
       // Baixa de estoque + razão. Loja física já entregou o produto, então
       // permitimos estoque negativo (sinaliza ajuste posterior).
@@ -135,8 +180,9 @@ export async function updateSale(saleId: string, input: UpdateSaleInput) {
     // 2. Remove o financeiro vinculado (contas a receber da venda).
     await tx.financialAccount.deleteMany({ where: { saleId } });
 
-    // 3. Remove os itens antigos.
+    // 3. Remove os itens e pagamentos antigos.
     await tx.saleItem.deleteMany({ where: { saleId } });
+    await tx.salePayment.deleteMany({ where: { saleId } });
 
     // 4. Recalcula e regrava.
     const subtotal = sumItems(input.items);
@@ -168,8 +214,9 @@ export async function updateSale(saleId: string, input: UpdateSaleInput) {
         surcharge,
         totalAmount: total,
         notes: input.notes ?? null,
+        payments: { create: [{ method: input.paymentMethod, amount: total }] },
       },
-      include: { items: true },
+      include: { items: true, payments: true },
     });
   });
 }

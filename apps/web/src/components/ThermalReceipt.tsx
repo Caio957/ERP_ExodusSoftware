@@ -1,5 +1,3 @@
-import type { PaymentMethod } from '@exodus/shared';
-
 export interface ReceiptItem {
   description: string;
   quantity: number;
@@ -9,7 +7,7 @@ export interface ReceiptItem {
 interface Props {
   items: ReceiptItem[];
   total: number;
-  paymentMethod: PaymentMethod;
+  paymentMethod: string;
   width?: '58mm' | '80mm';
   storeName?: string;
   soldAt?: Date;
@@ -17,11 +15,13 @@ interface Props {
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-const methodLabel: Record<PaymentMethod, string> = {
+const methodLabel: Record<string, string> = {
   PIX: 'PIX',
   CREDIT: 'Crédito',
   DEBIT: 'Débito',
   CASH: 'Dinheiro',
+  A_PRAZO: 'A prazo',
+  SPLIT: 'Múltiplas formas',
 };
 
 /**
@@ -70,7 +70,7 @@ export function ThermalReceipt({
         </div>
         <div className="flex justify-between">
           <span>Pagamento</span>
-          <span>{methodLabel[paymentMethod]}</span>
+          <span>{methodLabel[paymentMethod] ?? paymentMethod}</span>
         </div>
 
         <div className="my-1 border-t border-dashed border-black" />

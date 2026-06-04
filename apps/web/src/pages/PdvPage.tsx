@@ -17,6 +17,8 @@ import {
   Lock,
   Package,
   User,
+  Layers,
+  Trash,
   type LucideIcon,
 } from 'lucide-react';
 import { api } from '../lib/api';
@@ -75,11 +77,12 @@ export function PdvPage() {
   const [surcharge, setSurcharge] = useState(0); // R$
   const [notes, setNotes] = useState('');
   const [client, setClient] = useState<{ id: string; name: string } | null>(null);
+  const [showPayment, setShowPayment] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [lastSale, setLastSale] = useState<{
     items: ReceiptItem[];
     total: number;
-    method: PaymentMethod;
+    method: string;
   } | null>(null);
 
   const { data: register, isLoading } = useQuery({
@@ -162,7 +165,10 @@ export function PdvPage() {
     setClient(null);
   }
 
-  async function finalize(method: PaymentMethod) {
+  async function doSale(
+    payments: { method: PaymentMethod; amount: number }[],
+    installments?: { dueDate: string; amount: number }[],
+  ) {
     if (!register || cart.length === 0) return;
     const items = cart.map((c) => ({
       variantId: c.variantId,
@@ -173,7 +179,9 @@ export function PdvPage() {
     // Offline-first: enfileira e confirma imediatamente (Requisito 4.4).
     await enqueueSale({
       cashRegisterId: register.id,
-      paymentMethod: method,
+      paymentMethod: payments[0]!.method,
+      payments,
+      installments: installments?.map((i) => ({ dueDate: new Date(i.dueDate), amount: i.amount })),
       items,
       clientId: client?.id,
       discount: round2(discount),
@@ -188,10 +196,16 @@ export function PdvPage() {
         unitPrice: c.unitPrice,
       })),
       total,
-      method,
+      method: payments.length === 1 ? payments[0]!.method : 'SPLIT',
     });
     resetSale();
+    setShowPayment(false);
     flash('Venda registrada ✓');
+  }
+
+  /** Caminho rápido: pagamento único à vista. */
+  function finalize(method: PaymentMethod) {
+    void doSale([{ method, amount: round2(total) }]);
   }
 
   if (isLoading)
@@ -412,8 +426,24 @@ export function PdvPage() {
               </button>
             ))}
           </div>
+          <button
+            disabled={cart.length === 0}
+            onClick={() => setShowPayment(true)}
+            className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-3 py-2.5 text-sm font-semibold text-brand-700 transition hover:bg-brand-100 disabled:pointer-events-none disabled:opacity-40"
+          >
+            <Layers className="h-4 w-4" /> Dividir pagamento / A prazo
+          </button>
         </div>
       </aside>
+
+      {showPayment && (
+        <PaymentModal
+          total={total}
+          hasClient={!!client}
+          onClose={() => setShowPayment(false)}
+          onConfirm={(payments, installments) => void doSale(payments, installments)}
+        />
+      )}
 
       {/* Toast */}
       {toast && (
@@ -446,6 +476,210 @@ export function PdvPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+const methodLabels: Record<PaymentMethod, string> = {
+  CASH: 'Dinheiro',
+  PIX: 'PIX',
+  DEBIT: 'Débito',
+  CREDIT: 'Crédito',
+  A_PRAZO: 'A prazo',
+};
+
+/** Modal de pagamento: múltiplas formas (split) + parcelamento "A prazo". */
+function PaymentModal({
+  total,
+  hasClient,
+  onClose,
+  onConfirm,
+}: {
+  total: number;
+  hasClient: boolean;
+  onClose: () => void;
+  onConfirm: (
+    payments: { method: PaymentMethod; amount: number }[],
+    installments?: { dueDate: string; amount: number }[],
+  ) => void;
+}) {
+  const [lines, setLines] = useState<{ method: PaymentMethod; amount: number }[]>([
+    { method: 'CASH', amount: round2(total) },
+  ]);
+  const [parcels, setParcels] = useState(2);
+  const [firstDue, setFirstDue] = useState(() => new Date().toISOString().slice(0, 10));
+  const [intervalDays, setIntervalDays] = useState(30);
+
+  const paid = round2(lines.reduce((a, l) => a + (l.amount || 0), 0));
+  const remaining = round2(total - paid);
+  const aPrazoTotal = round2(
+    lines.filter((l) => l.method === 'A_PRAZO').reduce((a, l) => a + (l.amount || 0), 0),
+  );
+
+  function genInstallments() {
+    const n = Math.max(1, Math.floor(parcels));
+    const base = Math.floor((aPrazoTotal / n) * 100) / 100;
+    const parts: { dueDate: string; amount: number }[] = [];
+    let acc = 0;
+    for (let i = 0; i < n; i++) {
+      const amount = i === n - 1 ? round2(aPrazoTotal - acc) : base;
+      acc = round2(acc + amount);
+      const d = new Date(firstDue);
+      d.setDate(d.getDate() + i * intervalDays);
+      parts.push({ dueDate: d.toISOString().slice(0, 10), amount });
+    }
+    return parts;
+  }
+
+  const installments = aPrazoTotal > 0 ? genInstallments() : undefined;
+  const balanced = Math.abs(remaining) < 0.01;
+  const aPrazoOk = aPrazoTotal <= 0 || (hasClient && parcels >= 1);
+  const canConfirm = balanced && aPrazoOk && lines.every((l) => l.amount > 0);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
+      <div className="max-h-[92vh] w-full max-w-md animate-scale-in overflow-auto rounded-2xl bg-white p-5 shadow-elevated">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="font-display text-lg font-bold">Pagamento</h3>
+          <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="mb-3 flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
+          <span className="text-sm text-slate-500">Total da venda</span>
+          <span className="text-xl font-bold">{brl(total)}</span>
+        </div>
+
+        <div className="space-y-2">
+          {lines.map((l, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <select
+                className="h-10 flex-1 rounded-lg border border-slate-200 px-2 text-sm outline-none focus:border-brand-400"
+                value={l.method}
+                onChange={(e) =>
+                  setLines((prev) =>
+                    prev.map((x, j) => (j === i ? { ...x, method: e.target.value as PaymentMethod } : x)),
+                  )
+                }
+              >
+                {(Object.keys(methodLabels) as PaymentMethod[]).map((m) => (
+                  <option key={m} value={m}>
+                    {methodLabels[m]}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={l.amount || ''}
+                onChange={(e) =>
+                  setLines((prev) =>
+                    prev.map((x, j) => (j === i ? { ...x, amount: Number(e.target.value) || 0 } : x)),
+                  )
+                }
+                className="h-10 w-24 rounded-lg border border-slate-200 px-2 text-right text-sm outline-none focus:border-brand-400"
+                placeholder="0,00"
+              />
+              <button
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-500 disabled:opacity-30"
+                disabled={lines.length === 1}
+                onClick={() => setLines((prev) => prev.filter((_, j) => j !== i))}
+              >
+                <Trash className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-2 flex items-center justify-between">
+          <button
+            className="text-sm font-medium text-brand-700 hover:underline"
+            onClick={() =>
+              setLines((prev) => [
+                ...prev,
+                { method: 'PIX', amount: remaining > 0 ? remaining : 0 },
+              ])
+            }
+          >
+            + Adicionar forma
+          </button>
+          <span className={`text-sm font-semibold ${balanced ? 'text-emerald-600' : 'text-rose-600'}`}>
+            {balanced ? 'Pago integralmente' : remaining > 0 ? `Falta ${brl(remaining)}` : `Excede ${brl(-remaining)}`}
+          </span>
+        </div>
+
+        {/* Parcelamento da parte a prazo */}
+        {aPrazoTotal > 0 && (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+            <div className="mb-2 text-sm font-semibold text-amber-700">
+              A prazo: {brl(aPrazoTotal)}
+            </div>
+            {!hasClient && (
+              <div className="mb-2 text-xs font-medium text-rose-600">
+                Selecione um cliente no carrinho para vender a prazo.
+              </div>
+            )}
+            <div className="grid grid-cols-3 gap-2 text-sm">
+              <label>
+                <span className="mb-1 block text-xs text-slate-500">Parcelas</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={parcels}
+                  onChange={(e) => setParcels(Number(e.target.value) || 1)}
+                  className="input h-9"
+                />
+              </label>
+              <label>
+                <span className="mb-1 block text-xs text-slate-500">1º vencimento</span>
+                <input
+                  type="date"
+                  value={firstDue}
+                  onChange={(e) => setFirstDue(e.target.value)}
+                  className="input h-9"
+                />
+              </label>
+              <label>
+                <span className="mb-1 block text-xs text-slate-500">Intervalo (dias)</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={intervalDays}
+                  onChange={(e) => setIntervalDays(Number(e.target.value) || 30)}
+                  className="input h-9"
+                />
+              </label>
+            </div>
+            {installments && (
+              <ul className="mt-2 space-y-0.5 text-xs text-slate-600">
+                {installments.map((p, i) => (
+                  <li key={i} className="flex justify-between">
+                    <span>
+                      {i + 1}ª · {new Date(p.dueDate).toLocaleDateString('pt-BR')}
+                    </span>
+                    <span className="font-medium">{brl(p.amount)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button className="btn-ghost" onClick={onClose}>
+            Cancelar
+          </button>
+          <button
+            className="btn-primary"
+            disabled={!canConfirm}
+            onClick={() => onConfirm(lines.filter((l) => l.amount > 0), installments)}
+          >
+            Confirmar venda
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

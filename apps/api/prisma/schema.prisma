@@ -197,6 +197,7 @@ model Sale {
   createdAt      DateTime     @default(now())
 
   items             SaleItem[]
+  payments          SalePayment[] // formas de pagamento (split / múltiplas)
   financialAccounts FinancialAccount[] // contas a receber geradas (venda a prazo)
 
   @@index([cashRegisterId])
@@ -214,6 +215,18 @@ model SaleItem {
 
   @@index([saleId])
   @@index([variantId])
+}
+
+// Formas de pagamento de uma venda (permite split de pagamento / "A prazo").
+model SalePayment {
+  id        String   @id @default(uuid())
+  saleId    String
+  sale      Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  method    String // 'CASH' | 'PIX' | 'DEBIT' | 'CREDIT' | 'A_PRAZO'
+  amount    Decimal  @db.Decimal(10, 2)
+  createdAt DateTime @default(now())
+
+  @@index([saleId])
 }
 
 // Razão de movimentações de estoque (auditoria + base p/ sugestão de compra)

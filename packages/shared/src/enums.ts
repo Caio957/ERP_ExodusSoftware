@@ -13,8 +13,12 @@ export type UserRole = z.infer<typeof UserRole>;
 export const PersonType = z.enum(['CLIENT', 'SUPPLIER']);
 export type PersonType = z.infer<typeof PersonType>;
 
-export const PaymentMethod = z.enum(['PIX', 'CREDIT', 'DEBIT', 'CASH']);
+// 'A_PRAZO' não entra no caixa: gera contas a receber parceladas (PDV-B).
+export const PaymentMethod = z.enum(['PIX', 'CREDIT', 'DEBIT', 'CASH', 'A_PRAZO']);
 export type PaymentMethod = z.infer<typeof PaymentMethod>;
+
+/** Formas que entram no caixa à vista (excluem 'A_PRAZO'). */
+export const CASH_METHODS = ['PIX', 'CREDIT', 'DEBIT', 'CASH'] as const;
 
 export const SyncStatus = z.enum(['PENDING', 'SYNCED']);
 export type SyncStatus = z.infer<typeof SyncStatus>;
