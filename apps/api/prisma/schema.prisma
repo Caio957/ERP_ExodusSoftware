@@ -257,12 +257,13 @@ model Setting {
 // 6. FINANCEIRO --------------------------------------------------------------
 model FinancialAccount {
   id          String    @id @default(uuid())
+  code        Int       @unique @default(autoincrement()) // código sequencial do título
   type        String // 'PAYABLE' | 'RECEIVABLE'
   description String
   amount      Decimal   @db.Decimal(10, 2)
   dueDate     DateTime
   paidAt      DateTime?
-  status      String // 'PENDING' | 'PAID' | 'LATE'
+  status      String // 'PENDING' | 'PARTIAL' | 'PAID'
 
   // Duplicatas da NFe alimentam Contas a Pagar automaticamente (4.3)
   invoiceId String?
@@ -273,8 +274,22 @@ model FinancialAccount {
   saleId    String?
   sale      Sale?    @relation(fields: [saleId], references: [id], onDelete: SetNull)
 
+  settlements AccountSettlement[]
+
   @@index([status])
   @@index([dueDate])
   @@index([invoiceId])
   @@index([saleId])
+}
+
+// Baixas (liquidações) de um título — permite baixa parcial e estorno (E1/E2).
+model AccountSettlement {
+  id                 String           @id @default(uuid())
+  financialAccountId String
+  account            FinancialAccount @relation(fields: [financialAccountId], references: [id], onDelete: Cascade)
+  amount             Decimal          @db.Decimal(10, 2)
+  paidAt             DateTime         @default(now())
+  createdAt          DateTime         @default(now())
+
+  @@index([financialAccountId])
 }

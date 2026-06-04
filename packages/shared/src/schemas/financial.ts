@@ -12,10 +12,18 @@ export const createFinancialAccountSchema = z.object({
 });
 export type CreateFinancialAccountInput = z.infer<typeof createFinancialAccountSchema>;
 
-export const payAccountSchema = z.object({
+/**
+ * Baixa (liquidação) de um título — permite baixa parcial (E1).
+ *  - `amount` omitido baixa o saldo restante (quitação total).
+ *  - `settleInFull` quita o título mesmo quando o valor pago é menor que o
+ *    saldo (ex.: desconto concedido na negociação).
+ */
+export const settleAccountSchema = z.object({
+  amount: money.optional(),
+  settleInFull: z.boolean().default(false),
   paidAt: z.coerce.date().default(() => new Date()),
 });
-export type PayAccountInput = z.infer<typeof payAccountSchema>;
+export type SettleAccountInput = z.infer<typeof settleAccountSchema>;
 
 /**
  * Lançamento manual com geração de parcelas. O valor total é dividido em N
@@ -29,7 +37,8 @@ export const createInstallmentsSchema = z.object({
   firstDueDate: z.coerce.date(),
   installments: z.coerce.number().int().min(1).max(60).default(1),
   intervalDays: z.coerce.number().int().min(1).max(365).default(30),
-  personId: z.string().uuid().optional(),
+  // Fornecedor (a pagar) ou cliente (a receber) — obrigatório (E5/E6).
+  personId: z.string().uuid('Informe o fornecedor/cliente'),
 });
 export type CreateInstallmentsInput = z.infer<typeof createInstallmentsSchema>;
 

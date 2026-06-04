@@ -32,5 +32,6 @@ export type CashTransactionType = z.infer<typeof CashTransactionType>;
 export const FinancialAccountType = z.enum(['PAYABLE', 'RECEIVABLE']);
 export type FinancialAccountType = z.infer<typeof FinancialAccountType>;
 
-export const FinancialAccountStatus = z.enum(['PENDING', 'PAID', 'LATE']);
+// PARTIAL = baixa parcial. "Vencido" é derivado (dueDate < hoje e status != PAID).
+export const FinancialAccountStatus = z.enum(['PENDING', 'PARTIAL', 'PAID']);
 export type FinancialAccountStatus = z.infer<typeof FinancialAccountStatus>;

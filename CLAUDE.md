@@ -175,10 +175,12 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   item**, e **contas a pagar parceladas** opcionais do total); **aba "Compras lançadas"**
   para consultar, editar (observação) e **excluir** (estorna estoque + remove contas a
   pagar pendentes; bloqueado se houver título já baixado).
-- ✅ **Financeiro**: lançamento manual a pagar/receber com **geração de N parcelas**
-  (divide o total, última absorve arredondamento, vencimentos a cada X dias); editar
-  e excluir títulos manuais; títulos originados de nota/entrada exibem 🔒 e são
-  bloqueados no backend.
+- ✅ **Financeiro**: lançamento manual a pagar/receber com **N parcelas** e
+  **fornecedor/cliente obrigatório**; cada título tem **código sequencial** (`code`);
+  **baixa parcial** (registra liquidações em `AccountSettlement`, mostra saldo restante)
+  e **quitação integral com desconto**; **estorno da última baixa**; **filtros** por
+  período (vencimento) e busca por descrição/pessoa; **títulos vencidos destacados**;
+  edição/exclusão **bloqueadas** para origem nota/venda e para títulos já baixados.
 - ✅ **Configurações** (ADMIN): toggles para exigir marca, grupo, subgrupo, código de
   barras e ativar controle de lote/validade por padrão em novos produtos.
 - ✅ **Recibo térmico** 58/80mm + `window.print()` (§4.7).
@@ -333,6 +335,11 @@ Outras decisões:
   parceladas; aba de compras lançadas (detalhe/editar/excluir com estorno). Migração
   aditiva `invoice_document_notes` (Invoice: documentNumber, notes). Endpoints
   `GET/PUT/DELETE /invoices/:id`. `npm run build` OK.
+- ✅ **Onda Financeiro** (2026-06-04): baixa parcial + estorno (tabela
+  `AccountSettlement`), código sequencial (`FinancialAccount.code` SERIAL — preenche
+  os existentes), fornecedor/cliente obrigatório, filtros (período + busca), vencidos
+  destacados, bloqueio de edição de baixados. Migração `financial_settlements_code`.
+  Endpoints `/financial/:id/settle` e `/:id/reverse` (substituem `/pay`). Build OK.
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---
