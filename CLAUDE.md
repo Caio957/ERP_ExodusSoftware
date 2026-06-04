@@ -145,11 +145,11 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   `autoCapitalize=none`, trim na validação.
 - ✅ **PDV** (§4.4): scanner de teclado, **busca vazia lista todos os produtos**,
   carrinho com **valor unitário editável por item**, **desconto e acréscimo** sobre o
-  subtotal (entrada em R$ e em %), **observação** livre da venda, 4 formas de
-  pagamento, **fila offline (Dexie)** com sucesso imediato, modal de recibo. Caixa
-  fechado mostra tela de bloqueio. **Seletor de cliente na venda** (busca cadastrados
-  ou cadastra rápido pelo nome).
-  🟡 Falta: múltiplas formas de pagamento + "A prazo" (PDV-B).
+  subtotal (entrada em R$ e em %), **observação** livre da venda, **seletor de cliente**
+  (busca ou cadastro rápido), **fila offline (Dexie)** com sucesso imediato, modal de
+  recibo. Caixa fechado mostra tela de bloqueio.
+  **Pagamento:** 4 formas à vista (atalho) + modal com **split (múltiplas formas)** e
+  **"A prazo"** (nº de parcelas, 1º vencimento, intervalo → gera contas a receber).
 - ✅ **Cadastros** (`/cadastros`, autenticado): CRUD de **clientes e fornecedores**
   (nome, CPF/CNPJ, telefone, e-mail, endereço) com exclusão protegida por origem.
 - ✅ **Vendas** (ADMIN, `/vendas`): consulta das vendas (data, pagamento, cliente,
@@ -310,6 +310,11 @@ Outras decisões:
 - ✅ **Onda Cadastros** (2026-06-04): tela `/cadastros` (clientes/fornecedores, CRUD +
   exclusão protegida); `DELETE /api/persons/:id`; **seletor de cliente no PDV** (busca
   ou cadastro rápido). Sem migração (model `Person` já existia). Build OK. Commit `02c2aa7`.
+- ✅ **Onda PDV-B — Pagamentos** (2026-06-04): split de pagamento (múltiplas formas) +
+  venda **"A prazo"** com parcelas (gera contas a receber). Nova tabela `SalePayment`
+  (migração `sale_payments`), enum `+A_PRAZO`, `Sale.paymentMethod` legado vira `SPLIT`.
+  **Caixa corrigido**: saldo e resumo somam por `SalePayment` (antes contavam o total
+  inteiro da venda como CASH). `npm run build` OK. Commit `848089a`.
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---
@@ -322,7 +327,7 @@ Outras decisões:
 4. **Sem testes automatizados** (Vitest/Supertest) — apenas smoke test manual.
 5. **BrasilAPI** ainda não integrada no formulário de fornecedor (§4.2).
 6. **Cadastro de produto** cria 1 variante por vez (multi-variante a fazer).
-7. **Pagamento único por venda** (sem split de pagamento) — conforme briefing.
+7. ~~**Pagamento único por venda**~~ **RESOLVIDO** (PDV-B): split de pagamento + "A prazo".
 8. **Estoque pode ficar negativo** em vendas offline (decisão consciente). Avaliar política de bloqueio/alerta.
 9. **JWT sem refresh token** e sem revogação (expira em 12h).
 10. **Recibo**: layout 58/80mm pronto, mas **não testado em impressora térmica real**.
