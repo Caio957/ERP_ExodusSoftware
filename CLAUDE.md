@@ -164,8 +164,11 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   **marca/grupo/subgrupo obrigatórios conforme a config da loja**; precificação:
   o **último percentual editado (margem OU markup) recalcula o preço de venda**,
   alterar o custo mantém o percentual e atualiza a venda.
-- ✅ **Caixa**: card gradiente mostra **saldo atual** (`expectedCash`) atualizado após
-  cada movimentação; suprimento/sangria com ícones; fechamento com resumo.
+- ✅ **Caixa**: card gradiente com **saldo atual** (`expectedCash`); suprimento/sangria
+  via **modal próprio com observação** (sem `window.prompt`); **timeline de
+  movimentações** unindo vendas (leitura) + sangrias/suprimentos (editáveis/excluíveis
+  só com o caixa aberto); **resumo de recebimentos por forma** (ADMIN); **histórico de
+  caixas de outros dias** com detalhe e resumo; fechamento por modal.
 - ✅ **Compras**: sugestão de compra; importação de XML por **upload de arquivo .xml**
   (sem colar texto); **compra manual** (fornecedor, data, produto, qtd, preço,
   lote/validade condicional → dá entrada de estoque).
@@ -315,6 +318,13 @@ Outras decisões:
   (migração `sale_payments`), enum `+A_PRAZO`, `Sale.paymentMethod` legado vira `SPLIT`.
   **Caixa corrigido**: saldo e resumo somam por `SalePayment` (antes contavam o total
   inteiro da venda como CASH). `npm run build` OK. Commit `848089a`.
+- ✅ **Onda Caixa** (2026-06-04): timeline de movimentações (vendas + manuais), editar/
+  excluir sangria/suprimento (bloqueado se caixa fechado), modal com observação,
+  resumo por forma de pagamento (ADMIN) e histórico de outros dias. Endpoints
+  `/cash/registers`, `/cash/:id/movements`, `PUT|DELETE /cash/transactions/:id`. Sem
+  migração. Build OK.
+- ✅ **Auto-deploy Railway** (2026-06-04): serviço `exodus-web` vinculado ao GitHub
+  (branch `main`) com **deploy automático a cada push**; migrações aplicadas no deploy.
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---
@@ -332,7 +342,7 @@ Outras decisões:
 9. **JWT sem refresh token** e sem revogação (expira em 12h).
 10. **Recibo**: layout 58/80mm pronto, mas **não testado em impressora térmica real**.
 11. **Ícones PWA** usam um único SVG (sem PNGs 192/512 dedicados).
-12. **Tela de Suprimento/Sangria** usa `window.prompt()` nativo — substituir por modal próprio para melhor UX no tablet.
+12. ~~**Tela de Suprimento/Sangria** usa `window.prompt()`~~ **RESOLVIDO** (Onda Caixa): modal próprio com observação.
 
 ---
 

@@ -1,7 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { openCashSchema, closeCashSchema, cashTransactionSchema } from '@exodus/shared';
+import {
+  openCashSchema,
+  closeCashSchema,
+  cashTransactionSchema,
+  updateCashTransactionSchema,
+} from '@exodus/shared';
 import { prisma } from '../lib/prisma.js';
 import { serializeDecimals, toMoney } from '../lib/serialize.js';
 import { BusinessError, ForbiddenError, NotFoundError } from '../lib/errors.js';
@@ -125,6 +130,91 @@ export async function cashRoutes(app: FastifyInstance) {
           total: toMoney(m._sum.amount) ?? 0,
         })),
       };
+    },
+  );
+
+  // Histórico de caixas (consulta de outros dias). ADMIN vê todos; operador, os seus.
+  r.get('/registers', { preHandler: app.authenticate }, async (req) => {
+    const where = req.user.role === 'ADMIN' ? {} : { userId: req.user.sub };
+    const registers = await prisma.cashRegister.findMany({
+      where,
+      orderBy: { openedAt: 'desc' },
+      take: 60,
+      include: { user: { select: { name: true } } },
+    });
+    return serializeDecimals(registers);
+  });
+
+  // Timeline unificada: sangrias/suprimentos (manuais) + vendas (origem). As
+  // vendas vêm como leitura — só podem ser alteradas pela tela de Vendas (C5).
+  r.get('/:id/movements', { preHandler: app.authenticate, schema: { params: idParam } }, async (req) => {
+    const register = await prisma.cashRegister.findUnique({ where: { id: req.params.id } });
+    if (!register) throw new NotFoundError('Caixa');
+
+    const [transactions, sales] = await Promise.all([
+      prisma.cashTransaction.findMany({ where: { cashRegisterId: register.id } }),
+      prisma.sale.findMany({
+        where: { cashRegisterId: register.id },
+        include: { client: { select: { name: true } }, payments: true },
+      }),
+    ]);
+
+    const movements = [
+      ...transactions.map((t) => ({
+        kind: 'TRANSACTION' as const,
+        id: t.id,
+        type: t.type, // SUPPLY | BLEED
+        amount: toMoney(t.amount) ?? 0,
+        description: t.description,
+        at: t.createdAt,
+      })),
+      ...sales.map((s) => ({
+        kind: 'SALE' as const,
+        id: s.id,
+        paymentMethod: s.paymentMethod,
+        amount: toMoney(s.totalAmount) ?? 0,
+        client: s.client?.name ?? null,
+        payments: s.payments.map((p) => ({ method: p.method, amount: toMoney(p.amount) ?? 0 })),
+        at: s.soldAt,
+      })),
+    ].sort((a, b) => +new Date(b.at) - +new Date(a.at));
+
+    return { register: serializeDecimals(register), movements };
+  });
+
+  // Edita uma sangria/suprimento manual (somente com o caixa aberto).
+  r.put(
+    '/transactions/:id',
+    { preHandler: app.authenticate, schema: { params: idParam, body: updateCashTransactionSchema } },
+    async (req) => {
+      const tx = await prisma.cashTransaction.findUnique({
+        where: { id: req.params.id },
+        include: { cashRegister: true },
+      });
+      if (!tx) throw new NotFoundError('Movimentação');
+      if (tx.cashRegister.status !== 'OPEN') {
+        throw new BusinessError('Caixa fechado não pode ser alterado');
+      }
+      const updated = await prisma.cashTransaction.update({ where: { id: tx.id }, data: req.body });
+      return serializeDecimals(updated);
+    },
+  );
+
+  // Exclui uma sangria/suprimento manual (somente com o caixa aberto).
+  r.delete(
+    '/transactions/:id',
+    { preHandler: app.authenticate, schema: { params: idParam } },
+    async (req, reply) => {
+      const tx = await prisma.cashTransaction.findUnique({
+        where: { id: req.params.id },
+        include: { cashRegister: true },
+      });
+      if (!tx) throw new NotFoundError('Movimentação');
+      if (tx.cashRegister.status !== 'OPEN') {
+        throw new BusinessError('Caixa fechado não pode ser alterado');
+      }
+      await prisma.cashTransaction.delete({ where: { id: tx.id } });
+      return reply.status(204).send();
     },
   );
 
