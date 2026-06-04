@@ -147,8 +147,11 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   carrinho com **valor unitário editável por item**, **desconto e acréscimo** sobre o
   subtotal (entrada em R$ e em %), **observação** livre da venda, 4 formas de
   pagamento, **fila offline (Dexie)** com sucesso imediato, modal de recibo. Caixa
-  fechado mostra tela de bloqueio.
+  fechado mostra tela de bloqueio. **Seletor de cliente na venda** (busca cadastrados
+  ou cadastra rápido pelo nome).
   🟡 Falta: múltiplas formas de pagamento + "A prazo" (PDV-B).
+- ✅ **Cadastros** (`/cadastros`, autenticado): CRUD de **clientes e fornecedores**
+  (nome, CPF/CNPJ, telefone, e-mail, endereço) com exclusão protegida por origem.
 - ✅ **Vendas** (ADMIN, `/vendas`): consulta das vendas (data, pagamento, cliente,
   itens, total); **excluir** (estorna estoque + remove financeiro vinculado);
   **editar por completo** (itens/qtd/preço/desconto/acréscimo/observação/pagamento) —
@@ -304,6 +307,9 @@ Outras decisões:
   desconto, acréscimo, observação, pagamento). Migração aditiva
   `financial_account_sale_link` (FinancialAccount.saleId). `npm run build` OK.
   Commit `7e6b652`. **Falta aplicar as migrações no Railway** (próximo deploy).
+- ✅ **Onda Cadastros** (2026-06-04): tela `/cadastros` (clientes/fornecedores, CRUD +
+  exclusão protegida); `DELETE /api/persons/:id`; **seletor de cliente no PDV** (busca
+  ou cadastro rápido). Sem migração (model `Person` já existia). Build OK. Commit `02c2aa7`.
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---
