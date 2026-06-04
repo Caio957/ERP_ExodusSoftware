@@ -6,6 +6,7 @@ import { api, ApiError } from '../lib/api';
 interface CashRegister {
   id: string;
   initialCash: number;
+  expectedCash?: number;
   openedAt: string;
   status: string;
   transactions?: Array<{ id: string; type: string; amount: number; description: string }>;
@@ -113,8 +114,13 @@ export function CashPage() {
               <Clock className="h-4 w-4" />
               Aberto desde {new Date(register.openedAt).toLocaleString('pt-BR')}
             </div>
-            <div className="mt-3 text-sm text-white/70">Fundo inicial</div>
-            <div className="font-display text-4xl font-extrabold">{brl(register.initialCash)}</div>
+            <div className="mt-3 text-sm text-white/70">Saldo atual em caixa</div>
+            <div className="font-display text-4xl font-extrabold">
+              {brl(register.expectedCash ?? register.initialCash)}
+            </div>
+            <div className="mt-1 text-sm text-white/70">
+              Fundo inicial: {brl(register.initialCash)}
+            </div>
           </div>
           <span className="badge bg-white/20 text-white ring-1 ring-white/30">
             <span className="h-2 w-2 rounded-full bg-emerald-300" />

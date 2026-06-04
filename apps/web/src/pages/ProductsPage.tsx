@@ -8,30 +8,70 @@ import {
   priceFromMargin,
   priceFromMarkup,
 } from '@exodus/shared';
-import { Plus, Search, Package, Tag } from 'lucide-react';
+import { Plus, Search, Package, Tag, Pencil, Trash2, X, ShieldCheck, Filter } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
+interface Variant {
+  id: string;
+  sku: string;
+  description: string;
+  barcode: string | null;
+  costPrice: number;
+  salePrice: number;
+  stockQty: number;
+  batch: string | null;
+  validity: string | null;
+}
+interface Product {
+  id: string;
+  name: string;
+  brand: string;
+  group: string;
+  subgroup: string | null;
+  tracksLotValidity: boolean;
+  variants: Variant[];
+}
 interface ProductList {
-  items: Array<{
-    id: string;
-    name: string;
-    brand: string;
-    group: string;
-    variants: Array<{ id: string; sku: string; description: string; salePrice: number; stockQty: number }>;
-  }>;
+  items: Product[];
 }
 
 export function ProductsPage() {
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
+  const [brand, setBrand] = useState('');
+  const [group, setGroup] = useState('');
+  const [subgroup, setSubgroup] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<Product | null>(null);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['products', search],
-    queryFn: () => api.get<ProductList>(`/api/products?search=${encodeURIComponent(search)}`),
+    queryKey: ['products', search, brand, group, subgroup],
+    queryFn: () => {
+      const qs = new URLSearchParams({ pageSize: '100' });
+      if (search.trim()) qs.set('search', search.trim());
+      if (brand.trim()) qs.set('brand', brand.trim());
+      if (group.trim()) qs.set('group', group.trim());
+      if (subgroup.trim()) qs.set('subgroup', subgroup.trim());
+      return api.get<ProductList>(`/api/products?${qs.toString()}`);
+    },
   });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => api.del(`/api/products/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['products'] }),
+    onError: (e) => window.alert(e instanceof ApiError ? e.message : 'Falha ao excluir'),
+  });
+
+  function handleDelete(p: Product) {
+    if (window.confirm(`Excluir o produto "${p.name}"? Esta ação não pode ser desfeita.`)) {
+      remove.mutate(p.id);
+    }
+  }
+
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['products'] });
 
   return (
     <div className="space-y-5">
@@ -45,27 +85,77 @@ export function ProductsPage() {
         </button>
       </div>
 
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
-        <input
-          className="input pl-12"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar produto, marca ou SKU..."
-        />
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+          <input
+            className="input pl-12"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar produto, marca ou SKU..."
+          />
+        </div>
+        <button
+          className={showFilters ? 'btn-primary' : 'btn-ghost'}
+          onClick={() => setShowFilters((v) => !v)}
+          title="Filtros"
+        >
+          <Filter className="h-5 w-5" /> Filtros
+        </button>
       </div>
+
+      {showFilters && (
+        <div className="card grid animate-fade-in gap-3 sm:grid-cols-3">
+          <label className="block">
+            <span className="label">Marca</span>
+            <input className="input" value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="Todas" />
+          </label>
+          <label className="block">
+            <span className="label">Grupo</span>
+            <input className="input" value={group} onChange={(e) => setGroup(e.target.value)} placeholder="Todos" />
+          </label>
+          <label className="block">
+            <span className="label">Subgrupo</span>
+            <input className="input" value={subgroup} onChange={(e) => setSubgroup(e.target.value)} placeholder="Todos" />
+          </label>
+        </div>
+      )}
 
       {isLoading ? (
         <div className="grid h-40 place-items-center text-slate-500">Carregando...</div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {data?.items.map((p) => (
-            <div key={p.id} className="card-hover">
-              <div className="mb-2 flex items-center gap-2">
-                <span className="badge-brand">{p.brand}</span>
-                <span className="badge-neutral">{p.group}</span>
+            <div key={p.id} className="card-hover flex flex-col">
+              <div className="mb-2 flex items-start justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="badge-brand">{p.brand}</span>
+                  <span className="badge-neutral">{p.group}</span>
+                  {p.tracksLotValidity && (
+                    <span className="badge-warning" title="Controla lote e validade">
+                      <ShieldCheck className="h-3.5 w-3.5" /> Lote
+                    </span>
+                  )}
+                </div>
+                <div className="flex shrink-0 gap-1">
+                  <button
+                    className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition hover:bg-brand-50 hover:text-brand-600"
+                    onClick={() => setEditing(p)}
+                    title="Editar"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  <button
+                    className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
+                    onClick={() => handleDelete(p)}
+                    title="Excluir"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
               <div className="font-display text-base font-bold">{p.name}</div>
+              {p.subgroup && <div className="text-xs text-slate-400">{p.subgroup}</div>}
               <ul className="mt-3 space-y-1.5 text-sm">
                 {p.variants.map((v) => (
                   <li
@@ -90,7 +180,7 @@ export function ProductsPage() {
               <div>
                 <Package className="mx-auto mb-3 h-12 w-12 text-slate-300" />
                 <p className="font-semibold text-slate-600">Nenhum produto encontrado</p>
-                <p className="text-sm text-slate-400">Cadastre o primeiro produto da loja.</p>
+                <p className="text-sm text-slate-400">Ajuste os filtros ou cadastre o primeiro produto.</p>
               </div>
             </div>
           )}
@@ -102,7 +192,18 @@ export function ProductsPage() {
           onClose={() => setShowForm(false)}
           onCreated={() => {
             setShowForm(false);
-            qc.invalidateQueries({ queryKey: ['products'] });
+            invalidate();
+          }}
+        />
+      )}
+
+      {editing && (
+        <EditProductModal
+          product={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            invalidate();
           }}
         />
       )}
@@ -110,6 +211,9 @@ export function ProductsPage() {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Cadastro de novo produto
+// ---------------------------------------------------------------------------
 function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [form, setForm] = useState({
     name: '',
@@ -123,6 +227,9 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
     validity: '',
     stockQty: '0',
   });
+  const [tracksLotValidity, setTracksLotValidity] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+
   // Precificação com cálculo bidirecional (Requisito 4.1)
   const [cost, setCost] = useState(0);
   const [salePrice, setSalePrice] = useState(0);
@@ -141,6 +248,7 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
         brand: form.brand,
         group: form.group,
         subgroup: form.subgroup || undefined,
+        tracksLotValidity,
         variants: [
           {
             sku: form.sku,
@@ -149,13 +257,22 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
             costPrice: cost,
             salePrice,
             stockQty: Number(form.stockQty) || 0,
-            batch: form.batch,
-            validity: form.validity,
+            batch: form.batch || undefined,
+            validity: form.validity || undefined,
           },
         ],
       }),
     onSuccess: onCreated,
   });
+
+  function submit() {
+    setLocalError(null);
+    if (tracksLotValidity && (!form.batch.trim() || !form.validity)) {
+      setLocalError('Lote e validade são obrigatórios quando o controle está ativado.');
+      return;
+    }
+    create.mutate();
+  }
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -174,23 +291,45 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Nome" value={form.name} onChange={set('name')} />
-          <Field label="Marca" value={form.brand} onChange={set('brand')} />
-          <Field label="Grupo" value={form.group} onChange={set('group')} />
-          <Field label="Subgrupo (opcional)" value={form.subgroup} onChange={set('subgroup')} />
-          <Field label="SKU" value={form.sku} onChange={set('sku')} />
+          <Field label="Nome" required value={form.name} onChange={set('name')} />
+          <Field label="Marca" required value={form.brand} onChange={set('brand')} />
+          <Field label="Grupo" required value={form.group} onChange={set('group')} />
+          <Field label="Subgrupo" value={form.subgroup} onChange={set('subgroup')} />
+          <Field label="SKU" required value={form.sku} onChange={set('sku')} />
           <Field label="Código de barras" value={form.barcode} onChange={set('barcode')} />
-          <Field label="Descrição da variante" value={form.description} onChange={set('description')} />
-          <Field label="Lote" value={form.batch} onChange={set('batch')} />
-          <Field label="Validade" type="date" value={form.validity} onChange={set('validity')} />
+          <Field label="Descrição da variante" required value={form.description} onChange={set('description')} />
           <Field label="Estoque inicial" type="number" value={form.stockQty} onChange={set('stockQty')} />
         </div>
+
+        {/* Controle de lote e validade (Requisito 4.1 configurável) */}
+        <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <input
+            type="checkbox"
+            className="mt-0.5 h-5 w-5 accent-brand-600"
+            checked={tracksLotValidity}
+            onChange={(e) => setTracksLotValidity(e.target.checked)}
+          />
+          <span className="text-sm">
+            <span className="font-semibold text-slate-700">Controlar lote e validade</span>
+            <span className="block text-xs text-slate-500">
+              Quando ativado, lote e validade tornam-se obrigatórios para este produto.
+            </span>
+          </span>
+        </label>
+
+        {tracksLotValidity && (
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <Field label="Lote" required value={form.batch} onChange={set('batch')} />
+            <Field label="Validade" required type="date" value={form.validity} onChange={set('validity')} />
+          </div>
+        )}
 
         <div className="mt-4 rounded-xl border border-brand-100 bg-brand-50/60 p-4">
           <div className="mb-2 text-sm font-semibold text-brand-700">Precificação (margem ⇄ markup)</div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <NumField
               label="Custo (R$)"
+              required
               value={cost}
               onChange={(v) => {
                 setCost(v);
@@ -217,6 +356,7 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
             />
             <NumField
               label="Venda (R$)"
+              required
               value={salePrice}
               onChange={(v) => {
                 setSalePrice(v);
@@ -226,9 +366,9 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
           </div>
         </div>
 
-        {create.error instanceof ApiError && (
+        {(localError || create.error instanceof ApiError) && (
           <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
-            {create.error.message}
+            {localError ?? (create.error as ApiError).message}
           </div>
         )}
 
@@ -236,7 +376,7 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
           <button className="btn-ghost" onClick={onClose}>
             Cancelar
           </button>
-          <button className="btn-primary" disabled={create.isPending} onClick={() => create.mutate()}>
+          <button className="btn-primary" disabled={create.isPending} onClick={submit}>
             {create.isPending ? 'Salvando...' : 'Salvar produto'}
           </button>
         </div>
@@ -245,13 +385,208 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
   );
 }
 
+// ---------------------------------------------------------------------------
+// Edição de produto + variantes
+// ---------------------------------------------------------------------------
+function EditProductModal({
+  product,
+  onClose,
+  onSaved,
+}: {
+  product: Product;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(product.name);
+  const [brand, setBrand] = useState(product.brand);
+  const [group, setGroup] = useState(product.group);
+  const [subgroup, setSubgroup] = useState(product.subgroup ?? '');
+  const [tracksLotValidity, setTracksLotValidity] = useState(product.tracksLotValidity);
+  const [variants, setVariants] = useState(
+    product.variants.map((v) => ({
+      id: v.id,
+      description: v.description,
+      barcode: v.barcode ?? '',
+      costPrice: v.costPrice,
+      salePrice: v.salePrice,
+      batch: v.batch ?? '',
+      validity: v.validity ? v.validity.slice(0, 10) : '',
+    })),
+  );
+
+  const setVariant = (id: string, patch: Partial<(typeof variants)[number]>) =>
+    setVariants((vs) => vs.map((v) => (v.id === id ? { ...v, ...patch } : v)));
+
+  const save = useMutation({
+    mutationFn: async () => {
+      await api.put(`/api/products/${product.id}`, {
+        name,
+        brand,
+        group,
+        subgroup: subgroup || null,
+        tracksLotValidity,
+      });
+      for (const v of variants) {
+        await api.put(`/api/products/variants/${v.id}`, {
+          description: v.description,
+          barcode: v.barcode || null,
+          costPrice: v.costPrice,
+          salePrice: v.salePrice,
+          batch: v.batch || undefined,
+          validity: v.validity || undefined,
+        });
+      }
+    },
+    onSuccess: onSaved,
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
+      <div className="max-h-[92vh] w-full max-w-2xl animate-scale-in overflow-auto rounded-2xl bg-white p-6 shadow-elevated">
+        <div className="mb-5 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-100 text-brand-600">
+              <Pencil className="h-5 w-5" />
+            </span>
+            <div>
+              <h2 className="font-display text-lg font-bold">Editar produto</h2>
+              <p className="text-sm text-slate-500">Altere os dados e os preços das variantes.</p>
+            </div>
+          </div>
+          <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block">
+            <span className="label">Nome</span>
+            <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
+          <label className="block">
+            <span className="label">Marca</span>
+            <input className="input" value={brand} onChange={(e) => setBrand(e.target.value)} />
+          </label>
+          <label className="block">
+            <span className="label">Grupo</span>
+            <input className="input" value={group} onChange={(e) => setGroup(e.target.value)} />
+          </label>
+          <label className="block">
+            <span className="label">Subgrupo</span>
+            <input className="input" value={subgroup} onChange={(e) => setSubgroup(e.target.value)} />
+          </label>
+        </div>
+
+        <label className="mt-4 flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <input
+            type="checkbox"
+            className="h-5 w-5 accent-brand-600"
+            checked={tracksLotValidity}
+            onChange={(e) => setTracksLotValidity(e.target.checked)}
+          />
+          <span className="text-sm font-semibold text-slate-700">Controlar lote e validade</span>
+        </label>
+
+        <div className="mt-4 space-y-3">
+          {variants.map((v) => (
+            <div key={v.id} className="rounded-xl border border-slate-200 p-3">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                Variante
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="label">Descrição</span>
+                  <input
+                    className="input"
+                    value={v.description}
+                    onChange={(e) => setVariant(v.id, { description: e.target.value })}
+                  />
+                </label>
+                <label className="block">
+                  <span className="label">Código de barras</span>
+                  <input
+                    className="input"
+                    value={v.barcode}
+                    onChange={(e) => setVariant(v.id, { barcode: e.target.value })}
+                  />
+                </label>
+                <label className="block">
+                  <span className="label">Custo (R$)</span>
+                  <input
+                    className="input"
+                    type="number"
+                    inputMode="decimal"
+                    value={v.costPrice}
+                    onChange={(e) => setVariant(v.id, { costPrice: Number(e.target.value) })}
+                  />
+                </label>
+                <label className="block">
+                  <span className="label">Venda (R$)</span>
+                  <input
+                    className="input"
+                    type="number"
+                    inputMode="decimal"
+                    value={v.salePrice}
+                    onChange={(e) => setVariant(v.id, { salePrice: Number(e.target.value) })}
+                  />
+                </label>
+                {tracksLotValidity && (
+                  <>
+                    <label className="block">
+                      <span className="label">Lote</span>
+                      <input
+                        className="input"
+                        value={v.batch}
+                        onChange={(e) => setVariant(v.id, { batch: e.target.value })}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="label">Validade</span>
+                      <input
+                        className="input"
+                        type="date"
+                        value={v.validity}
+                        onChange={(e) => setVariant(v.id, { validity: e.target.value })}
+                      />
+                    </label>
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {save.error instanceof ApiError && (
+          <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
+            {save.error.message}
+          </div>
+        )}
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button className="btn-ghost" onClick={onClose}>
+            Cancelar
+          </button>
+          <button className="btn-primary" disabled={save.isPending} onClick={() => save.mutate()}>
+            {save.isPending ? 'Salvando...' : 'Salvar alterações'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 function Field({
   label,
+  required,
   ...props
-}: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+}: { label: string; required?: boolean } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <label className="block">
-      <span className="label">{label}</span>
+      <span className="label">
+        {label}
+        {required && <span className="text-rose-500"> *</span>}
+      </span>
       <input className="input" {...props} />
     </label>
   );
@@ -260,15 +595,20 @@ function Field({
 function NumField({
   label,
   value,
+  required,
   onChange,
 }: {
   label: string;
   value: number;
+  required?: boolean;
   onChange: (v: number) => void;
 }) {
   return (
     <label className="block">
-      <span className="label">{label}</span>
+      <span className="label">
+        {label}
+        {required && <span className="text-rose-500"> *</span>}
+      </span>
       <input
         className="input"
         type="number"

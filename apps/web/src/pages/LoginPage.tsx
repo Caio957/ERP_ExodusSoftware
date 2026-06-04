@@ -19,11 +19,18 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  function fillDemo() {
+    setEmail('admin@exodus.local');
+    setPassword('admin12345');
+    setError(null);
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
-    const parsed = loginSchema.safeParse({ email, password });
+    // Tolera espaços acidentais (autofill/teclado de tablet) antes de validar.
+    const parsed = loginSchema.safeParse({ email: email.trim(), password: password.trim() });
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? 'Dados inválidos');
       return;
@@ -116,6 +123,10 @@ export function LoginPage() {
                   type="email"
                   value={email}
                   autoComplete="username"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  inputMode="email"
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="admin@exodus.local"
                 />
@@ -153,10 +164,15 @@ export function LoginPage() {
             </button>
           </form>
 
-          <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50/80 p-3 text-center text-xs text-slate-500">
-            <span className="font-semibold text-slate-600">Acesso demo:</span> admin@exodus.local
-            / admin12345
-          </div>
+          <button
+            type="button"
+            onClick={fillDemo}
+            className="mt-6 w-full rounded-xl border border-dashed border-brand-300 bg-brand-50/60 p-3 text-center text-xs text-slate-500 transition hover:bg-brand-100/60"
+          >
+            <span className="font-semibold text-brand-700">Toque para preencher o acesso demo</span>
+            <br />
+            admin@exodus.local / admin12345
+          </button>
         </div>
       </main>
     </div>

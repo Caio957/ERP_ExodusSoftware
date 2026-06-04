@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
 import {
   createProductSchema,
@@ -9,24 +10,37 @@ import {
 } from '@exodus/shared';
 import { prisma } from '../lib/prisma.js';
 import { serializeDecimals } from '../lib/serialize.js';
-import { NotFoundError } from '../lib/errors.js';
+import { BusinessError, NotFoundError } from '../lib/errors.js';
+
+/** Querystring da listagem: paginação + busca livre + filtros dedicados. */
+const productListQuery = paginationQuery.extend({
+  brand: z.string().trim().min(1).optional(),
+  group: z.string().trim().min(1).optional(),
+  subgroup: z.string().trim().min(1).optional(),
+});
 
 export async function productRoutes(app: FastifyInstance) {
   const r = app.withTypeProvider<ZodTypeProvider>();
 
-  // Lista paginada com busca por nome/marca/SKU/código de barras
-  r.get('/', { schema: { querystring: paginationQuery } }, async (req) => {
-    const { page, pageSize, search } = req.query;
-    const where = search
-      ? {
-          OR: [
-            { name: { contains: search, mode: 'insensitive' as const } },
-            { brand: { contains: search, mode: 'insensitive' as const } },
-            { variants: { some: { sku: { contains: search, mode: 'insensitive' as const } } } },
-            { variants: { some: { barcode: { contains: search } } } },
-          ],
-        }
-      : {};
+  // Lista paginada com busca livre (nome/marca/SKU/código) + filtros dedicados.
+  // Sem nenhum filtro, retorna TODOS os produtos cadastrados.
+  r.get('/', { schema: { querystring: productListQuery } }, async (req) => {
+    const { page, pageSize, search, brand, group, subgroup } = req.query;
+    const and: Prisma.ProductWhereInput[] = [];
+    if (search) {
+      and.push({
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { brand: { contains: search, mode: 'insensitive' } },
+          { variants: { some: { sku: { contains: search, mode: 'insensitive' } } } },
+          { variants: { some: { barcode: { contains: search } } } },
+        ],
+      });
+    }
+    if (brand) and.push({ brand: { contains: brand, mode: 'insensitive' } });
+    if (group) and.push({ group: { contains: group, mode: 'insensitive' } });
+    if (subgroup) and.push({ subgroup: { contains: subgroup, mode: 'insensitive' } });
+    const where: Prisma.ProductWhereInput = and.length ? { AND: and } : {};
 
     const [total, items] = await Promise.all([
       prisma.product.count({ where }),
@@ -142,6 +156,37 @@ export async function productRoutes(app: FastifyInstance) {
         data: req.body,
       });
       return serializeDecimals(variant);
+    },
+  );
+
+  // Exclusão de produto (ADMIN). Bloqueia se houver vendas ou notas vinculadas
+  // às variantes — preserva a integridade histórica do estoque/financeiro.
+  r.delete(
+    '/:id',
+    { preHandler: app.authorize(['ADMIN']), schema: { params: z.object({ id: z.string().uuid() }) } },
+    async (req, reply) => {
+      const product = await prisma.product.findUnique({
+        where: { id: req.params.id },
+        select: { id: true, variants: { select: { id: true } } },
+      });
+      if (!product) throw new NotFoundError('Produto');
+
+      const variantIds = product.variants.map((v) => v.id);
+      if (variantIds.length) {
+        const [saleCount, invoiceCount] = await Promise.all([
+          prisma.saleItem.count({ where: { variantId: { in: variantIds } } }),
+          prisma.invoiceItem.count({ where: { variantId: { in: variantIds } } }),
+        ]);
+        if (saleCount > 0 || invoiceCount > 0) {
+          throw new BusinessError(
+            'Produto possui vendas ou notas vinculadas e não pode ser excluído.',
+          );
+        }
+      }
+
+      // Cascade remove variantes, movimentos de estoque e mapeamentos De/Para.
+      await prisma.product.delete({ where: { id: req.params.id } });
+      return reply.status(204).send();
     },
   );
 }

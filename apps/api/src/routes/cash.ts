@@ -37,13 +37,15 @@ async function computeExpectedCash(cashRegisterId: string) {
 export async function cashRoutes(app: FastifyInstance) {
   const r = app.withTypeProvider<ZodTypeProvider>();
 
-  // Caixa aberto do operador atual
+  // Caixa aberto do operador atual (com saldo esperado em tempo real).
   r.get('/current', { preHandler: app.authenticate }, async (req) => {
     const register = await prisma.cashRegister.findFirst({
       where: { userId: req.user.sub, status: 'OPEN' },
-      include: { transactions: true },
+      include: { transactions: { orderBy: { createdAt: 'desc' } } },
     });
-    return serializeDecimals(register);
+    if (!register) return null;
+    const { expectedCash } = await computeExpectedCash(register.id);
+    return { ...serializeDecimals(register), expectedCash };
   });
 
   // Abertura
