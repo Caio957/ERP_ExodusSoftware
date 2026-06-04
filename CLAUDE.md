@@ -143,9 +143,13 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   (online/fila com ícones lucide-react).
 - ✅ **Login**: layout split (painel de marca + formulário), botão "preencher demo",
   `autoCapitalize=none`, trim na validação.
-- ✅ **PDV** (§4.4): scanner de teclado, busca, carrinho, 4 formas de pagamento,
-  **fila offline (Dexie)** com sucesso imediato, modal de recibo. Caixa fechado
-  mostra tela de bloqueio.
+- ✅ **PDV** (§4.4): scanner de teclado, **busca vazia lista todos os produtos**,
+  carrinho com **valor unitário editável por item**, **desconto e acréscimo** sobre o
+  subtotal (entrada em R$ e em %), **observação** livre da venda, 4 formas de
+  pagamento, **fila offline (Dexie)** com sucesso imediato, modal de recibo. Caixa
+  fechado mostra tela de bloqueio.
+  🟡 Falta: múltiplas formas de pagamento + "A prazo" (PDV-B) e consulta/edição de
+  vendas (PDV-C).
 - ✅ **Produtos**: filtros (marca/grupo/subgrupo) + busca; editar produto e variantes
   (asteriscos `*` também no modal Editar); excluir (com confirmação + bloqueio por
   origem); toggle **"controlar lote e validade"** (lote/validade só obrigatórios
@@ -286,6 +290,11 @@ Outras decisões:
   o percentual); descrição da variante opcional (fallback = nome); marca/grupo
   obrigatórios conforme Configurações (`brandRequired`/`groupRequired`); asteriscos
   no modal Editar produto. `npm run build` (shared+api+web) OK. Commit `ec3e134`.
+- ✅ **Onda PDV-A — Vendas (parte 1)** (2026-06-04): busca vazia lista todos; valor
+  unitário editável por item; desconto e acréscimo (R$ e %); observação da venda.
+  Migração aditiva `sale_discount_surcharge_notes` (Sale: subtotal/discount/surcharge/
+  notes). `npm run build` OK. Commit `9344d19`. **Falta aplicar a migração no Railway**
+  (próximo deploy).
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---
