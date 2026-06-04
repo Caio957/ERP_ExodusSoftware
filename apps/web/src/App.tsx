@@ -9,6 +9,7 @@ import { PurchasesPage } from './pages/PurchasesPage';
 import { FinancialPage } from './pages/FinancialPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { SalesPage } from './pages/SalesPage';
+import { RegistrationsPage } from './pages/RegistrationsPage';
 
 export function App() {
   return (
@@ -22,6 +23,7 @@ export function App() {
             <Route path="/pdv" element={<PdvPage />} />
             <Route path="/produtos" element={<ProductsPage />} />
             <Route path="/caixa" element={<CashPage />} />
+            <Route path="/cadastros" element={<RegistrationsPage />} />
 
             {/* Rotas exclusivas de ADMIN (RBAC - Requisito 4.5) */}
             <Route element={<ProtectedRoute roles={['ADMIN']} />}>

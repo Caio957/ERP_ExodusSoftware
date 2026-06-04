@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   Lock,
   Package,
+  User,
   type LucideIcon,
 } from 'lucide-react';
 import { api } from '../lib/api';
@@ -73,6 +74,7 @@ export function PdvPage() {
   const [discount, setDiscount] = useState(0); // R$
   const [surcharge, setSurcharge] = useState(0); // R$
   const [notes, setNotes] = useState('');
+  const [client, setClient] = useState<{ id: string; name: string } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [lastSale, setLastSale] = useState<{
     items: ReceiptItem[];
@@ -157,6 +159,7 @@ export function PdvPage() {
     setDiscount(0);
     setSurcharge(0);
     setNotes('');
+    setClient(null);
   }
 
   async function finalize(method: PaymentMethod) {
@@ -172,6 +175,7 @@ export function PdvPage() {
       cashRegisterId: register.id,
       paymentMethod: method,
       items,
+      clientId: client?.id,
       discount: round2(discount),
       surcharge: round2(surcharge),
       notes: notes.trim() || undefined,
@@ -281,6 +285,11 @@ export function PdvPage() {
             Carrinho
           </div>
           {itemCount > 0 && <span className="badge-brand">{itemCount} itens</span>}
+        </div>
+
+        {/* Seletor de cliente da venda */}
+        <div className="border-b border-slate-100 px-3 py-2">
+          <ClientPicker client={client} onChange={setClient} onToast={flash} />
         </div>
 
         <div className="flex-1 overflow-auto p-3">
@@ -434,6 +443,110 @@ export function PdvPage() {
                 <Printer className="h-4 w-4" /> Imprimir
               </button>
             </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Seletor de cliente da venda: busca cadastrados ou cria um novo rapidamente. */
+function ClientPicker({
+  client,
+  onChange,
+  onToast,
+}: {
+  client: { id: string; name: string } | null;
+  onChange: (c: { id: string; name: string } | null) => void;
+  onToast: (msg: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [term, setTerm] = useState('');
+  const [creating, setCreating] = useState(false);
+
+  const { data } = useQuery({
+    queryKey: ['pdv-clients', term],
+    queryFn: () =>
+      api.get<{ items: Array<{ id: string; name: string; document: string | null }> }>(
+        `/api/persons?type=CLIENT&pageSize=20${term.trim() ? `&search=${encodeURIComponent(term.trim())}` : ''}`,
+      ),
+    enabled: open,
+  });
+
+  async function createQuick() {
+    const name = term.trim();
+    if (name.length < 2) return;
+    setCreating(true);
+    try {
+      const created = await api.post<{ id: string; name: string }>('/api/persons', {
+        type: 'CLIENT',
+        name,
+      });
+      onChange({ id: created.id, name: created.name });
+      onToast(`Cliente ${created.name} cadastrado`);
+      setOpen(false);
+      setTerm('');
+    } catch {
+      onToast('Falha ao cadastrar cliente');
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  if (client) {
+    return (
+      <div className="flex items-center justify-between rounded-lg bg-brand-50 px-3 py-1.5 text-sm">
+        <span className="flex items-center gap-1.5 font-medium text-brand-700">
+          <User className="h-4 w-4" /> {client.name}
+        </span>
+        <button className="text-brand-400 hover:text-rose-500" onClick={() => onChange(null)} title="Remover">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative">
+      <button
+        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-50"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <User className="h-4 w-4" /> Cliente: <span className="font-medium">Balcão</span>
+      </button>
+      {open && (
+        <div className="absolute left-0 right-0 top-full z-20 mt-1 rounded-xl border border-slate-200 bg-white p-2 shadow-elevated">
+          <input
+            className="input h-9 text-sm"
+            value={term}
+            onChange={(e) => setTerm(e.target.value)}
+            placeholder="Buscar ou digitar novo cliente..."
+            autoFocus
+          />
+          <div className="mt-1 max-h-44 overflow-auto">
+            {data?.items.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => {
+                  onChange({ id: c.id, name: c.name });
+                  setOpen(false);
+                  setTerm('');
+                }}
+                className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50"
+              >
+                {c.name}
+                {c.document && <span className="ml-1 text-xs text-slate-400">{c.document}</span>}
+              </button>
+            ))}
+            {term.trim().length >= 2 && !data?.items.some((c) => c.name.toLowerCase() === term.trim().toLowerCase()) && (
+              <button
+                onClick={() => void createQuick()}
+                disabled={creating}
+                className="block w-full rounded-lg px-3 py-2 text-left text-sm font-medium text-brand-700 hover:bg-brand-50"
+              >
+                + Cadastrar “{term.trim()}”
+              </button>
+            )}
           </div>
         </div>
       )}
