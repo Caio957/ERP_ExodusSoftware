@@ -6,6 +6,7 @@ import {
   createProductSchema,
   updateProductSchema,
   updateVariantSchema,
+  stockAdjustSchema,
   paginationQuery,
   productFormSettingsSchema,
 } from '@exodus/shared';
@@ -172,6 +173,33 @@ export async function productRoutes(app: FastifyInstance) {
         data: req.body,
       });
       return serializeDecimals(variant);
+    },
+  );
+
+  // Acerto de estoque (inventário): define a quantidade física e registra a
+  // diferença como StockMovement ADJUST.
+  r.post(
+    '/adjust-stock',
+    { preHandler: app.authorize(['ADMIN']), schema: { body: stockAdjustSchema } },
+    async (req) => {
+      const { variantId, newQuantity, reason } = req.body;
+      const variant = await prisma.productVariant.findUnique({ where: { id: variantId } });
+      if (!variant) throw new NotFoundError('Produto');
+
+      const diff = newQuantity - variant.stockQty;
+      const updated = await prisma.$transaction(async (tx) => {
+        const v = await tx.productVariant.update({
+          where: { id: variantId },
+          data: { stockQty: newQuantity },
+        });
+        if (diff !== 0) {
+          await tx.stockMovement.create({
+            data: { variantId, type: 'ADJUST', quantity: diff, reason: `ADJUST: ${reason}` },
+          });
+        }
+        return v;
+      });
+      return serializeDecimals(updated);
     },
   );
 

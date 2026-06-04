@@ -10,6 +10,8 @@ import { FinancialPage } from './pages/FinancialPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { SalesPage } from './pages/SalesPage';
 import { RegistrationsPage } from './pages/RegistrationsPage';
+import { DashboardPage } from './pages/DashboardPage';
+import { StockAdjustPage } from './pages/StockAdjustPage';
 
 export function App() {
   return (
@@ -27,7 +29,9 @@ export function App() {
 
             {/* Rotas exclusivas de ADMIN (RBAC - Requisito 4.5) */}
             <Route element={<ProtectedRoute roles={['ADMIN']} />}>
+              <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/vendas" element={<SalesPage />} />
+              <Route path="/estoque" element={<StockAdjustPage />} />
               <Route path="/compras" element={<PurchasesPage />} />
               <Route path="/financeiro" element={<FinancialPage />} />
               <Route path="/configuracoes" element={<SettingsPage />} />

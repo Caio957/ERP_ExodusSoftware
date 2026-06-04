@@ -8,6 +8,8 @@ import {
   Settings,
   Receipt,
   Users,
+  LineChart,
+  ClipboardCheck,
   LogOut,
   type LucideIcon,
 } from 'lucide-react';
@@ -15,8 +17,10 @@ import { useAuth } from '../store/auth';
 import { StatusBadge } from './StatusBadge';
 
 const navItems: { to: string; label: string; icon: LucideIcon; adminOnly?: boolean }[] = [
+  { to: '/dashboard', label: 'Dashboard', icon: LineChart, adminOnly: true },
   { to: '/pdv', label: 'PDV', icon: ShoppingCart },
   { to: '/produtos', label: 'Produtos', icon: Package },
+  { to: '/estoque', label: 'Estoque', icon: ClipboardCheck, adminOnly: true },
   { to: '/caixa', label: 'Caixa', icon: Wallet },
   { to: '/cadastros', label: 'Cadastros', icon: Users },
   { to: '/vendas', label: 'Vendas', icon: Receipt, adminOnly: true },

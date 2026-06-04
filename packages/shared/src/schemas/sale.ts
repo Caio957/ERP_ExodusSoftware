@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import { money, positiveInt } from './common.js';
-import { PaymentMethod } from '../enums.js';
+
+/**
+ * Código da forma de pagamento. Aceita qualquer tipo configurado nas
+ * Configurações (tipos de recebimento), além dos base. O backend trata
+ * 'A_PRAZO' (gera parcelas) e 'CASH' (entra no caixa) de forma especial.
+ */
+const paymentCode = z.string().trim().min(1, 'Forma de pagamento obrigatória').max(20);
 
 export const saleItemSchema = z.object({
   variantId: z.string().uuid(),
@@ -11,7 +17,7 @@ export type SaleItemInput = z.infer<typeof saleItemSchema>;
 
 /** Uma forma de pagamento da venda (split permite várias). */
 export const salePaymentSchema = z.object({
-  method: PaymentMethod,
+  method: paymentCode,
   amount: money.refine((v) => v > 0, 'Valor do pagamento deve ser maior que zero'),
 });
 export type SalePaymentInput = z.infer<typeof salePaymentSchema>;
@@ -25,7 +31,7 @@ export type SaleInstallmentInput = z.infer<typeof saleInstallmentSchema>;
 
 export const createSaleSchema = z.object({
   cashRegisterId: z.string().uuid(),
-  paymentMethod: PaymentMethod,
+  paymentMethod: paymentCode,
   clientId: z.string().uuid().optional(),
   items: z.array(saleItemSchema).min(1, 'Venda sem itens'),
   /** Desconto e acréscimo aplicados sobre o subtotal (valores em R$). */
@@ -66,7 +72,7 @@ export type SyncSalesInput = z.infer<typeof syncSalesSchema>;
  * financeiro vinculado e regrava tudo de forma consistente.
  */
 export const updateSaleSchema = z.object({
-  paymentMethod: PaymentMethod,
+  paymentMethod: paymentCode,
   clientId: z.string().uuid().nullish(),
   items: z.array(saleItemSchema).min(1, 'Venda sem itens'),
   discount: money.default(0),

@@ -181,8 +181,14 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   e **quitação integral com desconto**; **estorno da última baixa**; **filtros** por
   período (vencimento) e busca por descrição/pessoa; **títulos vencidos destacados**;
   edição/exclusão **bloqueadas** para origem nota/venda e para títulos já baixados.
-- ✅ **Configurações** (ADMIN): toggles para exigir marca, grupo, subgrupo, código de
-  barras e ativar controle de lote/validade por padrão em novos produtos.
+- ✅ **Dashboard** (ADMIN, `/dashboard`): visão financeira por **período** — vendas
+  (total/qtd/ticket), recebimentos por forma, série diária (gráfico) e situação de
+  contas a pagar/receber (aberto e vencido).
+- ✅ **Acerto de estoque** (ADMIN, `/estoque`): inventário — informa a quantidade
+  contada e o motivo; registra a diferença como `StockMovement` tipo `ADJUST`.
+- ✅ **Configurações** (ADMIN) em abas: **Produto** (campos obrigatórios + lote/validade
+  padrão), **Recebimentos** (tipos de pagamento configuráveis: renomear/ativar/adicionar,
+  consumidos dinamicamente pelo PDV) e **Empresa** (dados cadastrais do contratante).
 - ✅ **Recibo térmico** 58/80mm + `window.print()` (§4.7).
 - ✅ **PWA**: manifest + Service Worker (Workbox) com cache de app shell e API.
 
@@ -340,6 +346,11 @@ Outras decisões:
   os existentes), fornecedor/cliente obrigatório, filtros (período + busca), vencidos
   destacados, bloqueio de edição de baixados. Migração `financial_settlements_code`.
   Endpoints `/financial/:id/settle` e `/:id/reverse` (substituem `/pay`). Build OK.
+- ✅ **Onda Cadastros & Dashboard** (2026-06-04): **dados da empresa** (Setting), **tipos
+  de recebimento** configuráveis (Setting + PDV dinâmico; método de pagamento relaxado
+  para string), **acerto de estoque** (`/products/adjust-stock` → `StockMovement ADJUST`)
+  e **dashboard financeiro** por período (`/dashboard`). Sem migração (Setting/JSON +
+  tabelas existentes). `npm run build` OK. **Backlog de melhorias 100% concluído.**
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---

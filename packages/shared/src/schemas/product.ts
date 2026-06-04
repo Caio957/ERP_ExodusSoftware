@@ -67,6 +67,17 @@ export const updateProductSchema = z.object({
 });
 export type UpdateProductInput = z.infer<typeof updateProductSchema>;
 
+/**
+ * Acerto de estoque (inventário): informa a quantidade física contada e o
+ * motivo. O backend registra a diferença como StockMovement do tipo ADJUST.
+ */
+export const stockAdjustSchema = z.object({
+  variantId: z.string().uuid('Selecione o produto'),
+  newQuantity: z.number().int().min(0, 'Quantidade não pode ser negativa'),
+  reason: z.string().trim().min(1, 'Informe o motivo do acerto').max(200),
+});
+export type StockAdjustInput = z.infer<typeof stockAdjustSchema>;
+
 /** Atualização avulsa de uma variante (preço, estoque manual, lote, validade). */
 export const updateVariantSchema = z.object({
   description: z.string().trim().min(1).optional(),

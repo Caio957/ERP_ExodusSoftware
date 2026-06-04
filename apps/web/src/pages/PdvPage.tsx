@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import type { PaymentMethod } from '@exodus/shared';
+import { type PaymentType, DEFAULT_PAYMENT_TYPES } from '@exodus/shared';
 import {
   Search,
   ShoppingCart,
@@ -58,17 +58,15 @@ interface ProductSearchResult {
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
-const paymentOptions: {
-  method: PaymentMethod;
-  label: string;
-  icon: LucideIcon;
-  classes: string;
-}[] = [
-  { method: 'CASH', label: 'Dinheiro', icon: Banknote, classes: 'from-emerald-500 to-emerald-600' },
-  { method: 'PIX', label: 'PIX', icon: Zap, classes: 'from-teal-500 to-cyan-600' },
-  { method: 'DEBIT', label: 'Débito', icon: CreditCard, classes: 'from-sky-500 to-blue-600' },
-  { method: 'CREDIT', label: 'Crédito', icon: Coins, classes: 'from-violet-500 to-brand-600' },
-];
+// Estilo (ícone/cor) dos métodos base; tipos customizados usam o padrão.
+const methodStyle: Record<string, { icon: LucideIcon; classes: string }> = {
+  CASH: { icon: Banknote, classes: 'from-emerald-500 to-emerald-600' },
+  PIX: { icon: Zap, classes: 'from-teal-500 to-cyan-600' },
+  DEBIT: { icon: CreditCard, classes: 'from-sky-500 to-blue-600' },
+  CREDIT: { icon: Coins, classes: 'from-violet-500 to-brand-600' },
+  A_PRAZO: { icon: Layers, classes: 'from-amber-500 to-orange-600' },
+};
+const defaultStyle = { icon: Coins, classes: 'from-slate-500 to-slate-600' };
 
 export function PdvPage() {
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -89,6 +87,14 @@ export function PdvPage() {
     queryKey: ['cash-current'],
     queryFn: () => api.get<CashRegister | null>('/api/cash/current'),
   });
+
+  // Tipos de recebimento configuráveis (Configurações → Recebimentos).
+  const { data: ptData } = useQuery({
+    queryKey: ['payment-types'],
+    queryFn: () => api.get<{ types: PaymentType[] }>('/api/settings/payment-types'),
+  });
+  const paymentTypes = (ptData?.types ?? DEFAULT_PAYMENT_TYPES).filter((t) => t.active);
+  const quickTypes = paymentTypes.filter((t) => t.kind !== 'A_PRAZO');
 
   // Busca: campo vazio lista todos os produtos (Requisito B1).
   const { data: results } = useQuery({
@@ -166,7 +172,7 @@ export function PdvPage() {
   }
 
   async function doSale(
-    payments: { method: PaymentMethod; amount: number }[],
+    payments: { method: string; amount: number }[],
     installments?: { dueDate: string; amount: number }[],
   ) {
     if (!register || cart.length === 0) return;
@@ -204,7 +210,7 @@ export function PdvPage() {
   }
 
   /** Caminho rápido: pagamento único à vista. */
-  function finalize(method: PaymentMethod) {
+  function finalize(method: string) {
     void doSale([{ method, amount: round2(total) }]);
   }
 
@@ -414,17 +420,20 @@ export function PdvPage() {
             <span className="font-display text-3xl font-extrabold text-slate-900">{brl(total)}</span>
           </div>
           <div className="grid grid-cols-2 gap-2">
-            {paymentOptions.map((opt) => (
-              <button
-                key={opt.method}
-                disabled={cart.length === 0}
-                onClick={() => void finalize(opt.method)}
-                className={`flex min-h-touch items-center justify-center gap-2 rounded-xl bg-gradient-to-br ${opt.classes} px-3 py-3 font-semibold text-white shadow-soft transition active:scale-[0.97] disabled:pointer-events-none disabled:opacity-40`}
-              >
-                <opt.icon className="h-5 w-5" />
-                <span className="text-sm">{opt.label}</span>
-              </button>
-            ))}
+            {quickTypes.map((opt) => {
+              const st = methodStyle[opt.code] ?? defaultStyle;
+              return (
+                <button
+                  key={opt.code}
+                  disabled={cart.length === 0}
+                  onClick={() => void finalize(opt.code)}
+                  className={`flex min-h-touch items-center justify-center gap-2 rounded-xl bg-gradient-to-br ${st.classes} px-3 py-3 font-semibold text-white shadow-soft transition active:scale-[0.97] disabled:pointer-events-none disabled:opacity-40`}
+                >
+                  <st.icon className="h-5 w-5" />
+                  <span className="text-sm">{opt.label}</span>
+                </button>
+              );
+            })}
           </div>
           <button
             disabled={cart.length === 0}
@@ -440,6 +449,7 @@ export function PdvPage() {
         <PaymentModal
           total={total}
           hasClient={!!client}
+          types={paymentTypes}
           onClose={() => setShowPayment(false)}
           onConfirm={(payments, installments) => void doSale(payments, installments)}
         />
@@ -480,31 +490,26 @@ export function PdvPage() {
   );
 }
 
-const methodLabels: Record<PaymentMethod, string> = {
-  CASH: 'Dinheiro',
-  PIX: 'PIX',
-  DEBIT: 'Débito',
-  CREDIT: 'Crédito',
-  A_PRAZO: 'A prazo',
-};
-
 /** Modal de pagamento: múltiplas formas (split) + parcelamento "A prazo". */
 function PaymentModal({
   total,
   hasClient,
+  types,
   onClose,
   onConfirm,
 }: {
   total: number;
   hasClient: boolean;
+  types: PaymentType[];
   onClose: () => void;
   onConfirm: (
-    payments: { method: PaymentMethod; amount: number }[],
+    payments: { method: string; amount: number }[],
     installments?: { dueDate: string; amount: number }[],
   ) => void;
 }) {
-  const [lines, setLines] = useState<{ method: PaymentMethod; amount: number }[]>([
-    { method: 'CASH', amount: round2(total) },
+  const firstCode = types[0]?.code ?? 'CASH';
+  const [lines, setLines] = useState<{ method: string; amount: number }[]>([
+    { method: firstCode, amount: round2(total) },
   ]);
   const [parcels, setParcels] = useState(2);
   const [firstDue, setFirstDue] = useState(() => new Date().toISOString().slice(0, 10));
@@ -558,14 +563,12 @@ function PaymentModal({
                 className="h-10 flex-1 rounded-lg border border-slate-200 px-2 text-sm outline-none focus:border-brand-400"
                 value={l.method}
                 onChange={(e) =>
-                  setLines((prev) =>
-                    prev.map((x, j) => (j === i ? { ...x, method: e.target.value as PaymentMethod } : x)),
-                  )
+                  setLines((prev) => prev.map((x, j) => (j === i ? { ...x, method: e.target.value } : x)))
                 }
               >
-                {(Object.keys(methodLabels) as PaymentMethod[]).map((m) => (
-                  <option key={m} value={m}>
-                    {methodLabels[m]}
+                {types.map((t) => (
+                  <option key={t.code} value={t.code}>
+                    {t.label}
                   </option>
                 ))}
               </select>
@@ -599,7 +602,7 @@ function PaymentModal({
             onClick={() =>
               setLines((prev) => [
                 ...prev,
-                { method: 'PIX', amount: remaining > 0 ? remaining : 0 },
+                { method: firstCode, amount: remaining > 0 ? remaining : 0 },
               ])
             }
           >
