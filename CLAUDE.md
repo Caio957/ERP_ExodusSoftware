@@ -146,10 +146,13 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
 - ✅ **PDV** (§4.4): scanner de teclado, busca, carrinho, 4 formas de pagamento,
   **fila offline (Dexie)** com sucesso imediato, modal de recibo. Caixa fechado
   mostra tela de bloqueio.
-- ✅ **Produtos**: filtros (marca/grupo/subgrupo) + busca; editar produto e variantes;
-  excluir (com confirmação + bloqueio por origem); formulário com asteriscos `*` nos
-  campos obrigatórios; toggle **"controlar lote e validade"** (lote/validade só
-  obrigatórios quando marcado); campos obrigatórios lidos da config da loja.
+- ✅ **Produtos**: filtros (marca/grupo/subgrupo) + busca; editar produto e variantes
+  (asteriscos `*` também no modal Editar); excluir (com confirmação + bloqueio por
+  origem); toggle **"controlar lote e validade"** (lote/validade só obrigatórios
+  quando marcado); **descrição da variante opcional** (fallback = nome do produto);
+  **marca/grupo/subgrupo obrigatórios conforme a config da loja**; precificação:
+  o **último percentual editado (margem OU markup) recalcula o preço de venda**,
+  alterar o custo mantém o percentual e atualiza a venda.
 - ✅ **Caixa**: card gradiente mostra **saldo atual** (`expectedCash`) atualizado após
   cada movimentação; suprimento/sangria com ícones; fechamento com resumo.
 - ✅ **Compras**: sugestão de compra; importação de XML por **upload de arquivo .xml**
@@ -159,8 +162,8 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   (divide o total, última absorve arredondamento, vencimentos a cada X dias); editar
   e excluir títulos manuais; títulos originados de nota/entrada exibem 🔒 e são
   bloqueados no backend.
-- ✅ **Configurações** (ADMIN): toggles para exigir subgrupo, código de barras e
-  ativar controle de lote/validade por padrão em novos produtos.
+- ✅ **Configurações** (ADMIN): toggles para exigir marca, grupo, subgrupo, código de
+  barras e ativar controle de lote/validade por padrão em novos produtos.
 - ✅ **Recibo térmico** 58/80mm + `window.print()` (§4.7).
 - ✅ **PWA**: manifest + Service Worker (Workbox) com cache de app shell e API.
 
@@ -258,6 +261,9 @@ Outras decisões:
 - Comentários de domínio em **português**; identificadores em inglês.
 - Componentes React touch-first (classes utilitárias `.btn`, `.input`, `.card`,
   alvos `min-h-touch`).
+- ⚠️ **Workspaces copiados (Windows):** neste ambiente o npm **copia** `@exodus/shared`
+  para `node_modules` em vez de symlinkar. Após editar `packages/shared/src`, rode
+  `npm install` para o tsc/build enxergarem as mudanças.
 
 ---
 
@@ -275,6 +281,11 @@ Outras decisões:
 - ✅ **Onda 2 — Configurações** (2026-06-04): tela `/configuracoes` (ADMIN), model `Setting`, rota `/api/settings/product-form`. Toggles: subgrupo obrigatório, código de barras obrigatório, lote/validade por padrão. Formulário de produto lê a config. Validado em produção.
 - ✅ **Onda 3 — Compras** (2026-06-04): importação de XML por **upload de arquivo** (não cola texto); compra manual (fornecedor, data, produto, qtd, preço, lote/validade → dá entrada de estoque via `/api/invoices/manual`). Validado em produção.
 - ✅ **Onda 4 — Financeiro** (2026-06-04): lançamento manual com **parcelas** (N parcelas × intervalo, última absorve arredondamento); editar/excluir títulos; proteção de origem (bloqueia títulos com `invoiceId`). Validado em produção (3 parcelas de 33,33/33,33/33,34).
+- ✅ **Onda 5 — Produtos (refinamentos)** (2026-06-04): correção da precificação
+  (último percentual margem/markup editado recalcula a venda; alterar custo mantém
+  o percentual); descrição da variante opcional (fallback = nome); marca/grupo
+  obrigatórios conforme Configurações (`brandRequired`/`groupRequired`); asteriscos
+  no modal Editar produto. `npm run build` (shared+api+web) OK. Commit `ec3e134`.
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---
