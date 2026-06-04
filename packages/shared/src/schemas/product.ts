@@ -10,7 +10,9 @@ export const createVariantSchema = z
   .object({
     sku: z.string().trim().min(1, 'SKU obrigatório'),
     barcode: z.string().trim().min(1).optional(),
-    description: z.string().trim().min(1, 'Descrição da variante obrigatória'),
+    // Descrição da variante é opcional (o backend usa o nome do produto como
+    // fallback quando vazia).
+    description: z.string().trim().min(1).optional(),
     costPrice: money,
     salePrice: money,
     stockQty: z.number().int().min(0).default(0),
@@ -26,8 +28,10 @@ export type CreateVariantInput = z.infer<typeof createVariantSchema>;
 export const createProductSchema = z
   .object({
     name: z.string().trim().min(2, 'Nome do produto obrigatório'),
-    brand: z.string().trim().min(1, 'Marca obrigatória'),
-    group: z.string().trim().min(1, 'Grupo obrigatório'),
+    // Marca/grupo/subgrupo: obrigatoriedade é configurável por loja
+    // (validada na rota conforme as Configurações). Aqui ficam opcionais.
+    brand: z.string().trim().min(1).optional(),
+    group: z.string().trim().min(1).optional(),
     subgroup: z.string().trim().min(1).optional(),
     /** Liga a obrigatoriedade de lote e validade nas variantes (4.1). */
     tracksLotValidity: z.boolean().default(false),

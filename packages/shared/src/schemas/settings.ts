@@ -6,6 +6,8 @@ import { z } from 'zod';
  * controle de lote/validade.
  */
 export const productFormSettingsSchema = z.object({
+  brandRequired: z.boolean().default(false),
+  groupRequired: z.boolean().default(false),
   subgroupRequired: z.boolean().default(false),
   barcodeRequired: z.boolean().default(false),
   defaultTracksLotValidity: z.boolean().default(false),

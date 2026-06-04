@@ -236,21 +236,50 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
     queryKey: ['settings', 'product-form'],
     queryFn: () => api.get<ProductFormSettings>('/api/settings/product-form'),
   });
+  const brandRequired = settings?.brandRequired ?? false;
+  const groupRequired = settings?.groupRequired ?? false;
   const subgroupRequired = settings?.subgroupRequired ?? false;
   const barcodeRequired = settings?.barcodeRequired ?? false;
   useEffect(() => {
     if (settings) setTracksLotValidity(settings.defaultTracksLotValidity);
   }, [settings]);
 
-  // Precificação com cálculo bidirecional (Requisito 4.1)
+  // Precificação (Requisito 4.1). Fonte da verdade: custo + último percentual
+  // informado (margem OU markup) recalcula o preço de venda. Editar a venda
+  // diretamente recalcula ambos os percentuais.
   const [cost, setCost] = useState(0);
   const [salePrice, setSalePrice] = useState(0);
   const [margin, setMargin] = useState(0);
   const [markup, setMarkup] = useState(0);
+  const [lastPct, setLastPct] = useState<'margin' | 'markup' | null>(null);
 
-  function recomputeFromPrice(c: number, p: number) {
-    setMargin(marginFromPrice(c, p));
-    setMarkup(markupFromPrice(c, p));
+  function applyCost(novoCusto: number) {
+    setCost(novoCusto);
+    // Mantém o último percentual informado e recalcula a venda.
+    if (lastPct === 'margin') setSalePrice(priceFromMargin(novoCusto, margin));
+    else if (lastPct === 'markup') setSalePrice(priceFromMarkup(novoCusto, markup));
+    else {
+      setMargin(marginFromPrice(novoCusto, salePrice));
+      setMarkup(markupFromPrice(novoCusto, salePrice));
+    }
+  }
+  function applyMargin(v: number) {
+    setLastPct('margin');
+    setMargin(v);
+    setMarkup(marginToMarkup(v));
+    setSalePrice(priceFromMargin(cost, v));
+  }
+  function applyMarkup(v: number) {
+    setLastPct('markup');
+    setMarkup(v);
+    setMargin(markupToMargin(v));
+    setSalePrice(priceFromMarkup(cost, v));
+  }
+  function applySalePrice(v: number) {
+    setLastPct(null);
+    setSalePrice(v);
+    setMargin(marginFromPrice(cost, v));
+    setMarkup(markupFromPrice(cost, v));
   }
 
   const create = useMutation({
@@ -265,7 +294,7 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
           {
             sku: form.sku,
             barcode: form.barcode || undefined,
-            description: form.description,
+            description: form.description.trim() || undefined,
             costPrice: cost,
             salePrice,
             stockQty: Number(form.stockQty) || 0,
@@ -279,6 +308,14 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
 
   function submit() {
     setLocalError(null);
+    if (brandRequired && !form.brand.trim()) {
+      setLocalError('Marca é obrigatória (definido nas Configurações).');
+      return;
+    }
+    if (groupRequired && !form.group.trim()) {
+      setLocalError('Grupo é obrigatório (definido nas Configurações).');
+      return;
+    }
     if (subgroupRequired && !form.subgroup.trim()) {
       setLocalError('Subgrupo é obrigatório (definido nas Configurações).');
       return;
@@ -312,8 +349,8 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="Nome" required value={form.name} onChange={set('name')} />
-          <Field label="Marca" required value={form.brand} onChange={set('brand')} />
-          <Field label="Grupo" required value={form.group} onChange={set('group')} />
+          <Field label="Marca" required={brandRequired} value={form.brand} onChange={set('brand')} />
+          <Field label="Grupo" required={groupRequired} value={form.group} onChange={set('group')} />
           <Field label="Subgrupo" required={subgroupRequired} value={form.subgroup} onChange={set('subgroup')} />
           <Field label="SKU" required value={form.sku} onChange={set('sku')} />
           <Field
@@ -322,7 +359,7 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
             value={form.barcode}
             onChange={set('barcode')}
           />
-          <Field label="Descrição da variante" required value={form.description} onChange={set('description')} />
+          <Field label="Descrição da variante" value={form.description} onChange={set('description')} />
           <Field label="Estoque inicial" type="number" value={form.stockQty} onChange={set('stockQty')} />
         </div>
 
@@ -352,42 +389,10 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
         <div className="mt-4 rounded-xl border border-brand-100 bg-brand-50/60 p-4">
           <div className="mb-2 text-sm font-semibold text-brand-700">Precificação (margem ⇄ markup)</div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <NumField
-              label="Custo (R$)"
-              required
-              value={cost}
-              onChange={(v) => {
-                setCost(v);
-                recomputeFromPrice(v, salePrice);
-              }}
-            />
-            <NumField
-              label="Margem (%)"
-              value={margin}
-              onChange={(v) => {
-                setMargin(v);
-                setMarkup(marginToMarkup(v));
-                setSalePrice(priceFromMargin(cost, v));
-              }}
-            />
-            <NumField
-              label="Markup (%)"
-              value={markup}
-              onChange={(v) => {
-                setMarkup(v);
-                setMargin(markupToMargin(v));
-                setSalePrice(priceFromMarkup(cost, v));
-              }}
-            />
-            <NumField
-              label="Venda (R$)"
-              required
-              value={salePrice}
-              onChange={(v) => {
-                setSalePrice(v);
-                recomputeFromPrice(cost, v);
-              }}
-            />
+            <NumField label="Custo (R$)" required value={cost} onChange={applyCost} />
+            <NumField label="Margem (%)" value={margin} onChange={applyMargin} />
+            <NumField label="Markup (%)" value={markup} onChange={applyMarkup} />
+            <NumField label="Venda (R$)" required value={salePrice} onChange={applySalePrice} />
           </div>
         </div>
 
@@ -442,6 +447,16 @@ function EditProductModal({
   const setVariant = (id: string, patch: Partial<(typeof variants)[number]>) =>
     setVariants((vs) => vs.map((v) => (v.id === id ? { ...v, ...patch } : v)));
 
+  // Configurações de obrigatoriedade (para marcar os campos com *).
+  const { data: settings } = useQuery({
+    queryKey: ['settings', 'product-form'],
+    queryFn: () => api.get<ProductFormSettings>('/api/settings/product-form'),
+  });
+  const brandRequired = settings?.brandRequired ?? false;
+  const groupRequired = settings?.groupRequired ?? false;
+  const subgroupRequired = settings?.subgroupRequired ?? false;
+  const barcodeRequired = settings?.barcodeRequired ?? false;
+
   const save = useMutation({
     mutationFn: async () => {
       await api.put(`/api/products/${product.id}`, {
@@ -453,7 +468,7 @@ function EditProductModal({
       });
       for (const v of variants) {
         await api.put(`/api/products/variants/${v.id}`, {
-          description: v.description,
+          description: v.description.trim() || undefined,
           barcode: v.barcode || null,
           costPrice: v.costPrice,
           salePrice: v.salePrice,
@@ -485,19 +500,19 @@ function EditProductModal({
 
         <div className="grid grid-cols-2 gap-3">
           <label className="block">
-            <span className="label">Nome</span>
+            <Lbl required>Nome</Lbl>
             <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
           </label>
           <label className="block">
-            <span className="label">Marca</span>
+            <Lbl required={brandRequired}>Marca</Lbl>
             <input className="input" value={brand} onChange={(e) => setBrand(e.target.value)} />
           </label>
           <label className="block">
-            <span className="label">Grupo</span>
+            <Lbl required={groupRequired}>Grupo</Lbl>
             <input className="input" value={group} onChange={(e) => setGroup(e.target.value)} />
           </label>
           <label className="block">
-            <span className="label">Subgrupo</span>
+            <Lbl required={subgroupRequired}>Subgrupo</Lbl>
             <input className="input" value={subgroup} onChange={(e) => setSubgroup(e.target.value)} />
           </label>
         </div>
@@ -520,7 +535,7 @@ function EditProductModal({
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <label className="block">
-                  <span className="label">Descrição</span>
+                  <Lbl>Descrição</Lbl>
                   <input
                     className="input"
                     value={v.description}
@@ -528,7 +543,7 @@ function EditProductModal({
                   />
                 </label>
                 <label className="block">
-                  <span className="label">Código de barras</span>
+                  <Lbl required={barcodeRequired}>Código de barras</Lbl>
                   <input
                     className="input"
                     value={v.barcode}
@@ -536,7 +551,7 @@ function EditProductModal({
                   />
                 </label>
                 <label className="block">
-                  <span className="label">Custo (R$)</span>
+                  <Lbl required>Custo (R$)</Lbl>
                   <input
                     className="input"
                     type="number"
@@ -546,7 +561,7 @@ function EditProductModal({
                   />
                 </label>
                 <label className="block">
-                  <span className="label">Venda (R$)</span>
+                  <Lbl required>Venda (R$)</Lbl>
                   <input
                     className="input"
                     type="number"
@@ -558,7 +573,7 @@ function EditProductModal({
                 {tracksLotValidity && (
                   <>
                     <label className="block">
-                      <span className="label">Lote</span>
+                      <Lbl required>Lote</Lbl>
                       <input
                         className="input"
                         value={v.batch}
@@ -566,7 +581,7 @@ function EditProductModal({
                       />
                     </label>
                     <label className="block">
-                      <span className="label">Validade</span>
+                      <Lbl required>Validade</Lbl>
                       <input
                         className="input"
                         type="date"
@@ -601,6 +616,16 @@ function EditProductModal({
 }
 
 // ---------------------------------------------------------------------------
+/** Texto de label com marcação de campo obrigatório (* em vermelho). */
+function Lbl({ children, required }: { children: React.ReactNode; required?: boolean }) {
+  return (
+    <span className="label">
+      {children}
+      {required && <span className="text-rose-500"> *</span>}
+    </span>
+  );
+}
+
 function Field({
   label,
   required,
@@ -608,10 +633,7 @@ function Field({
 }: { label: string; required?: boolean } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <label className="block">
-      <span className="label">
-        {label}
-        {required && <span className="text-rose-500"> *</span>}
-      </span>
+      <Lbl required={required}>{label}</Lbl>
       <input className="input" {...props} />
     </label>
   );

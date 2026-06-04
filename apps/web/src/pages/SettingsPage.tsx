@@ -5,6 +5,8 @@ import { Settings, Save, Check, Package } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 
 const defaults: ProductFormSettings = {
+  brandRequired: false,
+  groupRequired: false,
   subgroupRequired: false,
   barcodeRequired: false,
   defaultTracksLotValidity: false,
@@ -54,6 +56,18 @@ export function SettingsPage() {
           <Package className="h-5 w-5 text-brand-600" /> Cadastro de produto — campos obrigatórios
         </div>
         <div className="divide-y divide-slate-100">
+          <ToggleRow
+            label="Exigir marca"
+            desc="Torna o campo Marca obrigatório ao cadastrar produtos."
+            checked={form.brandRequired}
+            onChange={() => toggle('brandRequired')}
+          />
+          <ToggleRow
+            label="Exigir grupo"
+            desc="Torna o campo Grupo obrigatório ao cadastrar produtos."
+            checked={form.groupRequired}
+            onChange={() => toggle('groupRequired')}
+          />
           <ToggleRow
             label="Exigir subgrupo"
             desc="Torna o campo Subgrupo obrigatório ao cadastrar produtos."

@@ -7,6 +7,7 @@ import {
   updateProductSchema,
   updateVariantSchema,
   paginationQuery,
+  productFormSettingsSchema,
 } from '@exodus/shared';
 import { prisma } from '../lib/prisma.js';
 import { serializeDecimals } from '../lib/serialize.js';
@@ -90,15 +91,30 @@ export async function productRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const { variants, ...productData } = req.body;
 
+      // Obrigatoriedade configurável (Configurações da loja).
+      const setting = await prisma.setting.findUnique({ where: { key: 'product_form' } });
+      const cfg = productFormSettingsSchema.parse(setting?.value ?? {});
+      if (cfg.brandRequired && !productData.brand) throw new BusinessError('Marca é obrigatória');
+      if (cfg.groupRequired && !productData.group) throw new BusinessError('Grupo é obrigatório');
+      if (cfg.subgroupRequired && !productData.subgroup)
+        throw new BusinessError('Subgrupo é obrigatório');
+      if (cfg.barcodeRequired && variants.some((v) => !v.barcode))
+        throw new BusinessError('Código de barras é obrigatório');
+
       const product = await prisma.$transaction(async (tx) => {
         const created = await tx.product.create({
           data: {
-            ...productData,
+            name: productData.name,
+            brand: productData.brand ?? '',
+            group: productData.group ?? '',
+            subgroup: productData.subgroup ?? null,
+            tracksLotValidity: productData.tracksLotValidity,
             variants: {
               create: variants.map((v) => ({
                 sku: v.sku,
                 barcode: v.barcode,
-                description: v.description,
+                // Fallback: usa o nome do produto quando a descrição é omitida.
+                description: v.description?.trim() || productData.name,
                 costPrice: v.costPrice,
                 salePrice: v.salePrice,
                 stockQty: v.stockQty,
