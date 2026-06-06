@@ -158,7 +158,9 @@ export async function createSale(input: CreateSaleInput, userId: string) {
  * Edita uma venda por completo (PDV-C). Antes de regravar:
  *  1) estorna o estoque dos itens antigos (StockMovement IN),
  *  2) remove o financeiro vinculado à venda (contas a receber),
- *  3) regrava itens + baixa de estoque e recalcula os totais.
+ *  3) regrava itens + baixa de estoque e recalcula os totais,
+ *  4) recria as formas de pagamento (split) e — se "A prazo" — as contas a receber.
+ * Editar a venda sempre regenera o financeiro (financialGenerated = true).
  * Tudo em uma única transação para não deixar dados inconsistentes.
  */
 export async function updateSale(saleId: string, input: UpdateSaleInput) {
@@ -191,6 +193,31 @@ export async function updateSale(saleId: string, input: UpdateSaleInput) {
     const total = subtotal.sub(discount).add(surcharge);
     if (total.lessThan(0)) throw new BusinessError('Desconto maior que o total da venda');
 
+    // Formas de pagamento (default: pagamento único no valor total).
+    const payments =
+      input.payments && input.payments.length > 0
+        ? input.payments
+        : [{ method: input.paymentMethod, amount: total.toNumber() }];
+    const cent = new Prisma.Decimal('0.01');
+    const paidSum = payments.reduce((a, p) => a.add(new Prisma.Decimal(p.amount)), new Prisma.Decimal(0));
+    if (paidSum.sub(total).abs().greaterThan(cent)) {
+      throw new BusinessError('A soma das formas de pagamento difere do total da venda');
+    }
+
+    // Parte "A prazo" → gera contas a receber parceladas.
+    const aPrazoTotal = payments
+      .filter((p) => p.method === 'A_PRAZO')
+      .reduce((a, p) => a.add(new Prisma.Decimal(p.amount)), new Prisma.Decimal(0));
+    const installments = input.installments ?? [];
+    if (aPrazoTotal.greaterThan(0)) {
+      if (!input.clientId) throw new BusinessError('Venda a prazo exige um cliente');
+      if (installments.length === 0) throw new BusinessError('Informe as parcelas da venda a prazo');
+      const instSum = installments.reduce((a, i) => a.add(new Prisma.Decimal(i.amount)), new Prisma.Decimal(0));
+      if (instSum.sub(aPrazoTotal).abs().greaterThan(cent)) {
+        throw new BusinessError('A soma das parcelas difere do valor a prazo');
+      }
+    }
+
     for (const it of input.items) {
       await tx.productVariant.update({
         where: { id: it.variantId },
@@ -204,20 +231,70 @@ export async function updateSale(saleId: string, input: UpdateSaleInput) {
       });
     }
 
+    // Contas a receber das parcelas a prazo.
+    if (aPrazoTotal.greaterThan(0)) {
+      await tx.financialAccount.createMany({
+        data: installments.map((inst, i) => ({
+          type: 'RECEIVABLE',
+          description: `Venda a prazo ${i + 1}/${installments.length}`,
+          amount: inst.amount,
+          dueDate: inst.dueDate,
+          status: 'PENDING',
+          saleId,
+          personId: input.clientId!,
+        })),
+      });
+    }
+
+    const legacyMethod = payments.length === 1 ? payments[0]!.method : 'SPLIT';
+
     return tx.sale.update({
       where: { id: saleId },
       data: {
-        paymentMethod: input.paymentMethod,
+        paymentMethod: legacyMethod,
         clientId: input.clientId ?? null,
         subtotal,
         discount,
         surcharge,
         totalAmount: total,
         notes: input.notes ?? null,
-        payments: { create: [{ method: input.paymentMethod, amount: total }] },
+        financialGenerated: true,
+        payments: { create: payments.map((p) => ({ method: p.method, amount: p.amount })) },
       },
       include: { items: true, payments: true },
     });
+  });
+}
+
+/**
+ * Exclui ou regenera o financeiro de uma venda (status "com/sem financeiro").
+ *  - `generated = false`: a venda deixa de contar no caixa, nos recebimentos e
+ *    no dashboard; as contas a receber vinculadas ficam ocultas. Bloqueado se
+ *    houver título a receber já baixado (estorne antes).
+ *  - `generated = true`: reverte, voltando a contar normalmente.
+ */
+export async function setSaleFinancialGenerated(saleId: string, generated: boolean) {
+  const sale = await prisma.sale.findUnique({
+    where: { id: saleId },
+    include: { financialAccounts: { include: { settlements: true } } },
+  });
+  if (!sale) throw new NotFoundError('Venda');
+
+  if (!generated) {
+    const hasSettled = sale.financialAccounts.some(
+      (a) => a.settlements.length > 0 || a.status !== 'PENDING',
+    );
+    if (hasSettled) {
+      throw new BusinessError(
+        'Há contas a receber desta venda com baixa registrada. Estorne as baixas antes de excluir o financeiro.',
+      );
+    }
+  }
+
+  return prisma.sale.update({
+    where: { id: saleId },
+    data: { financialGenerated: generated },
+    include: { items: true, payments: true },
   });
 }
 

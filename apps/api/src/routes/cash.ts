@@ -26,8 +26,9 @@ async function computeExpectedCash(cashRegisterId: string) {
       _sum: { amount: true },
     }),
     // Soma os PAGAMENTOS em dinheiro (não o total da venda) — trata split e a prazo.
+    // Ignora vendas com o financeiro excluído (financialGenerated = false).
     prisma.salePayment.aggregate({
-      where: { method: 'CASH', sale: { cashRegisterId } },
+      where: { method: 'CASH', sale: { cashRegisterId, financialGenerated: true } },
       _sum: { amount: true },
     }),
   ]);
@@ -116,7 +117,7 @@ export async function cashRoutes(app: FastifyInstance) {
       const { register, expectedCash } = await computeExpectedCash(req.params.id);
       const byMethod = await prisma.salePayment.groupBy({
         by: ['method'],
-        where: { sale: { cashRegisterId: register.id } },
+        where: { sale: { cashRegisterId: register.id, financialGenerated: true } },
         _sum: { amount: true },
         _count: true,
       });
@@ -171,9 +172,11 @@ export async function cashRoutes(app: FastifyInstance) {
       ...sales.map((s) => ({
         kind: 'SALE' as const,
         id: s.id,
+        code: s.code,
         paymentMethod: s.paymentMethod,
         amount: toMoney(s.totalAmount) ?? 0,
         client: s.client?.name ?? null,
+        financialGenerated: s.financialGenerated,
         payments: s.payments.map((p) => ({ method: p.method, amount: toMoney(p.amount) ?? 0 })),
         at: s.soldAt,
       })),

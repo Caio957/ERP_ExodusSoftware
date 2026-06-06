@@ -125,10 +125,13 @@
   body * {
     visibility: hidden;
   }
+  .print-area,
+  .print-area *,
   .thermal-receipt,
   .thermal-receipt * {
     visibility: visible;
   }
+  .print-area,
   .thermal-receipt {
     position: absolute;
     left: 0;

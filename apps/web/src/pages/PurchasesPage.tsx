@@ -318,7 +318,9 @@ function ManualPurchase() {
                       quantity: 1,
                       unitCost: v.costPrice,
                       newSalePrice: '',
-                      tracksLot: false,
+                      // Produtos que já controlam lote/validade vêm marcados; os
+                      // demais vêm desmarcados para o usuário decidir.
+                      tracksLot: v.tracksLot,
                       batch: '',
                       validity: '',
                     },
@@ -633,6 +635,7 @@ interface VariantHit {
   label: string;
   salePrice: number;
   costPrice: number;
+  tracksLot: boolean;
 }
 
 function ProductSearch({ onPick }: { onPick: (v: VariantHit) => void }) {
@@ -643,6 +646,7 @@ function ProductSearch({ onPick }: { onPick: (v: VariantHit) => void }) {
       api.get<{
         items: Array<{
           name: string;
+          tracksLotValidity: boolean;
           variants: Array<{ id: string; description: string; sku: string; salePrice: number; costPrice: number }>;
         }>;
       }>(`/api/products?search=${encodeURIComponent(term)}`),
@@ -671,6 +675,7 @@ function ProductSearch({ onPick }: { onPick: (v: VariantHit) => void }) {
                     label: `${p.name} — ${v.description} (${v.sku})`,
                     salePrice: v.salePrice,
                     costPrice: v.costPrice,
+                    tracksLot: p.tracksLotValidity,
                   });
                   setTerm('');
                 }}

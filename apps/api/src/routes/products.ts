@@ -203,6 +203,80 @@ export async function productRoutes(app: FastifyInstance) {
     },
   );
 
+  // Histórico de acertos de estoque (StockMovement ADJUST). Só ADMIN.
+  r.get('/stock-adjustments', { preHandler: app.authorize(['ADMIN']) }, async () => {
+    const movements = await prisma.stockMovement.findMany({
+      where: { type: 'ADJUST' },
+      include: { variant: { include: { product: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+    return movements.map((m) => ({
+      id: m.id,
+      variantId: m.variantId,
+      quantity: m.quantity, // diferença aplicada (+/-)
+      reason: m.reason.replace(/^ADJUST:\s*/, ''),
+      createdAt: m.createdAt,
+      product: m.variant.product.name,
+      description: m.variant.description,
+      sku: m.variant.sku,
+      currentStock: m.variant.stockQty,
+    }));
+  });
+
+  // Edita um acerto: aplica no estoque apenas a diferença entre o novo e o
+  // antigo valor do ajuste (recalcula o estoque internamente). Só ADMIN.
+  r.put(
+    '/stock-adjustments/:id',
+    {
+      preHandler: app.authorize(['ADMIN']),
+      schema: {
+        params: z.object({ id: z.string().uuid() }),
+        body: z.object({
+          quantity: z.number().int(),
+          reason: z.string().trim().min(1, 'Informe o motivo').max(200),
+        }),
+      },
+    },
+    async (req) => {
+      const { quantity, reason } = req.body;
+      return prisma.$transaction(async (tx) => {
+        const m = await tx.stockMovement.findUnique({ where: { id: req.params.id } });
+        if (!m || m.type !== 'ADJUST') throw new NotFoundError('Acerto de estoque');
+        const delta = quantity - m.quantity;
+        if (delta !== 0) {
+          await tx.productVariant.update({
+            where: { id: m.variantId },
+            data: { stockQty: { increment: delta } },
+          });
+        }
+        const updated = await tx.stockMovement.update({
+          where: { id: m.id },
+          data: { quantity, reason: `ADJUST: ${reason}` },
+        });
+        return serializeDecimals(updated);
+      });
+    },
+  );
+
+  // Apaga um acerto: reverte a diferença aplicada no estoque. Só ADMIN.
+  r.delete(
+    '/stock-adjustments/:id',
+    { preHandler: app.authorize(['ADMIN']), schema: { params: z.object({ id: z.string().uuid() }) } },
+    async (req, reply) => {
+      await prisma.$transaction(async (tx) => {
+        const m = await tx.stockMovement.findUnique({ where: { id: req.params.id } });
+        if (!m || m.type !== 'ADJUST') throw new NotFoundError('Acerto de estoque');
+        await tx.productVariant.update({
+          where: { id: m.variantId },
+          data: { stockQty: { decrement: m.quantity } },
+        });
+        await tx.stockMovement.delete({ where: { id: m.id } });
+      });
+      return reply.status(204).send();
+    },
+  );
+
   // Exclusão de produto (ADMIN). Bloqueia se houver vendas ou notas vinculadas
   // às variantes — preserva a integridade histórica do estoque/financeiro.
   r.delete(

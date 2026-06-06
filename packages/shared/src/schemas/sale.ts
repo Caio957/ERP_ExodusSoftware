@@ -69,7 +69,8 @@ export type SyncSalesInput = z.infer<typeof syncSalesSchema>;
 /**
  * Edição "por completo" de uma venda já registrada (PDV-C). Substitui itens,
  * valores e forma de pagamento. O backend estorna o estoque anterior, remove o
- * financeiro vinculado e regrava tudo de forma consistente.
+ * financeiro vinculado e regrava tudo de forma consistente. Aceita split e
+ * "A prazo" (parcelas → contas a receber), assim como a criação da venda.
  */
 export const updateSaleSchema = z.object({
   paymentMethod: paymentCode,
@@ -78,5 +79,9 @@ export const updateSaleSchema = z.object({
   discount: money.default(0),
   surcharge: money.default(0),
   notes: z.string().trim().max(500).nullish(),
+  /** Formas de pagamento (split). Omitido = pagamento único pelo paymentMethod. */
+  payments: z.array(salePaymentSchema).optional(),
+  /** Parcelas da parte "A prazo" (contas a receber). Exige clientId. */
+  installments: z.array(saleInstallmentSchema).optional(),
 });
 export type UpdateSaleInput = z.infer<typeof updateSaleSchema>;

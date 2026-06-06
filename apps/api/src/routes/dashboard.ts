@@ -24,8 +24,9 @@ export async function dashboardRoutes(app: FastifyInstance) {
       const toEnd = new Date(to);
       toEnd.setHours(23, 59, 59, 999);
 
+      // Apenas vendas com financeiro gerado contam como receita/recebimento.
       const sales = await prisma.sale.findMany({
-        where: { soldAt: { gte: from, lte: toEnd } },
+        where: { soldAt: { gte: from, lte: toEnd }, financialGenerated: true },
         include: { payments: true },
       });
 
@@ -51,8 +52,12 @@ export async function dashboardRoutes(app: FastifyInstance) {
         .map(([date, total]) => ({ date, total: round2(total) }));
 
       // Situação atual de contas a pagar/receber (saldo aberto e vencido).
+      // Oculta títulos a receber de vendas com o financeiro excluído.
       const accounts = await prisma.financialAccount.findMany({
-        where: { status: { not: 'PAID' } },
+        where: {
+          status: { not: 'PAID' },
+          OR: [{ saleId: null }, { sale: { financialGenerated: true } }],
+        },
         include: { settlements: true },
       });
       const now = new Date();
@@ -73,6 +78,16 @@ export async function dashboardRoutes(app: FastifyInstance) {
         }
       }
 
+      // Resultado do período (Receitas − Despesas): vendas do período como
+      // receita; contas a pagar (dívidas) com vencimento no período como despesa.
+      const payables = await prisma.financialAccount.findMany({
+        where: { type: 'PAYABLE', dueDate: { gte: from, lte: toEnd } },
+        select: { amount: true },
+      });
+      const expensesTotal = round2(payables.reduce((a, p) => a + Number(p.amount), 0));
+      const incomeTotal = salesTotal;
+      const monthResult = round2(incomeTotal - expensesTotal);
+
       return {
         period: { from, to },
         salesTotal,
@@ -84,6 +99,10 @@ export async function dashboardRoutes(app: FastifyInstance) {
         receivableOpen: round2(receivableOpen),
         payableOverdue: round2(payableOverdue),
         receivableOverdue: round2(receivableOverdue),
+        // Resultado do período (Receitas − Despesas).
+        incomeTotal,
+        expensesTotal,
+        monthResult,
       };
     },
   );

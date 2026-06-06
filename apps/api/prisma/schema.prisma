@@ -181,6 +181,7 @@ model CashTransaction {
 
 model Sale {
   id             String       @id @default(uuid())
+  code           Int          @unique @default(autoincrement()) // NºDOC sequencial da venda
   cashRegisterId String
   cashRegister   CashRegister @relation(fields: [cashRegisterId], references: [id])
   userId         String? // operador que registrou
@@ -193,6 +194,9 @@ model Sale {
   totalAmount    Decimal      @db.Decimal(10, 2) // líquido: subtotal - desconto + acréscimo
   notes          String? // observação livre da venda
   paymentMethod  String // 'PIX' | 'CREDIT' | 'DEBIT' | 'CASH'
+  // false = financeiro da venda excluído (não conta no caixa/recebimentos nem
+  // gera contas a receber). Reversível pela tela de Vendas.
+  financialGenerated Boolean  @default(true)
   syncStatus     String       @default("SYNCED") // 'PENDING' | 'SYNCED'
   // Idempotência da fila offline (Dexie): evita venda duplicada na sync (4.4)
   clientRef      String?      @unique

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   marginFromPrice,
@@ -240,9 +240,8 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
   const groupRequired = settings?.groupRequired ?? false;
   const subgroupRequired = settings?.subgroupRequired ?? false;
   const barcodeRequired = settings?.barcodeRequired ?? false;
-  useEffect(() => {
-    if (settings) setTracksLotValidity(settings.defaultTracksLotValidity);
-  }, [settings]);
+  // Lote/validade é sempre opt-in: todo produto novo abre desmarcado e quem
+  // decide é o usuário, por produto. Não bloqueia o cadastro por causa de lote.
 
   // Precificação (Requisito 4.1). Fonte da verdade: custo + último percentual
   // informado (margem OU markup) recalcula o preço de venda. Editar a venda

@@ -25,6 +25,9 @@ interface DashboardData {
   receivableOpen: number;
   payableOverdue: number;
   receivableOverdue: number;
+  incomeTotal: number;
+  expensesTotal: number;
+  monthResult: number;
 }
 
 export function DashboardPage() {
@@ -97,6 +100,36 @@ export function DashboardPage() {
             />
           </div>
 
+          {/* Resultado do período: Receitas − Despesas (saldo +/−) */}
+          <div className="card">
+            <h3 className="mb-3 font-semibold">Resultado do período (Receitas − Despesas)</h3>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-xl bg-emerald-50 p-4">
+                <div className="text-xs font-medium uppercase tracking-wide text-emerald-700">Receitas (vendas)</div>
+                <div className="font-display text-xl font-bold text-emerald-700">{brl(data.incomeTotal)}</div>
+              </div>
+              <div className="rounded-xl bg-rose-50 p-4">
+                <div className="text-xs font-medium uppercase tracking-wide text-rose-700">Despesas (contas a pagar)</div>
+                <div className="font-display text-xl font-bold text-rose-700">{brl(data.expensesTotal)}</div>
+              </div>
+              <div className={`rounded-xl p-4 ${data.monthResult >= 0 ? 'bg-emerald-100' : 'bg-rose-100'}`}>
+                <div
+                  className={`text-xs font-medium uppercase tracking-wide ${data.monthResult >= 0 ? 'text-emerald-800' : 'text-rose-800'}`}
+                >
+                  Saldo do período
+                </div>
+                <div
+                  className={`font-display text-xl font-bold ${data.monthResult >= 0 ? 'text-emerald-800' : 'text-rose-800'}`}
+                >
+                  {brl(data.monthResult)}
+                </div>
+              </div>
+            </div>
+            <p className="mt-2 text-xs text-slate-400">
+              Receitas = vendas no período. Despesas = contas a pagar com vencimento no período.
+            </p>
+          </div>
+
           <div className="grid gap-4 lg:grid-cols-2">
             {/* Série diária */}
             <div className="card">
@@ -106,7 +139,11 @@ export function DashboardPage() {
               ) : (
                 <div className="flex h-40 items-end gap-1">
                   {data.dailySales.map((d) => (
-                    <div key={d.date} className="group flex flex-1 flex-col items-center justify-end" title={`${d.date}: ${brl(d.total)}`}>
+                    <div
+                      key={d.date}
+                      className="group flex h-full flex-1 flex-col items-center justify-end"
+                      title={`${new Date(`${d.date}T00:00:00`).toLocaleDateString('pt-BR')}: ${brl(d.total)}`}
+                    >
                       <div
                         className="w-full rounded-t bg-brand-gradient transition-all group-hover:opacity-80"
                         style={{ height: `${Math.max(4, (d.total / maxDaily) * 100)}%` }}

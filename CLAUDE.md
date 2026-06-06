@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-06-04
+- **Última atualização:** 2026-06-05
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -138,7 +138,11 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
 - ✅ **Vendas**: `/sales` e `/sales/sync` (lote offline) com **idempotência por
   `clientRef`**; **split de pagamento** (tabela `SalePayment`) e **"A prazo"** (gera
   contas a receber); **`PUT/DELETE /sales/:id`** (editar/excluir com estorno de estoque
-  + remoção do financeiro vinculado); desconto/acréscimo/observação por venda.
+  + remoção do financeiro vinculado); desconto/acréscimo/observação por venda;
+  **`Sale.code` sequencial (NºDOC)**; **`Sale.financialGenerated`** (excluir/gerar
+  financeiro: `DELETE/POST /sales/:id/financial`); edição agora suporta split/"a
+  prazo" (parcelas → contas a receber); `GET /sales/:id` inclui `payments` e
+  `financialAccounts`.
 - ✅ **Caixa**: abrir, sangria/suprimento, fechar; `/current` com `expectedCash`
   (somado por `SalePayment` em dinheiro); **`/cash/registers`** (histórico),
   **`/cash/:id/movements`** (timeline vendas+manuais), **`PUT/DELETE /cash/transactions/:id`**
@@ -169,11 +173,13 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   **"A prazo"** (nº de parcelas, 1º vencimento, intervalo → gera contas a receber).
 - ✅ **Cadastros** (`/cadastros`, autenticado): CRUD de **clientes e fornecedores**
   (nome, CPF/CNPJ, telefone, e-mail, endereço) com exclusão protegida por origem.
-- ✅ **Vendas** (ADMIN, `/vendas`): consulta das vendas (data, pagamento, cliente,
-  itens, total); **excluir** (estorna estoque + remove financeiro vinculado);
-  **editar por completo** (itens/qtd/preço/desconto/acréscimo/observação/pagamento) —
-  o backend estorna o estoque anterior, apaga o financeiro vinculado e regrava tudo
-  numa transação.
+- ✅ **Vendas** (ADMIN, `/vendas`): **NºDOC sequencial** em todas as vendas; consulta
+  com coluna de status do financeiro; **botão Visualizar** (ver itens, pagamentos,
+  contas a receber) antes de decidir; **editar** (itens/qtd/preço/desconto/acréscimo/
+  observação/cliente/pagamento — incluindo **"A prazo" com parcelas**); **excluir**
+  (estorna estoque + remove financeiro); **excluir/gerar financeiro** (reversível —
+  venda sai/entra no caixa e recebimentos); **imprimir** — cupom térmico aprimorado
+  ou folha A4 estilizada com dados da empresa (escolha na hora).
 - ✅ **Produtos**: filtros (marca/grupo/subgrupo) + busca; editar produto e variantes
   (asteriscos `*` também no modal Editar); excluir (com confirmação + bloqueio por
   origem); toggle **"controlar lote e validade"** (lote/validade só obrigatórios
@@ -199,10 +205,13 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   período (vencimento) e busca por descrição/pessoa; **títulos vencidos destacados**;
   edição/exclusão **bloqueadas** para origem nota/venda e para títulos já baixados.
 - ✅ **Dashboard** (ADMIN, `/dashboard`): visão financeira por **período** — vendas
-  (total/qtd/ticket), recebimentos por forma, série diária (gráfico) e situação de
-  contas a pagar/receber (aberto e vencido).
+  (total/qtd/ticket), recebimentos por forma, série diária (gráfico corrigido) e
+  situação de contas a pagar/receber (aberto e vencido); **card Receitas − Despesas**
+  (saldo +/− do período).
 - ✅ **Acerto de estoque** (ADMIN, `/estoque`): inventário — informa a quantidade
-  contada e o motivo; registra a diferença como `StockMovement` tipo `ADJUST`.
+  contada e o motivo; registra a diferença como `StockMovement` tipo `ADJUST`;
+  **histórico de acertos** com editar (recalcula estoque) e apagar (reverte diff).
+  Endpoints: `GET/PUT/DELETE /products/stock-adjustments(/:id)`.
 - ✅ **Configurações** (ADMIN) em abas: **Produto** (campos obrigatórios + lote/validade
   padrão), **Recebimentos** (tipos de pagamento configuráveis: renomear/ativar/adicionar,
   consumidos dinamicamente pelo PDV) e **Empresa** (dados cadastrais do contratante).
@@ -307,10 +316,11 @@ Outras decisões:
 da venda, **relaxado para string** (tipos de recebimento configuráveis). Detalhe
 completo: `apps/api/prisma/schema.prisma`.
 
-**Migrações (8, todas aditivas/seguras):** `0_init`, `add_lot_validity_control`,
+**Migrações (9, todas aditivas/seguras):** `0_init`, `add_lot_validity_control`,
 `add_settings`, `sale_discount_surcharge_notes`, `financial_account_sale_link`,
-`sale_payments`, `invoice_document_notes`, `financial_settlements_code`. Aplicadas
-automaticamente no Railway a cada deploy (`prisma migrate deploy`).
+`sale_payments`, `invoice_document_notes`, `financial_settlements_code`,
+`sale_code_financial_flag`. Aplicadas automaticamente no Railway a cada deploy
+(`prisma migrate deploy`).
 
 ---
 
@@ -389,6 +399,25 @@ automaticamente no Railway a cada deploy (`prisma migrate deploy`).
   e **dashboard financeiro** por período (`/dashboard`). Sem migração (Setting/JSON +
   tabelas existentes). `npm run build` OK. Commit `ba5dc18`. **Backlog de melhorias
   100% concluído.**
+- ✅ **Onda 2026-06-05 — múltiplas melhorias** (2026-06-05):
+  - **Compra manual**: checkbox lote/validade pré-marcado conforme o produto já controla.
+  - **Cadastro produto**: lote/validade sempre desmarcado por padrão (opt-in); remove
+    bloqueio indevido ao cadastrar produto sem lote.
+  - **Financeiro**: paginação 50/50 — **corrige bug que deixava a tela vazia** (front
+    pedia `pageSize=200` mas schema limitava a 100).
+  - **Dashboard**: gráfico "Vendas por dia" corrigido (barras colapsavam); novo card
+    **Receitas − Despesas** (saldo +/− do período). Backend também ignora vendas com
+    `financialGenerated=false`.
+  - **Vendas**: NºDOC sequencial (`Sale.code`); status "com/sem financeiro gerado"
+    (`Sale.financialGenerated`); botão Visualizar antes de editar; editar cliente e
+    editar pagamento **a prazo** (split + parcelas → contas a receber); excluir/gerar
+    financeiro (reversível, bloqueia se houver baixa registrada); imprimir em cupom
+    térmico aprimorado ou folha A4 com dados da empresa (escolha na hora).
+  - **Acerto de estoque**: histórico completo com editar (recalcula diff no estoque) e
+    apagar (reverte o ajuste). Endpoints `GET/PUT/DELETE /products/stock-adjustments`.
+  - **Migração aditiva** `sale_code_financial_flag` (`Sale.code SERIAL @unique`,
+    `Sale.financialGenerated BOOLEAN DEFAULT true`).
+  - `npm run typecheck` + `npm run build` → **0 erros**.
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---
@@ -408,7 +437,7 @@ automaticamente no Railway a cada deploy (`prisma migrate deploy`).
 11. **Ícones PWA** usam um único SVG (sem PNGs 192/512 dedicados).
 12. ~~**Tela de Suprimento/Sangria** usa `window.prompt()`~~ **RESOLVIDO** (Onda Caixa): modal próprio com observação.
 13. **Tipos de recebimento customizados** são tratados como "à vista não-dinheiro": o backend reconhece apenas os códigos literais `CASH` (entra no `expectedCash`) e `A_PRAZO` (gera parcelas). Um tipo novo com kind CASH/A_PRAZO não teria esse comportamento especial — por isso a tela de Configurações só permite adicionar tipos `OTHER` (os 5 base são fixos quanto a code/kind).
-14. **Edição de venda** simplifica o pagamento para forma única (a tela de Vendas não reabre o split/parcelas); para alterar uma venda dividida/a prazo, o ideal é excluir e refazer.
+14. ~~**Edição de venda** simplifica o pagamento para forma única~~ **RESOLVIDO (2026-06-05)**: edição agora aceita "a prazo" com parcelas; split de formas múltiplas segue sendo reaberto somente na criação (excluir e refazer para split).
 
 ---
 

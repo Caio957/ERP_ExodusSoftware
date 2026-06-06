@@ -39,6 +39,8 @@ interface Account {
   person?: { name: string } | null;
 }
 
+const PAGE_SIZE = 50;
+
 export function FinancialPage() {
   const qc = useQueryClient();
   const [type, setType] = useState<AccountType>('PAYABLE');
@@ -46,20 +48,30 @@ export function FinancialPage() {
   const [dueFrom, setDueFrom] = useState('');
   const [dueTo, setDueTo] = useState('');
   const [showFilters, setShowFilters] = useState(false);
+  const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Account | null>(null);
   const [settling, setSettling] = useState<Account | null>(null);
 
+  // Troca de filtro/tipo volta para a primeira página.
+  const changeType = (t: AccountType) => { setType(t); setPage(1); };
+  const changeSearch = (v: string) => { setSearch(v); setPage(1); };
+  const changeDueFrom = (v: string) => { setDueFrom(v); setPage(1); };
+  const changeDueTo = (v: string) => { setDueTo(v); setPage(1); };
+
   const { data, isLoading } = useQuery({
-    queryKey: ['financial', type, search, dueFrom, dueTo],
+    queryKey: ['financial', type, search, dueFrom, dueTo, page],
     queryFn: () => {
-      const qs = new URLSearchParams({ type, pageSize: '200' });
+      const qs = new URLSearchParams({ type, page: String(page), pageSize: String(PAGE_SIZE) });
       if (search.trim()) qs.set('search', search.trim());
       if (dueFrom) qs.set('dueFrom', dueFrom);
       if (dueTo) qs.set('dueTo', dueTo);
-      return api.get<{ items: Account[] }>(`/api/financial?${qs.toString()}`);
+      return api.get<{ total: number; items: Account[] }>(`/api/financial?${qs.toString()}`);
     },
   });
+
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['financial'] });
 
@@ -91,10 +103,10 @@ export function FinancialPage() {
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex gap-2">
-          <button className={type === 'PAYABLE' ? 'btn-primary' : 'btn-ghost'} onClick={() => setType('PAYABLE')}>
+          <button className={type === 'PAYABLE' ? 'btn-primary' : 'btn-ghost'} onClick={() => changeType('PAYABLE')}>
             <ArrowUpCircle className="h-5 w-5" /> A Pagar
           </button>
-          <button className={type === 'RECEIVABLE' ? 'btn-primary' : 'btn-ghost'} onClick={() => setType('RECEIVABLE')}>
+          <button className={type === 'RECEIVABLE' ? 'btn-primary' : 'btn-ghost'} onClick={() => changeType('RECEIVABLE')}>
             <ArrowDownCircle className="h-5 w-5" /> A Receber
           </button>
           <button className={showFilters ? 'btn-primary' : 'btn-ghost'} onClick={() => setShowFilters((v) => !v)}>
@@ -115,16 +127,16 @@ export function FinancialPage() {
             <span className="label">Buscar (descrição/pessoa)</span>
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input className="input pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
+              <input className="input pl-9" value={search} onChange={(e) => changeSearch(e.target.value)} />
             </div>
           </label>
           <label className="block">
             <span className="label">Vencimento de</span>
-            <input className="input" type="date" value={dueFrom} onChange={(e) => setDueFrom(e.target.value)} />
+            <input className="input" type="date" value={dueFrom} onChange={(e) => changeDueFrom(e.target.value)} />
           </label>
           <label className="block">
             <span className="label">Vencimento até</span>
-            <input className="input" type="date" value={dueTo} onChange={(e) => setDueTo(e.target.value)} />
+            <input className="input" type="date" value={dueTo} onChange={(e) => changeDueTo(e.target.value)} />
           </label>
         </div>
       )}
@@ -132,6 +144,7 @@ export function FinancialPage() {
       {isLoading ? (
         <div className="grid h-40 place-items-center text-slate-500">Carregando...</div>
       ) : (
+        <>
         <div className="card overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -239,6 +252,26 @@ export function FinancialPage() {
             </tbody>
           </table>
         </div>
+        {total > PAGE_SIZE && (
+          <div className="mt-3 flex items-center justify-between text-sm">
+            <span className="text-slate-500">
+              {total} título(s) · página {page} de {totalPages}
+            </span>
+            <div className="flex gap-2">
+              <button className="btn-ghost" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                Anterior
+              </button>
+              <button
+                className="btn-ghost"
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
+                Próxima
+              </button>
+            </div>
+          </div>
+        )}
+        </>
       )}
 
       {creating && (

@@ -75,6 +75,8 @@ export async function financialRoutes(app: FastifyInstance) {
         ...(dueFrom || dueTo
           ? { dueDate: { ...(dueFrom ? { gte: dueFrom } : {}), ...(dueTo ? { lte: dueTo } : {}) } }
           : {}),
+        // Oculta contas a receber de vendas com o financeiro excluído.
+        AND: [{ OR: [{ saleId: null }, { sale: { financialGenerated: true } }] }],
       };
       const [total, items] = await Promise.all([
         prisma.financialAccount.count({ where }),

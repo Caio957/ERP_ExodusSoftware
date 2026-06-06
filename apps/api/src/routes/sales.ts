@@ -4,7 +4,7 @@ import { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { createSaleSchema, syncSalesSchema, updateSaleSchema, paginationQuery } from '@exodus/shared';
 import { prisma } from '../lib/prisma.js';
 import { serializeDecimals } from '../lib/serialize.js';
-import { createSale, updateSale, deleteSale } from '../services/sales.js';
+import { createSale, updateSale, deleteSale, setSaleFinancialGenerated } from '../services/sales.js';
 import { NotFoundError } from '../lib/errors.js';
 
 export async function saleRoutes(app: FastifyInstance) {
@@ -68,7 +68,12 @@ export async function saleRoutes(app: FastifyInstance) {
     async (req) => {
       const sale = await prisma.sale.findUnique({
         where: { id: req.params.id },
-        include: { items: { include: { variant: { include: { product: true } } } }, client: true },
+        include: {
+          items: { include: { variant: { include: { product: true } } } },
+          client: true,
+          payments: true,
+          financialAccounts: { orderBy: { dueDate: 'asc' } },
+        },
       });
       if (!sale) throw new NotFoundError('Venda');
       return serializeDecimals(sale);
@@ -95,6 +100,27 @@ export async function saleRoutes(app: FastifyInstance) {
     async (req, reply) => {
       await deleteSale(req.params.id);
       return reply.status(204).send();
+    },
+  );
+
+  // Exclui o financeiro da venda: deixa de contar no caixa/recebimentos e oculta
+  // as contas a receber vinculadas (status "sem financeiro gerado"). Só ADMIN.
+  r.delete(
+    '/:id/financial',
+    { preHandler: app.authorize(['ADMIN']), schema: { params: z.object({ id: z.string().uuid() }) } },
+    async (req) => {
+      const sale = await setSaleFinancialGenerated(req.params.id, false);
+      return serializeDecimals(sale);
+    },
+  );
+
+  // Regera o financeiro da venda (volta a contar no caixa/recebimentos). Só ADMIN.
+  r.post(
+    '/:id/financial',
+    { preHandler: app.authorize(['ADMIN']), schema: { params: z.object({ id: z.string().uuid() }) } },
+    async (req) => {
+      const sale = await setSaleFinancialGenerated(req.params.id, true);
+      return serializeDecimals(sale);
     },
   );
 }
