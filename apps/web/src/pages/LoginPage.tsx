@@ -50,10 +50,12 @@ export function LoginPage() {
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
       {/* Painel de marca */}
-      <aside className="relative hidden overflow-hidden bg-brand-gradient lg:flex lg:flex-col lg:justify-between lg:p-12 lg:text-white">
-        {/* Brilhos decorativos */}
-        <div className="pointer-events-none absolute -right-24 -top-24 h-96 w-96 rounded-full bg-white/10 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-32 -left-16 h-96 w-96 rounded-full bg-accent-500/30 blur-3xl" />
+      <aside className="relative hidden overflow-hidden bg-brand-gradient bg-[length:200%_200%] animate-gradient-x lg:flex lg:flex-col lg:justify-between lg:p-12 lg:text-white">
+        {/* Orbes flutuantes + grade sutil */}
+        <div className="pointer-events-none absolute -right-24 -top-24 h-96 w-96 animate-float rounded-full bg-white/10 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-32 -left-16 h-96 w-96 animate-float-slow rounded-full bg-accent-500/30 blur-3xl" />
+        <div className="pointer-events-none absolute right-1/3 top-1/2 h-64 w-64 animate-glow-pulse rounded-full bg-brand-300/20 blur-3xl" />
+        <div className="pointer-events-none absolute inset-0 bg-grid bg-[length:36px_36px] opacity-20 [mask-image:radial-gradient(ellipse_at_center,black,transparent_75%)]" />
 
         <div className="relative flex items-center gap-3">
           <span className="grid h-12 w-12 place-items-center rounded-2xl bg-white/15 text-2xl font-bold backdrop-blur-sm ring-1 ring-white/30">
@@ -66,19 +68,22 @@ export function LoginPage() {
         </div>
 
         <div className="relative max-w-md">
-          <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-sm font-medium backdrop-blur-sm">
+          <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-sm font-medium ring-1 ring-white/25 backdrop-blur-sm">
             <Sparkles className="h-4 w-4" /> ERP para lojas de cosméticos
           </div>
-          <h1 className="font-display text-4xl font-extrabold leading-tight">
+          <h1 className="font-display text-4xl font-extrabold leading-tight xl:text-5xl">
             Sua loja de beleza, no controle total.
           </h1>
           <p className="mt-4 text-lg text-white/80">
             Estoque, vendas e caixa em uma experiência pensada para o balcão.
           </p>
 
-          <ul className="mt-8 space-y-4">
+          <ul className="mt-8 space-y-3">
             {highlights.map((h) => (
-              <li key={h.title} className="flex items-start gap-3">
+              <li
+                key={h.title}
+                className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/10 p-3 backdrop-blur-md transition-all duration-300 hover:translate-x-1 hover:bg-white/15"
+              >
                 <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/15 ring-1 ring-white/20">
                   <h.icon className="h-5 w-5" />
                 </span>
@@ -97,8 +102,8 @@ export function LoginPage() {
       </aside>
 
       {/* Formulário */}
-      <main className="flex items-center justify-center p-6 sm:p-10">
-        <div className="w-full max-w-sm animate-fade-in">
+      <main className="relative flex items-center justify-center p-6 sm:p-10">
+        <div className="w-full max-w-sm animate-fade-in rounded-3xl border border-white/60 bg-white/70 p-6 shadow-card backdrop-blur-xl sm:p-8">
           {/* Marca compacta (mobile) */}
           <div className="mb-8 flex flex-col items-center text-center lg:hidden">
             <div className="mb-3 grid h-16 w-16 place-items-center rounded-2xl bg-brand-gradient text-3xl font-bold text-white shadow-brand">

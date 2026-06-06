@@ -221,18 +221,18 @@ function Kpi({
   tone: 'brand' | 'emerald' | 'slate';
 }) {
   const tones: Record<string, string> = {
-    brand: 'bg-brand-100 text-brand-700',
-    emerald: 'bg-emerald-100 text-emerald-700',
-    slate: 'bg-slate-100 text-slate-600',
+    brand: 'bg-brand-gradient text-white shadow-brand',
+    emerald: 'bg-emerald-500 text-white shadow-soft',
+    slate: 'bg-slate-800 text-white shadow-soft',
   };
   return (
-    <div className="card flex items-center gap-3">
-      <span className={`grid h-11 w-11 place-items-center rounded-xl ${tones[tone]}`}>
+    <div className="card-hover flex items-center gap-3">
+      <span className={`grid h-12 w-12 shrink-0 place-items-center rounded-2xl ${tones[tone]}`}>
         <Icon className="h-6 w-6" />
       </span>
-      <div>
+      <div className="min-w-0">
         <div className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</div>
-        <div className="font-display text-xl font-bold">{value}</div>
+        <div className="font-display text-2xl font-bold">{value}</div>
         {sub && <div className="text-xs text-slate-400">{sub}</div>}
       </div>
     </div>

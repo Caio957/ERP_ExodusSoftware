@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-06-05
+- **Última atualização:** 2026-06-06
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -418,6 +418,22 @@ completo: `apps/api/prisma/schema.prisma`.
   - **Migração aditiva** `sale_code_financial_flag` (`Sale.code SERIAL @unique`,
     `Sale.financialGenerated BOOLEAN DEFAULT true`).
   - `npm run typecheck` + `npm run build` → **0 erros**.
+- ✅ **Onda 2026-06-06 — Redesign visual premium** (2026-06-06): reformulação visual
+  completa do PWA, sem novas dependências (CSS/Tailwind avançado):
+  - **Design system** (`index.css` + `tailwind.config.js`): fundo com **aurora animada**
+    + grade "tech" sutil; **glassmorphism** em header/cards/modais; botões primários com
+    **brilho diagonal (sheen)** no hover e gradiente animado; inputs com **glow** no foco;
+    `.card`/`.card-hover` premium (lift + glow); utilitários novos (`gradient-text`,
+    `icon-tile`, `hover-lift`, `glass-card`, `gradient-border`, `skeleton`); respeito a
+    `prefers-reduced-motion`; sombras coloridas (`glow-brand`, `brand-lg`, `card`).
+  - **Layout/Navegação** (`Layout.tsx`): header glass com logo **glow pulsante** e nome
+    em gradiente; sidebar (tablet/desktop) com **indicador ativo animado** e ícones que
+    escalam no hover; **bottom navigation** fixa no celular (4 atalhos) + **drawer "Menu"**
+    com todos os itens → responsividade real (celular/tablet/desktop).
+  - **Login**: gradiente animado, **orbes flutuantes**, grade sutil e **cartão glass**.
+  - **Dashboard**: KPIs premium (ícones em gradiente, `card-hover`).
+  - Cores priorizadas: **roxo Exodus (brand) + rosé (accent)**. Foco touch mantido.
+  - `npm run typecheck` + `npm run build` → **0 erros** (CSS 40→48KB).
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---
