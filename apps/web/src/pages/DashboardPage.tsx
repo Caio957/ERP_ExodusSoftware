@@ -90,7 +90,7 @@ export function DashboardPage() {
           {/* KPIs */}
           <div className="grid gap-3 sm:grid-cols-3">
             <Kpi icon={ShoppingBag} label="Vendas no período" value={brl(data.salesTotal)} sub={`${data.salesCount} venda(s)`} tone="brand" />
-            <Kpi icon={Wallet} label="Ticket médio" value={brl(data.ticket)} tone="slate" />
+            <Kpi icon={Wallet} label="Ticket médio" value={brl(data.ticket)} tone="gold" />
             <Kpi
               icon={ArrowDownCircle}
               label="A receber em aberto"
@@ -145,7 +145,7 @@ export function DashboardPage() {
                       title={`${new Date(`${d.date}T00:00:00`).toLocaleDateString('pt-BR')}: ${brl(d.total)}`}
                     >
                       <div
-                        className="w-full rounded-t bg-brand-gradient transition-all group-hover:opacity-80"
+                        className="w-full rounded-t bg-gradient-to-t from-brand-600 via-brand-500 to-accent-400 shadow-sm transition-all group-hover:opacity-80"
                         style={{ height: `${Math.max(4, (d.total / maxDaily) * 100)}%` }}
                       />
                     </div>
@@ -218,12 +218,12 @@ function Kpi({
   label: string;
   value: string;
   sub?: string;
-  tone: 'brand' | 'emerald' | 'slate';
+  tone: 'brand' | 'emerald' | 'gold';
 }) {
   const tones: Record<string, string> = {
     brand: 'bg-brand-gradient text-white shadow-brand',
     emerald: 'bg-emerald-500 text-white shadow-soft',
-    slate: 'bg-slate-800 text-white shadow-soft',
+    gold: 'bg-gold-gradient text-ink-900 shadow-gold',
   };
   return (
     <div className="card-hover flex items-center gap-3">

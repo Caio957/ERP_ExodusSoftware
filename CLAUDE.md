@@ -418,22 +418,30 @@ completo: `apps/api/prisma/schema.prisma`.
   - **Migração aditiva** `sale_code_financial_flag` (`Sale.code SERIAL @unique`,
     `Sale.financialGenerated BOOLEAN DEFAULT true`).
   - `npm run typecheck` + `npm run build` → **0 erros**.
-- ✅ **Onda 2026-06-06 — Redesign visual premium** (2026-06-06): reformulação visual
-  completa do PWA, sem novas dependências (CSS/Tailwind avançado):
-  - **Design system** (`index.css` + `tailwind.config.js`): fundo com **aurora animada**
-    + grade "tech" sutil; **glassmorphism** em header/cards/modais; botões primários com
-    **brilho diagonal (sheen)** no hover e gradiente animado; inputs com **glow** no foco;
-    `.card`/`.card-hover` premium (lift + glow); utilitários novos (`gradient-text`,
-    `icon-tile`, `hover-lift`, `glass-card`, `gradient-border`, `skeleton`); respeito a
-    `prefers-reduced-motion`; sombras coloridas (`glow-brand`, `brand-lg`, `card`).
-  - **Layout/Navegação** (`Layout.tsx`): header glass com logo **glow pulsante** e nome
-    em gradiente; sidebar (tablet/desktop) com **indicador ativo animado** e ícones que
-    escalam no hover; **bottom navigation** fixa no celular (4 atalhos) + **drawer "Menu"**
-    com todos os itens → responsividade real (celular/tablet/desktop).
-  - **Login**: gradiente animado, **orbes flutuantes**, grade sutil e **cartão glass**.
-  - **Dashboard**: KPIs premium (ícones em gradiente, `card-hover`).
-  - Cores priorizadas: **roxo Exodus (brand) + rosé (accent)**. Foco touch mantido.
-  - `npm run typecheck` + `npm run build` → **0 erros** (CSS 40→48KB).
+- ✅ **Onda 2026-06-06 — Redesign visual premium (AZUL + DOURADO)** (2026-06-06):
+  reformulação visual completa do PWA, sem novas dependências (CSS/Tailwind avançado).
+  **Identidade Exodus corrigida: paleta AZUL (brand) + DOURADO (accent/gold)** — substitui
+  o roxo/rosé anterior em todo o app.
+  - **Paleta** (`tailwind.config.js`): `brand` = azul royal (50→950), `accent`/`gold` =
+    dourado, `ink` = azul-noite. Gradientes `brand-gradient` (azul), `gold-gradient`,
+    `brand-gold` (azul→dourado, assinatura), `royal-gradient` (azul-noite hero). Sombras
+    `glow-brand`/`glow-gold`/`brand-lg`/`gold-lg`. Aurora azul+dourado, `dots`, `shine`.
+  - **Design system** (`index.css`): fundo com **aurora animada azul/dourado** + textura
+    de **pontos**; botões azuis com **brilho dourado deslizante (sheen)**; `.btn-gold`;
+    inputs com borda azul e **glow** no foco; `.card`/`.card-hover`/`.card-feature` (faixa
+    dourada no topo); `.page-title` com **barra dourada**; utilitários `gradient-text`
+    (azul→dourado), `gradient-text-gold`, `icon-tile`/`icon-tile-gold`, `gradient-border`,
+    `badge-gold`; `prefers-reduced-motion`.
+  - **Layout** (`Layout.tsx`): header glass, logo azul com **anel dourado** e nome em
+    gradiente; sidebar com **indicador ativo animado**; **bottom navigation** no celular +
+    **drawer "Menu"** → responsividade real (celular/tablet/desktop).
+  - **Login**: painel **azul-noite dramático** com **brilho cônico girando**, orbes
+    azul/dourado flutuantes, título com palavra em dourado e **cartão glass** com borda
+    em gradiente.
+  - **Dashboard**: KPIs em cores variadas (azul/dourado/verde), barras do gráfico em
+    degradê azul→dourado. **PDV**: botões de pagamento harmonizados (a prazo dourado).
+  - Favicon e `theme_color` atualizados para azul/dourado.
+  - `npm run typecheck` + `npm run build` → **0 erros**.
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---

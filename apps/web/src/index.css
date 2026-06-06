@@ -9,35 +9,35 @@
     height: 100%;
   }
   body {
-    @apply bg-slate-50 text-slate-900 antialiased;
+    @apply text-slate-900 antialiased;
+    background-color: #eef3ff;
     font-family: 'Inter', system-ui, sans-serif;
     position: relative;
-    /* Evita seleção acidental durante o toque no balcão. */
     -webkit-tap-highlight-color: transparent;
   }
 
-  /* Aurora viva de marca no fundo (sutil, fixa, atrás de tudo). */
+  /* Aurora viva azul + dourado (fixa, atrás de tudo). */
   body::before {
     content: '';
     position: fixed;
     inset: -15%;
-    z-index: -2;
+    z-index: -3;
     @apply bg-aurora;
     background-size: 180% 180%;
-    animation: aurora 20s ease-in-out infinite;
+    animation: aurora 18s ease-in-out infinite;
     pointer-events: none;
   }
-  /* Grade fina "tech" com máscara radial — quase imperceptível, dá profundidade. */
+  /* Textura de pontos "tech" com máscara radial (dá riqueza ao fundo). */
   body::after {
     content: '';
     position: fixed;
     inset: 0;
-    z-index: -1;
-    @apply bg-grid;
-    background-size: 34px 34px;
-    -webkit-mask-image: radial-gradient(ellipse 80% 80% at 50% 30%, black, transparent 78%);
-    mask-image: radial-gradient(ellipse 80% 80% at 50% 30%, black, transparent 78%);
-    opacity: 0.6;
+    z-index: -2;
+    @apply bg-dots;
+    background-size: 22px 22px;
+    -webkit-mask-image: radial-gradient(ellipse 90% 90% at 50% 20%, black, transparent 80%);
+    mask-image: radial-gradient(ellipse 90% 90% at 50% 20%, black, transparent 80%);
+    opacity: 0.8;
     pointer-events: none;
   }
 
@@ -50,23 +50,21 @@
   ::selection {
     @apply bg-brand-200 text-brand-900;
   }
-  /* Scrollbar discreta com cor de marca */
   * {
     scrollbar-width: thin;
-    scrollbar-color: rgb(196 181 253) transparent;
+    scrollbar-color: rgb(147 197 253) transparent;
   }
   *::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 9px;
+    height: 9px;
   }
   *::-webkit-scrollbar-thumb {
-    @apply rounded-full bg-brand-200;
+    @apply rounded-full bg-brand-300;
   }
   *::-webkit-scrollbar-thumb:hover {
-    @apply bg-brand-300;
+    @apply bg-brand-400;
   }
 
-  /* Respeita usuários que preferem menos movimento. */
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
@@ -85,10 +83,10 @@
       text-base font-semibold transition-all duration-200 active:scale-[0.96]
       disabled:pointer-events-none disabled:opacity-50;
   }
-  /* Primário com gradiente animado + brilho diagonal (sheen) no hover. */
+  /* Primário azul royal com brilho dourado deslizante (sheen) no hover. */
   .btn-primary {
     @apply btn relative overflow-hidden bg-brand-gradient text-white shadow-brand
-      hover:shadow-brand-lg;
+      ring-1 ring-white/20 hover:shadow-brand-lg;
     background-size: 160% 160%;
     background-position: 0% 50%;
     transition:
@@ -99,7 +97,7 @@
   }
   .btn-primary:hover {
     background-position: 100% 50%;
-    filter: brightness(1.05);
+    filter: brightness(1.06);
   }
   .btn-primary::after {
     content: '';
@@ -110,12 +108,23 @@
   .btn-primary:hover::after {
     transform: translateX(130%);
   }
+  /* Botão dourado de destaque (CTAs de luxo). */
+  .btn-gold {
+    @apply btn relative overflow-hidden bg-gold-gradient text-ink-900 shadow-gold
+      ring-1 ring-white/30 hover:shadow-gold-lg;
+    background-size: 160% 160%;
+    transition: background-position 0.6s ease, box-shadow 0.3s ease, transform 0.15s ease, filter 0.2s ease;
+  }
+  .btn-gold:hover {
+    background-position: 100% 50%;
+    filter: brightness(1.05);
+  }
   .btn-secondary {
     @apply btn bg-brand-50 text-brand-700 ring-1 ring-inset ring-brand-200 hover:bg-brand-100;
   }
   .btn-ghost {
-    @apply btn bg-white/80 text-slate-700 shadow-soft ring-1 ring-slate-200/70 backdrop-blur-sm
-      hover:bg-white hover:ring-brand-200;
+    @apply btn bg-white/85 text-slate-700 shadow-soft ring-1 ring-brand-200/60 backdrop-blur-sm
+      hover:bg-white hover:ring-brand-300;
   }
   .btn-danger {
     @apply btn bg-rose-600 text-white shadow-soft hover:bg-rose-700 hover:shadow-elevated;
@@ -127,23 +136,23 @@
   /* ---------------- Campos ---------------- */
   .input,
   .select {
-    @apply min-h-touch w-full rounded-xl border border-slate-200 bg-white/90 px-4 text-base
+    @apply min-h-touch w-full rounded-xl border-2 border-brand-100 bg-white/90 px-4 text-base
       text-slate-900 shadow-sm outline-none transition-all duration-200
       placeholder:text-slate-400
-      hover:border-slate-300
+      hover:border-brand-200
       focus:border-brand-400 focus:bg-white focus:ring-4 focus:ring-brand-500/15
       focus:shadow-glow-brand;
   }
   .label {
-    @apply mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500;
+    @apply mb-1.5 block text-xs font-bold uppercase tracking-wide text-brand-700/80;
   }
 
   /* ---------------- Superfícies ---------------- */
   .card {
-    @apply rounded-2xl border border-white/70 bg-white/90 p-5 shadow-card backdrop-blur-sm;
+    @apply relative rounded-2xl border border-brand-100/80 bg-white/90 p-5 shadow-card backdrop-blur-sm;
   }
   .card-hover {
-    @apply card transition-all duration-300 hover:-translate-y-1 hover:border-brand-200/80
+    @apply card transition-all duration-300 hover:-translate-y-1 hover:border-brand-300
       hover:shadow-brand-lg;
   }
   .glass {
@@ -152,7 +161,15 @@
   .glass-card {
     @apply rounded-2xl border border-white/50 bg-white/60 p-5 shadow-card backdrop-blur-xl;
   }
-  /* Borda em gradiente de marca (use junto de bg-white interno). */
+  /* Card com topo dourado (destaque, menos minimalista). */
+  .card-feature {
+    @apply card overflow-hidden;
+  }
+  .card-feature::before {
+    content: '';
+    @apply absolute inset-x-0 top-0 h-1 bg-brand-gold;
+  }
+  /* Borda em gradiente azul→dourado. */
   .gradient-border {
     position: relative;
     background-clip: padding-box;
@@ -162,8 +179,8 @@
     position: absolute;
     inset: 0;
     border-radius: inherit;
-    padding: 1px;
-    @apply bg-brand-gradient;
+    padding: 1.5px;
+    @apply bg-brand-gold;
     -webkit-mask:
       linear-gradient(#fff 0 0) content-box,
       linear-gradient(#fff 0 0);
@@ -174,7 +191,7 @@
 
   /* ---------------- Selos / chips ---------------- */
   .badge {
-    @apply inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold;
+    @apply inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold;
   }
   .badge-success {
     @apply badge bg-emerald-100 text-emerald-700;
@@ -188,34 +205,45 @@
   .badge-brand {
     @apply badge bg-brand-100 text-brand-700;
   }
+  .badge-gold {
+    @apply badge bg-accent-100 text-accent-700 ring-1 ring-accent-300;
+  }
   .badge-neutral {
     @apply badge bg-slate-100 text-slate-600;
   }
 
   /* ---------------- Utilitários premium ---------------- */
-  /* Texto com gradiente de marca. */
+  /* Texto com a assinatura Exodus: azul → dourado. */
   .gradient-text {
-    @apply bg-brand-gradient bg-clip-text text-transparent;
+    @apply bg-brand-gold bg-clip-text text-transparent;
   }
-  /* Tile de ícone com gradiente + brilho. */
+  .gradient-text-gold {
+    @apply bg-gold-gradient bg-clip-text text-transparent;
+  }
+  /* Tiles de ícone (azul e dourado). */
   .icon-tile {
     @apply grid place-items-center rounded-2xl bg-brand-gradient text-white shadow-brand;
   }
-  /* Elevação suave no hover (para itens interativos). */
+  .icon-tile-gold {
+    @apply grid place-items-center rounded-2xl bg-gold-gradient text-ink-900 shadow-gold;
+  }
   .hover-lift {
     @apply transition-all duration-300 hover:-translate-y-1 hover:shadow-elevated;
   }
-  /* Placeholder de carregamento (shimmer). */
   .skeleton {
     @apply rounded-lg;
-    background-image: linear-gradient(90deg, #e9e6f5 0px, #f4f2fb 180px, #e9e6f5 360px);
+    background-image: linear-gradient(90deg, #dbe6ff 0px, #eef3ff 180px, #dbe6ff 360px);
     background-size: 720px 100%;
     animation: shimmer 1.6s linear infinite;
   }
 
-  /* Título de seção/página */
+  /* Título de seção/página com barra dourada decorativa. */
   .page-title {
-    @apply text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl;
+    @apply relative pl-3.5 text-2xl font-extrabold tracking-tight text-ink-900 sm:text-3xl;
+  }
+  .page-title::before {
+    content: '';
+    @apply absolute left-0 top-[0.18em] bottom-[0.18em] w-[5px] rounded-full bg-brand-gold;
   }
 }
 

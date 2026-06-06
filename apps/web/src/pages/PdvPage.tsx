@@ -60,13 +60,13 @@ const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 // Estilo (ícone/cor) dos métodos base; tipos customizados usam o padrão.
 const methodStyle: Record<string, { icon: LucideIcon; classes: string }> = {
-  CASH: { icon: Banknote, classes: 'from-emerald-500 to-emerald-600' },
+  CASH: { icon: Banknote, classes: 'from-emerald-500 to-teal-600' },
   PIX: { icon: Zap, classes: 'from-teal-500 to-cyan-600' },
   DEBIT: { icon: CreditCard, classes: 'from-sky-500 to-blue-600' },
-  CREDIT: { icon: Coins, classes: 'from-violet-500 to-brand-600' },
-  A_PRAZO: { icon: Layers, classes: 'from-amber-500 to-orange-600' },
+  CREDIT: { icon: Coins, classes: 'from-blue-600 to-indigo-700' },
+  A_PRAZO: { icon: Layers, classes: 'from-accent-400 to-accent-600' },
 };
-const defaultStyle = { icon: Coins, classes: 'from-slate-500 to-slate-600' };
+const defaultStyle = { icon: Coins, classes: 'from-brand-500 to-brand-700' };
 
 export function PdvPage() {
   const [cart, setCart] = useState<CartItem[]>([]);

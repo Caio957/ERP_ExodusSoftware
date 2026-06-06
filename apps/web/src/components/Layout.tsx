@@ -66,8 +66,8 @@ export function Layout() {
       <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-white/40 bg-white/70 px-4 py-3 backdrop-blur-xl">
         <div className="flex items-center gap-2.5">
           <span className="relative grid h-10 w-10 place-items-center">
-            <span className="absolute inset-0 rounded-xl bg-brand-gradient opacity-60 blur-md animate-glow-pulse" />
-            <span className="relative grid h-10 w-10 place-items-center rounded-xl bg-brand-gradient text-lg font-bold text-white shadow-brand">
+            <span className="absolute inset-0 rounded-xl bg-brand-gradient opacity-70 blur-md animate-glow-pulse" />
+            <span className="relative grid h-10 w-10 place-items-center rounded-xl bg-brand-gradient text-lg font-bold text-white shadow-brand ring-2 ring-accent-400/80">
               E
             </span>
           </span>
@@ -86,7 +86,7 @@ export function Layout() {
               {user?.role === 'ADMIN' ? 'Administrador' : 'Operador'}
             </div>
           </div>
-          <span className="grid h-10 w-10 place-items-center rounded-full bg-brand-gradient text-sm font-bold text-white shadow-brand ring-2 ring-white">
+          <span className="grid h-10 w-10 place-items-center rounded-full bg-brand-gradient text-sm font-bold text-white shadow-brand ring-2 ring-accent-300">
             {initials(user?.name)}
           </span>
           <button
