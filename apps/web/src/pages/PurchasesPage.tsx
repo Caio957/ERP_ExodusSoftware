@@ -604,8 +604,8 @@ function PurchaseDetail({ id, onClose, onChanged }: { id: string; onClose: () =>
   const hasPaid = data?.financialAccounts.some((a) => a.status !== 'PENDING') ?? false;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
-      <div className="max-h-[92vh] w-full max-w-lg animate-scale-in overflow-auto rounded-2xl bg-white p-5 shadow-elevated">
+    <div className="modal-overlay">
+      <div className="modal-sheet sm:max-w-lg">
         <div className="mb-3 flex items-center justify-between">
           <h3 className="font-display text-lg font-bold">
             Compra {data?.documentNumber ? `#${data.documentNumber}` : ''}
@@ -781,8 +781,8 @@ function ProductPickerModal({ onPick, onClose }: { onPick: (v: VariantHit) => vo
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
-      <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-elevated animate-scale-in">
+    <div className="modal-overlay">
+      <div className="flex max-h-[92dvh] w-full animate-slide-up flex-col overflow-hidden rounded-t-3xl bg-white shadow-elevated sm:max-h-[90vh] sm:max-w-3xl sm:animate-scale-in sm:rounded-2xl">
         {/* Cabeçalho */}
         <div className="flex items-center justify-between gap-3 border-b border-slate-100 p-4">
           <h3 className="font-display text-lg font-bold">Selecionar produto</h3>

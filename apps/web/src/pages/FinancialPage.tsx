@@ -543,8 +543,8 @@ function PersonPicker({
 
 function Modal({ title, onClose, wide, children }: { title: string; onClose: () => void; wide?: boolean; children: React.ReactNode }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
-      <div className={`w-full ${wide ? 'max-w-lg' : 'max-w-md'} animate-scale-in overflow-auto rounded-2xl bg-white p-6 shadow-elevated`}>
+    <div className="modal-overlay">
+      <div className={`modal-sheet ${wide ? 'sm:max-w-lg' : 'sm:max-w-md'}`}>
         <div className="mb-5 flex items-center justify-between">
           <h2 className="font-display text-lg font-bold">{title}</h2>
           <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>

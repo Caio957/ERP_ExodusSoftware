@@ -337,8 +337,8 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
-      <div className="max-h-[92vh] w-full max-w-2xl animate-scale-in overflow-auto rounded-2xl bg-white p-6 shadow-elevated">
+    <div className="modal-overlay">
+      <div className="modal-sheet sm:max-w-2xl">
         <div className="mb-5 flex items-center gap-3">
           <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-100 text-brand-600">
             <Package className="h-6 w-6" />
@@ -483,8 +483,8 @@ function EditProductModal({
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
-      <div className="max-h-[92vh] w-full max-w-2xl animate-scale-in overflow-auto rounded-2xl bg-white p-6 shadow-elevated">
+    <div className="modal-overlay">
+      <div className="modal-sheet sm:max-w-2xl">
         <div className="mb-5 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-100 text-brand-600">

@@ -264,8 +264,8 @@ function PersonForm({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
-      <div className="max-h-[92vh] w-full max-w-xl animate-scale-in overflow-auto rounded-2xl bg-white p-6 shadow-elevated">
+    <div className="modal-overlay">
+      <div className="modal-sheet sm:max-w-xl">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-display text-lg font-bold">
             {person ? `Editar ${label}` : `Novo ${label}`}

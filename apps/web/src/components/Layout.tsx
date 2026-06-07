@@ -61,9 +61,9 @@ export function Layout() {
   }
 
   return (
-    <div className="flex h-full min-h-screen flex-col">
+    <div className="flex min-h-screen flex-col">
       {/* Header */}
-      <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-white/40 bg-white/70 px-4 py-3 backdrop-blur-xl">
+      <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-3 border-b border-white/40 bg-white/70 px-3 backdrop-blur-xl sm:px-4">
         <div className="flex items-center gap-2.5">
           <span className="relative grid h-10 w-10 place-items-center">
             <span className="absolute inset-0 rounded-xl bg-brand-gradient opacity-70 blur-md animate-glow-pulse" />
@@ -99,9 +99,9 @@ export function Layout() {
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar (tablet/desktop) */}
-        <nav className="hidden w-[88px] flex-col gap-2 border-r border-white/40 bg-white/50 p-3 backdrop-blur-md md:flex md:w-28">
+      <div className="flex flex-1">
+        {/* Sidebar (tablet/desktop) — sticky, com scroll próprio se necessário */}
+        <nav className="sticky top-16 hidden h-[calc(100vh-4rem)] w-[88px] shrink-0 flex-col gap-2 self-start overflow-y-auto border-r border-white/40 bg-white/50 p-3 backdrop-blur-md md:flex md:w-28">
           {items.map((item) => (
             <NavLink key={item.to} to={item.to} className={({ isActive }) => navItemClass(isActive)}>
               {({ isActive }) => (
@@ -120,9 +120,9 @@ export function Layout() {
           ))}
         </nav>
 
-        {/* Conteúdo */}
-        <main className="flex-1 overflow-auto p-4 pb-24 sm:p-6 md:pb-6">
-          <div className="mx-auto h-full max-w-6xl animate-fade-in">
+        {/* Conteúdo — scroll natural do documento (robusto no mobile) */}
+        <main className="min-w-0 flex-1 p-4 pb-28 sm:p-6 md:pb-8">
+          <div className="mx-auto max-w-6xl animate-fade-in">
             <Outlet />
           </div>
         </main>

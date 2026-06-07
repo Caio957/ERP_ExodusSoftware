@@ -532,8 +532,8 @@ function CloseModal({
 // ---------------------------------------------------------------------------
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-sm animate-scale-in rounded-2xl bg-white p-5 shadow-elevated">
+    <div className="modal-overlay">
+      <div className="modal-sheet sm:max-w-sm">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="font-display text-lg font-bold">{title}</h3>
           <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>

@@ -249,8 +249,8 @@ function ViewSaleModal({
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
-      <div className="max-h-[92vh] w-full max-w-lg animate-scale-in overflow-auto rounded-2xl bg-white p-6 shadow-elevated">
+    <div className="modal-overlay">
+      <div className="modal-sheet sm:max-w-lg">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-display text-lg font-bold">Venda {sale ? `#${sale.code}` : ''}</h2>
           <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
@@ -399,8 +399,8 @@ function PrintSaleModal({ saleId, onClose }: { saleId: string; onClose: () => vo
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm print:bg-white print:p-0">
-      <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-elevated print:max-h-none print:shadow-none">
+    <div className="modal-overlay print:bg-white print:p-0">
+      <div className="flex max-h-[92dvh] w-full animate-slide-up flex-col overflow-hidden rounded-t-3xl bg-white shadow-elevated sm:max-h-[90vh] sm:max-w-3xl sm:animate-scale-in sm:rounded-2xl print:max-h-none print:shadow-none">
         <div className="flex items-center justify-between border-b border-slate-100 p-4 print:hidden">
           <h2 className="font-display text-lg font-bold">Imprimir comprovante</h2>
           <div className="flex items-center gap-2">
@@ -575,8 +575,8 @@ function EditSaleModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
-      <div className="max-h-[92vh] w-full max-w-2xl animate-scale-in overflow-auto rounded-2xl bg-white p-6 shadow-elevated">
+    <div className="modal-overlay">
+      <div className="modal-sheet sm:max-w-2xl">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-display text-lg font-bold">Editar venda</h2>
           <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>

@@ -246,7 +246,7 @@ export function PdvPage() {
   );
 
   return (
-    <div className="grid h-full grid-cols-1 gap-5 lg:grid-cols-[1fr_400px]">
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_400px] lg:items-start">
       {/* Alerta de caixa do dia anterior */}
       {isStaleRegister && (
         <div className="col-span-full animate-scale-in rounded-2xl border-2 border-amber-300 bg-amber-50 px-5 py-4">
@@ -324,8 +324,8 @@ export function PdvPage() {
         </div>
       </section>
 
-      {/* Carrinho */}
-      <aside className="flex flex-col overflow-hidden rounded-2xl border border-white/60 bg-white shadow-elevated lg:max-h-[calc(100vh-7rem)]">
+      {/* Carrinho — no mobile flui naturalmente; no desktop fica fixo (sticky) */}
+      <aside className="flex flex-col rounded-2xl border border-white/60 bg-white shadow-elevated lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:overflow-hidden">
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
           <div className="flex items-center gap-2 text-lg font-bold">
             <ShoppingCart className="h-5 w-5 text-brand-600" />
@@ -339,7 +339,7 @@ export function PdvPage() {
           <ClientPicker client={client} onChange={setClient} onToast={flash} />
         </div>
 
-        <div className="flex-1 overflow-auto p-3">
+        <div className="p-3 lg:flex-1 lg:overflow-auto">
           {cart.length === 0 ? (
             <div className="grid h-full place-items-center py-12 text-center">
               <div>
@@ -542,7 +542,7 @@ export function PdvPage() {
 
       {/* Toast */}
       {toast && (
-        <div className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-elevated animate-slide-up">
+        <div className="fixed bottom-24 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-elevated animate-slide-up md:bottom-6">
           <CheckCircle2 className="h-4 w-4 text-emerald-400" />
           {toast}
         </div>
@@ -550,8 +550,8 @@ export function PdvPage() {
 
       {/* Modal de recibo pós-venda */}
       {lastSale && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
-          <div className="max-h-[90vh] w-full max-w-sm animate-scale-in overflow-auto rounded-2xl bg-white p-5 shadow-elevated">
+        <div className="modal-overlay">
+          <div className="modal-sheet sm:max-w-sm">
             <div className="mb-3 flex flex-col items-center text-center">
               <div className="mb-2 grid h-14 w-14 place-items-center rounded-full bg-emerald-100 text-emerald-600">
                 <CheckCircle2 className="h-8 w-8" />
@@ -644,8 +644,8 @@ function PaymentModal({
   const canConfirm = balanced && aPrazoOk && lines.every((l) => l.amount > 0);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
-      <div className="max-h-[92vh] w-full max-w-md animate-scale-in overflow-auto rounded-2xl bg-white p-5 shadow-elevated">
+    <div className="modal-overlay">
+      <div className="modal-sheet sm:max-w-md">
         <div className="mb-3 flex items-center justify-between">
           <h3 className="font-display text-lg font-bold">Pagamento</h3>
           <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
