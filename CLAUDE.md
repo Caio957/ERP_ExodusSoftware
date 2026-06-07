@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-06-06
+- **Última atualização:** 2026-06-07
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -316,11 +316,11 @@ Outras decisões:
 da venda, **relaxado para string** (tipos de recebimento configuráveis). Detalhe
 completo: `apps/api/prisma/schema.prisma`.
 
-**Migrações (9, todas aditivas/seguras):** `0_init`, `add_lot_validity_control`,
+**Migrações (10, todas aditivas/seguras):** `0_init`, `add_lot_validity_control`,
 `add_settings`, `sale_discount_surcharge_notes`, `financial_account_sale_link`,
 `sale_payments`, `invoice_document_notes`, `financial_settlements_code`,
-`sale_code_financial_flag`. Aplicadas automaticamente no Railway a cada deploy
-(`prisma migrate deploy`).
+`sale_code_financial_flag`, `product_person_code`. Aplicadas automaticamente no
+Railway a cada deploy (`prisma migrate deploy`).
 
 ---
 
@@ -418,6 +418,40 @@ completo: `apps/api/prisma/schema.prisma`.
   - **Migração aditiva** `sale_code_financial_flag` (`Sale.code SERIAL @unique`,
     `Sale.financialGenerated BOOLEAN DEFAULT true`).
   - `npm run typecheck` + `npm run build` → **0 erros**.
+- ✅ **Onda 2026-06-07a — Múltiplas melhorias** (2026-06-07):
+  - **PDV**: fix timezone parcelas (data 1 dia a menos corrigida, +T00:00:00); aviso de
+    parcela em fim de semana; alerta de caixa do dia anterior com botão "Ir ao Caixa";
+    modal de confirmação antes de finalizar venda à vista.
+  - **Compras**: novo modal picker de produto (grid com filtros marca/grupo, carrega
+    todos desde o início); botão "Visualizar" na lista de compras lançadas; coluna de
+    status financeiro; excluir/gerar/refazer contas a pagar da compra.
+  - **Dashboard**: fix divergência "Recebimentos por forma" (fallback para vendas
+    legadas sem SalePayment); labels de data (DD/MM) abaixo das barras do gráfico.
+  - **Caixa**: label "Resumo do **último** fechamento" com nota explicativa.
+  - **Produto**: fix "Dados inválidos" (brand/group vazio enviado como `""` em vez de
+    `undefined`); exibir código `#N` no card de produto.
+  - **Cadastros (Pessoas)**: exibir código `#N` em cada cliente/fornecedor.
+  - **Financeiro**: card adicional de Total Vencido ao lado do Saldo em Aberto.
+  - **SalesPage**: fix timezone no `genInstallments` da edição de venda.
+  - **Schema + migração** `20260607000000`: `Product.code SERIAL @unique` e
+    `Person.code SERIAL @unique` — ambos read-only, gerados automaticamente.
+  - Backend Invoice: `DELETE /api/invoices/:id/financial` e
+    `POST /api/invoices/:id/financial` (excluir/refazer contas a pagar da compra);
+    listagem inclui `hasFinancial` e `totalFinancial`.
+  - `npm run typecheck` + `npm run build` → **0 erros**. Commit `6619330`.
+- ✅ **Onda 2026-06-07b — Responsividade mobile** (2026-06-07):
+  - **Causa raiz corrigida**: Layout usava `overflow-hidden/auto` aninhados com altura
+    fixa — falha no iOS. Trocado para **scroll natural do documento** (padrão robusto).
+  - **PDV mobile**: carrinho flui abaixo dos produtos (mostrava em branco antes);
+    quantidade, preço, desconto, acréscimo e botões de pagamento agora visíveis;
+    toast de confirmação acima do bottom nav.
+  - **Bottom nav**: `pb-28` garante que nenhuma tela seja coberta pela barra inferior.
+  - **Modais bottom-sheet**: todos os modais (Produto, Pessoa, Vendas, Financeiro,
+    Compras, Caixa, Estoque) viram **bottom-sheet no celular** (sobem de baixo, largura
+    total, `max-h: 92dvh`) e card centralizado no desktop — via utilitários
+    `.modal-overlay` / `.modal-sheet` no `index.css`.
+  - Sidebar do desktop agora é `sticky` (rola com a página ao lado do conteúdo).
+  - `npm run typecheck` + `npm run build` → **0 erros**. Commit `a57d952`.
 - ✅ **Onda 2026-06-06 — Redesign visual premium (AZUL + DOURADO)** (2026-06-06):
   reformulação visual completa do PWA, sem novas dependências (CSS/Tailwind avançado).
   **Identidade Exodus corrigida: paleta AZUL (brand) + DOURADO (accent/gold)** — substitui
