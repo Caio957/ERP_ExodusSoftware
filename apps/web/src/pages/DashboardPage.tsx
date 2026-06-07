@@ -137,19 +137,28 @@ export function DashboardPage() {
               {data.dailySales.length === 0 ? (
                 <p className="py-8 text-center text-sm text-slate-400">Sem vendas no período.</p>
               ) : (
-                <div className="flex h-40 items-end gap-1">
-                  {data.dailySales.map((d) => (
-                    <div
-                      key={d.date}
-                      className="group flex h-full flex-1 flex-col items-center justify-end"
-                      title={`${new Date(`${d.date}T00:00:00`).toLocaleDateString('pt-BR')}: ${brl(d.total)}`}
-                    >
+                <div className="flex h-48 items-end gap-1">
+                  {data.dailySales.map((d) => {
+                    const dt = new Date(`${d.date}T00:00:00`);
+                    const label = dt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+                    const pct = Math.max(4, (d.total / maxDaily) * 100);
+                    return (
                       <div
-                        className="w-full rounded-t bg-gradient-to-t from-brand-600 via-brand-500 to-accent-400 shadow-sm transition-all group-hover:opacity-80"
-                        style={{ height: `${Math.max(4, (d.total / maxDaily) * 100)}%` }}
-                      />
-                    </div>
-                  ))}
+                        key={d.date}
+                        className="group flex h-full flex-1 flex-col items-center justify-end gap-0.5"
+                        title={`${dt.toLocaleDateString('pt-BR')}: ${brl(d.total)}`}
+                      >
+                        <span className="hidden text-[9px] font-bold text-brand-700 opacity-0 transition-opacity group-hover:opacity-100 sm:block">
+                          {brl(d.total)}
+                        </span>
+                        <div
+                          className="w-full rounded-t bg-gradient-to-t from-brand-600 via-brand-500 to-accent-400 shadow-sm transition-all group-hover:opacity-90 group-hover:shadow-md"
+                          style={{ height: `${pct}%` }}
+                        />
+                        <span className="text-[9px] font-medium text-slate-400">{label}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

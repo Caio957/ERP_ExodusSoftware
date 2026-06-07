@@ -38,6 +38,7 @@ model User {
 // 2. PRODUTOS E VARIAÇÕES ----------------------------------------------------
 model Product {
   id        String   @id @default(uuid())
+  code      Int      @unique @default(autoincrement()) // código sequencial de produto (somente leitura)
   name      String
   brand     String
   group     String
@@ -78,6 +79,7 @@ model ProductVariant {
 // 3. PESSOAS -----------------------------------------------------------------
 model Person {
   id       String  @id @default(uuid())
+  code     Int     @unique @default(autoincrement()) // código sequencial único (clientes e fornecedores)
   type     String // 'CLIENT' | 'SUPPLIER'
   name     String
   document String? @unique // CPF/CNPJ - opcional p/ balcão

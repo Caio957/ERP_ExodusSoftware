@@ -6,6 +6,7 @@ import { api, ApiError } from '../lib/api';
 
 interface Person {
   id: string;
+  code: number;
   type: string;
   name: string;
   document: string | null;
@@ -89,7 +90,10 @@ function PeopleManager({ type }: { type: PersonType }) {
           {data?.items.map((p) => (
             <div key={p.id} className="card-hover flex flex-col">
               <div className="mb-1 flex items-start justify-between gap-2">
-                <span className="font-display text-base font-bold">{p.name}</span>
+                <div>
+                  <span className="mr-2 text-xs font-semibold text-brand-400">#{p.code}</span>
+                  <span className="font-display text-base font-bold">{p.name}</span>
+                </div>
                 <div className="flex shrink-0 gap-1">
                   <button
                     className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition hover:bg-brand-50 hover:text-brand-600"
@@ -174,6 +178,7 @@ function PersonForm({
     state: person?.state ?? '',
   });
   const label = type === 'CLIENT' ? 'cliente' : 'fornecedor';
+  const [lookingUp, setLookingUp] = useState(false);
 
   const save = useMutation({
     mutationFn: () => {
@@ -199,6 +204,65 @@ function PersonForm({
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
+  const handleCnpjLookup = async () => {
+    const cleanDoc = form.document.replace(/\D/g, '');
+    if (cleanDoc.length !== 14) {
+      window.alert('Digite um CNPJ válido com 14 dígitos para buscar.');
+      return;
+    }
+    
+    setLookingUp(true);
+    try {
+      const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cleanDoc}`);
+      if (!res.ok) throw new Error('CNPJ não encontrado na BrasilAPI.');
+      const data = await res.json();
+      
+      setForm(f => ({
+        ...f,
+        name: f.name || data.razao_social || '',
+        email: f.email || data.email || '',
+        phone: f.phone || data.ddd_telefone_1 || '',
+        zipCode: data.cep || f.zipCode,
+        street: data.logradouro || f.street,
+        number: data.numero || f.number,
+        district: data.bairro || f.district,
+        city: data.municipio || f.city,
+        state: data.uf || f.state,
+      }));
+    } catch (err: any) {
+      window.alert(err.message || 'Erro ao buscar CNPJ.');
+    } finally {
+      setLookingUp(false);
+    }
+  };
+
+  const handleCepLookup = async () => {
+    const cleanCep = form.zipCode.replace(/\D/g, '');
+    if (cleanCep.length !== 8) {
+      window.alert('Digite um CEP válido com 8 dígitos para buscar.');
+      return;
+    }
+    
+    setLookingUp(true);
+    try {
+      const res = await fetch(`https://brasilapi.com.br/api/cep/v1/${cleanCep}`);
+      if (!res.ok) throw new Error('CEP não encontrado.');
+      const data = await res.json();
+      
+      setForm(f => ({
+        ...f,
+        street: data.street || f.street,
+        district: data.neighborhood || f.district,
+        city: data.city || f.city,
+        state: data.state || f.state,
+      }));
+    } catch (err: any) {
+      window.alert(err.message || 'Erro ao buscar CEP.');
+    } finally {
+      setLookingUp(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
       <div className="max-h-[92vh] w-full max-w-xl animate-scale-in overflow-auto rounded-2xl bg-white p-6 shadow-elevated">
@@ -213,10 +277,24 @@ function PersonForm({
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="Nome" required className="col-span-2" value={form.name} onChange={set('name')} />
-          <Field label="CPF / CNPJ" value={form.document} onChange={set('document')} />
+          <Field 
+            label="CPF / CNPJ" 
+            value={form.document} 
+            onChange={set('document')} 
+            actionIcon={<Search className="h-4 w-4" />}
+            onAction={handleCnpjLookup}
+            actionLoading={lookingUp}
+          />
           <Field label="Telefone" value={form.phone} onChange={set('phone')} />
           <Field label="E-mail" className="col-span-2" value={form.email} onChange={set('email')} />
-          <Field label="CEP" value={form.zipCode} onChange={set('zipCode')} />
+          <Field 
+            label="CEP" 
+            value={form.zipCode} 
+            onChange={set('zipCode')} 
+            actionIcon={<Search className="h-4 w-4" />}
+            onAction={handleCepLookup}
+            actionLoading={lookingUp}
+          />
           <Field label="Cidade" value={form.city} onChange={set('city')} />
           <Field label="Rua" className="col-span-2" value={form.street} onChange={set('street')} />
           <Field label="Número" value={form.number} onChange={set('number')} />
@@ -245,15 +323,37 @@ function Field({
   label,
   required,
   className = '',
+  actionIcon,
+  onAction,
+  actionLoading,
   ...props
-}: { label: string; required?: boolean } & React.InputHTMLAttributes<HTMLInputElement>) {
+}: { 
+  label: string; 
+  required?: boolean;
+  actionIcon?: React.ReactNode;
+  onAction?: () => void;
+  actionLoading?: boolean;
+} & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <label className={`block ${className}`}>
       <span className="label">
         {label}
         {required && <span className="text-rose-500"> *</span>}
       </span>
-      <input className="input" {...props} />
+      <div className="relative">
+        <input className={`input w-full ${actionIcon ? 'pr-10' : ''}`} {...props} />
+        {actionIcon && (
+          <button 
+            type="button" 
+            onClick={onAction} 
+            disabled={actionLoading}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-brand-600 disabled:opacity-50"
+            title="Buscar na BrasilAPI"
+          >
+            {actionLoading ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600" /> : actionIcon}
+          </button>
+        )}
+      </div>
     </label>
   );
 }

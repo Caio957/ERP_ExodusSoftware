@@ -88,6 +88,10 @@ export function FinancialPage() {
 
   const totalOpen =
     data?.items.filter((a) => a.status !== 'PAID').reduce((acc, a) => acc + (a.amount - a.paidAmount), 0) ?? 0;
+  const totalOverdue =
+    data?.items
+      .filter((a) => a.status !== 'PAID' && new Date(a.dueDate) < today0())
+      .reduce((acc, a) => acc + (a.amount - a.paidAmount), 0) ?? 0;
 
   return (
     <div className="space-y-5">
@@ -113,11 +117,19 @@ export function FinancialPage() {
             <Filter className="h-5 w-5" /> Filtros
           </button>
         </div>
-        <div className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-right shadow-soft">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Saldo em aberto</div>
-          <div className={`text-xl font-bold ${type === 'PAYABLE' ? 'text-rose-600' : 'text-emerald-600'}`}>
-            {brl(totalOpen)}
+        <div className="flex gap-2">
+          <div className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-right shadow-soft">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Saldo em aberto</div>
+            <div className={`text-xl font-bold ${type === 'PAYABLE' ? 'text-rose-600' : 'text-emerald-600'}`}>
+              {brl(totalOpen)}
+            </div>
           </div>
+          {totalOverdue > 0 && (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-right shadow-soft">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-rose-500">Vencido</div>
+              <div className="text-xl font-bold text-rose-700">{brl(totalOverdue)}</div>
+            </div>
+          )}
         </div>
       </div>
 

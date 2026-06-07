@@ -34,9 +34,16 @@ export async function dashboardRoutes(app: FastifyInstance) {
       const salesCount = sales.length;
 
       // Recebimentos por forma de pagamento.
+      // Vendas sem SalePayment (legado pré-split) usam paymentMethod + totalAmount como fallback.
       const methodMap = new Map<string, number>();
-      for (const s of sales)
-        for (const p of s.payments) methodMap.set(p.method, (methodMap.get(p.method) ?? 0) + Number(p.amount));
+      for (const s of sales) {
+        if (s.payments.length > 0) {
+          for (const p of s.payments)
+            methodMap.set(p.method, (methodMap.get(p.method) ?? 0) + Number(p.amount));
+        } else {
+          methodMap.set(s.paymentMethod, (methodMap.get(s.paymentMethod) ?? 0) + Number(s.totalAmount));
+        }
+      }
       const byMethod = [...methodMap.entries()]
         .map(([method, total]) => ({ method, total: round2(total) }))
         .sort((a, b) => b.total - a.total);

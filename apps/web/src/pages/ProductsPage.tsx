@@ -27,6 +27,7 @@ interface Variant {
 }
 interface Product {
   id: string;
+  code: number;
   name: string;
   brand: string;
   group: string;
@@ -130,8 +131,9 @@ export function ProductsPage() {
             <div key={p.id} className="card-hover flex flex-col">
               <div className="mb-2 flex items-start justify-between gap-2">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="badge-brand">{p.brand}</span>
-                  <span className="badge-neutral">{p.group}</span>
+                  <span className="badge-neutral text-slate-400">#{p.code}</span>
+                  {p.brand && <span className="badge-brand">{p.brand}</span>}
+                  {p.group && <span className="badge-neutral">{p.group}</span>}
                   {p.tracksLotValidity && (
                     <span className="badge-warning" title="Controla lote e validade">
                       <ShieldCheck className="h-3.5 w-3.5" /> Lote
@@ -285,9 +287,10 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
     mutationFn: () =>
       api.post('/api/products', {
         name: form.name,
-        brand: form.brand,
-        group: form.group,
-        subgroup: form.subgroup || undefined,
+        // brand/group opcionais: enviar undefined quando vazio para não falhar no Zod (min(1))
+        brand: form.brand.trim() || undefined,
+        group: form.group.trim() || undefined,
+        subgroup: form.subgroup.trim() || undefined,
         tracksLotValidity,
         variants: [
           {

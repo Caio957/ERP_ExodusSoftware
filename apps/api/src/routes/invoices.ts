@@ -344,18 +344,91 @@ export async function invoiceRoutes(app: FastifyInstance) {
     },
   );
 
-  // Listagem de notas
+  // Remove os títulos a pagar pendentes de uma compra (excluir financeiro). Só ADMIN.
+  r.delete(
+    '/:id/financial',
+    { preHandler: app.authorize(['ADMIN']), schema: { params: idParam } },
+    async (req, reply) => {
+      const invoice = await prisma.invoice.findUnique({
+        where: { id: req.params.id },
+        include: { financialAccounts: { include: { settlements: true } } },
+      });
+      if (!invoice) throw new NotFoundError('Compra');
+      const hasSettled = invoice.financialAccounts.some(
+        (a) => a.settlements.length > 0 || a.status !== 'PENDING',
+      );
+      if (hasSettled) {
+        throw new BusinessError(
+          'Há contas a pagar desta compra com baixa registrada. Estorne as baixas antes.',
+        );
+      }
+      await prisma.financialAccount.deleteMany({ where: { invoiceId: req.params.id } });
+      return reply.status(204).send();
+    },
+  );
+
+  // Recria os títulos a pagar de uma compra (refazer financeiro). Só ADMIN.
+  // Bloqueado se já houver contas a pagar não excluídas (excluir primeiro).
+  r.post(
+    '/:id/financial',
+    {
+      preHandler: app.authorize(['ADMIN']),
+      schema: {
+        params: idParam,
+        body: z.object({
+          installments: z.array(
+            z.object({ dueDate: z.coerce.date(), amount: z.number().positive() }),
+          ).min(1, 'Informe ao menos uma parcela'),
+        }),
+      },
+    },
+    async (req, reply) => {
+      const invoice = await prisma.invoice.findUnique({
+        where: { id: req.params.id },
+        include: { financialAccounts: true },
+      });
+      if (!invoice) throw new NotFoundError('Compra');
+      if (invoice.financialAccounts.length > 0) {
+        throw new BusinessError('Exclua o financeiro atual antes de refazê-lo.');
+      }
+      const { installments } = req.body;
+      await prisma.financialAccount.createMany({
+        data: installments.map((inst, i) => ({
+          type: 'PAYABLE',
+          description: `Compra #${invoice.documentNumber ?? invoice.id.slice(-6)} - parcela ${i + 1}/${installments.length}`,
+          amount: inst.amount,
+          dueDate: inst.dueDate,
+          status: 'PENDING',
+          invoiceId: invoice.id,
+          personId: invoice.supplierId,
+        })),
+      });
+      return reply.status(201).send({ created: installments.length });
+    },
+  );
+
+  // Listagem de notas (inclui financialAccounts resumido para exibir status)
   r.get('/', { preHandler: app.authenticate, schema: { querystring: paginationQuery } }, async (req) => {
     const { page, pageSize } = req.query;
     const [total, items] = await Promise.all([
       prisma.invoice.count(),
       prisma.invoice.findMany({
-        include: { supplier: true, items: true },
+        include: {
+          supplier: true,
+          items: true,
+          financialAccounts: { select: { id: true, status: true, amount: true } },
+        },
         orderBy: { issueDate: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
     ]);
-    return { total, page, pageSize, items: serializeDecimals(items) };
+    // Adiciona hasFinancial e totalFinancial para a tela de consulta.
+    const withMeta = items.map((inv) => ({
+      ...serializeDecimals(inv),
+      hasFinancial: inv.financialAccounts.length > 0,
+      totalFinancial: inv.financialAccounts.reduce((a, f) => a + Number(f.amount), 0),
+    }));
+    return { total, page, pageSize, items: withMeta };
   });
 }

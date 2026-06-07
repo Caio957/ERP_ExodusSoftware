@@ -38,6 +38,7 @@ interface CartItem {
 interface CashRegister {
   id: string;
   initialCash: number;
+  openedAt: string;
 }
 
 interface ProductSearchResult {
@@ -76,6 +77,7 @@ export function PdvPage() {
   const [notes, setNotes] = useState('');
   const [client, setClient] = useState<{ id: string; name: string } | null>(null);
   const [showPayment, setShowPayment] = useState(false);
+  const [confirmMethod, setConfirmMethod] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [lastSale, setLastSale] = useState<{
     items: ReceiptItem[];
@@ -234,12 +236,37 @@ export function PdvPage() {
     );
   }
 
+  // Detecta caixa aberto de outro dia (exige fechamento antes de continuar).
+  const today = new Date().toDateString();
+  const registerDay = register ? new Date(register.openedAt).toDateString() : null;
+  const isStaleRegister = registerDay !== null && registerDay !== today;
+
   const allVariants = results?.items.flatMap((p) =>
     p.variants.map((v) => ({ product: p, variant: v })),
   );
 
   return (
     <div className="grid h-full grid-cols-1 gap-5 lg:grid-cols-[1fr_400px]">
+      {/* Alerta de caixa do dia anterior */}
+      {isStaleRegister && (
+        <div className="col-span-full animate-scale-in rounded-2xl border-2 border-amber-300 bg-amber-50 px-5 py-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="font-bold text-amber-800">⚠️ Caixa do dia anterior ainda aberto</div>
+              <p className="mt-0.5 text-sm text-amber-700">
+                O caixa foi aberto em{' '}
+                <strong>{new Date(register!.openedAt).toLocaleDateString('pt-BR')}</strong> e ainda não foi
+                fechado. Para manter o controle financeiro organizado, feche o caixa antes de iniciar as
+                vendas de hoje.
+              </p>
+            </div>
+            <a href="/caixa" className="btn-gold shrink-0 text-sm">
+              Ir para o Caixa →
+            </a>
+          </div>
+        </div>
+      )}
+
       {/* Busca + resultados */}
       <section className="flex flex-col gap-4">
         <div>
@@ -426,7 +453,7 @@ export function PdvPage() {
                 <button
                   key={opt.code}
                   disabled={cart.length === 0}
-                  onClick={() => void finalize(opt.code)}
+                  onClick={() => setConfirmMethod(opt.code)}
                   className={`flex min-h-touch items-center justify-center gap-2 rounded-xl bg-gradient-to-br ${st.classes} px-3 py-3 font-semibold text-white shadow-soft transition active:scale-[0.97] disabled:pointer-events-none disabled:opacity-40`}
                 >
                   <st.icon className="h-5 w-5" />
@@ -444,6 +471,64 @@ export function PdvPage() {
           </button>
         </div>
       </aside>
+
+      {/* Modal de confirmação rápida (pagamento à vista) */}
+      {confirmMethod && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-4 backdrop-blur-sm sm:items-center">
+          <div className="w-full max-w-sm animate-slide-up rounded-2xl bg-white p-6 shadow-elevated sm:animate-scale-in">
+            <h3 className="mb-1 font-display text-lg font-bold">Confirmar venda?</h3>
+            <p className="mb-4 text-sm text-slate-500">
+              Revise os dados antes de finalizar.
+            </p>
+            <div className="mb-4 space-y-1 rounded-xl bg-slate-50 px-4 py-3 text-sm">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Itens</span>
+                <span className="font-medium">{cart.reduce((a, it) => a + it.quantity, 0)}</span>
+              </div>
+              {client && (
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Cliente</span>
+                  <span className="font-medium">{client.name}</span>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <span className="text-slate-500">Pagamento</span>
+                <span className="font-medium">{paymentTypes.find((t) => t.code === confirmMethod)?.label ?? confirmMethod}</span>
+              </div>
+              {discount > 0 && (
+                <div className="flex justify-between text-rose-600">
+                  <span>Desconto</span>
+                  <span>- {brl(discount)}</span>
+                </div>
+              )}
+              {surcharge > 0 && (
+                <div className="flex justify-between text-emerald-600">
+                  <span>Acréscimo</span>
+                  <span>+ {brl(surcharge)}</span>
+                </div>
+              )}
+              <div className="flex justify-between border-t border-slate-200 pt-1 text-base font-bold">
+                <span>Total</span>
+                <span>{brl(total)}</span>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button className="btn-ghost flex-1" onClick={() => setConfirmMethod(null)}>
+                Voltar e revisar
+              </button>
+              <button
+                className="btn-primary flex-1"
+                onClick={() => {
+                  setConfirmMethod(null);
+                  void finalize(confirmMethod);
+                }}
+              >
+                Confirmar venda
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showPayment && (
         <PaymentModal
@@ -521,7 +606,17 @@ function PaymentModal({
     lines.filter((l) => l.method === 'A_PRAZO').reduce((a, l) => a + (l.amount || 0), 0),
   );
 
+  // Valida se o 1º vencimento é uma data real antes de usá-la.
+  const firstDueDate = firstDue.trim() ? new Date(firstDue + 'T00:00:00') : null;
+  const firstDueValid = !!firstDueDate && !isNaN(firstDueDate.getTime());
+
+  // Formata YYYY-MM-DD usando data LOCAL (evita shift de fuso horário UTC-3).
+  function localDateStr(d: Date) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
   function genInstallments() {
+    if (!firstDueValid || !firstDueDate) return [];
     const n = Math.max(1, Math.floor(parcels));
     const base = Math.floor((aPrazoTotal / n) * 100) / 100;
     const parts: { dueDate: string; amount: number }[] = [];
@@ -529,16 +624,23 @@ function PaymentModal({
     for (let i = 0; i < n; i++) {
       const amount = i === n - 1 ? round2(aPrazoTotal - acc) : base;
       acc = round2(acc + amount);
-      const d = new Date(firstDue);
+      // Cria data em horário LOCAL para evitar deslocamento de 1 dia (UTC-3).
+      const d = new Date(firstDueDate);
       d.setDate(d.getDate() + i * intervalDays);
-      parts.push({ dueDate: d.toISOString().slice(0, 10), amount });
+      parts.push({ dueDate: localDateStr(d), amount });
     }
     return parts;
   }
 
-  const installments = aPrazoTotal > 0 ? genInstallments() : undefined;
+  function isWeekend(dateStr: string) {
+    const day = new Date(dateStr + 'T00:00:00').getDay();
+    return day === 0 || day === 6;
+  }
+
+  const installments = aPrazoTotal > 0 && firstDueValid ? genInstallments() : undefined;
+  const weekendParcelas = installments?.filter((p) => isWeekend(p.dueDate)) ?? [];
   const balanced = Math.abs(remaining) < 0.01;
-  const aPrazoOk = aPrazoTotal <= 0 || (hasClient && parcels >= 1);
+  const aPrazoOk = aPrazoTotal <= 0 || (hasClient && parcels >= 1 && firstDueValid);
   const canConfirm = balanced && aPrazoOk && lines.every((l) => l.amount > 0);
 
   return (
@@ -636,13 +738,16 @@ function PaymentModal({
                 />
               </label>
               <label>
-                <span className="mb-1 block text-xs text-slate-500">1º vencimento</span>
+                <span className="mb-1 block text-xs text-slate-500">1º vencimento *</span>
                 <input
                   type="date"
                   value={firstDue}
                   onChange={(e) => setFirstDue(e.target.value)}
-                  className="input h-9"
+                  className={`input h-9 ${!firstDueValid ? 'border-rose-400 focus:border-rose-500 focus:ring-rose-400/20' : ''}`}
                 />
+                {!firstDueValid && (
+                  <span className="mt-0.5 block text-xs font-medium text-rose-600">Informe a data</span>
+                )}
               </label>
               <label>
                 <span className="mb-1 block text-xs text-slate-500">Intervalo (dias)</span>
@@ -656,16 +761,28 @@ function PaymentModal({
               </label>
             </div>
             {installments && (
-              <ul className="mt-2 space-y-0.5 text-xs text-slate-600">
-                {installments.map((p, i) => (
-                  <li key={i} className="flex justify-between">
-                    <span>
-                      {i + 1}ª · {new Date(p.dueDate).toLocaleDateString('pt-BR')}
-                    </span>
-                    <span className="font-medium">{brl(p.amount)}</span>
-                  </li>
-                ))}
-              </ul>
+              <>
+                <ul className="mt-2 space-y-0.5 text-xs text-slate-600">
+                  {installments.map((p, i) => {
+                    const wknd = isWeekend(p.dueDate);
+                    return (
+                      <li key={i} className={`flex justify-between rounded px-1 ${wknd ? 'bg-amber-50 text-amber-700' : ''}`}>
+                        <span>
+                          {i + 1}ª · {new Date(p.dueDate + 'T00:00:00').toLocaleDateString('pt-BR')}
+                          {wknd && ' ⚠️ fim de semana'}
+                        </span>
+                        <span className="font-medium">{brl(p.amount)}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {weekendParcelas.length > 0 && (
+                  <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    <strong>⚠️ {weekendParcelas.length} parcela(s) caem no fim de semana.</strong>
+                    <br />Você pode prosseguir assim mesmo ou alterar a data do 1º vencimento.
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}

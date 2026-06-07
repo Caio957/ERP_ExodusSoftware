@@ -10,7 +10,8 @@ import {
   Search,
   ListChecks,
   X,
-  Pencil,
+  Eye,
+  Filter,
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { XmlImport } from '../components/XmlImport';
@@ -447,13 +448,14 @@ interface InvoiceListItem {
   notes: string | null;
   issueDate: string;
   totalAmount: number;
+  hasFinancial: boolean;
   supplier: { name: string };
   items: Array<{ id: string }>;
 }
 
 function PurchasesList() {
   const qc = useQueryClient();
-  const [detailId, setDetailId] = useState<string | null>(null);
+  const [viewId, setViewId] = useState<string | null>(null);
   const { data, isLoading } = useQuery({
     queryKey: ['invoices'],
     queryFn: () => api.get<{ items: InvoiceListItem[] }>('/api/invoices?pageSize=100'),
@@ -480,6 +482,7 @@ function PurchasesList() {
             <th>Data</th>
             <th className="text-center">Itens</th>
             <th className="text-right">Total</th>
+            <th>Financeiro</th>
             <th className="text-right">Ações</th>
           </tr>
         </thead>
@@ -495,13 +498,24 @@ function PurchasesList() {
               <td className="text-center">{inv.items.length}</td>
               <td className="text-right font-semibold">{brl(inv.totalAmount)}</td>
               <td>
+                {inv.hasFinancial ? (
+                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+                    Com financeiro
+                  </span>
+                ) : (
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
+                    Sem financeiro
+                  </span>
+                )}
+              </td>
+              <td>
                 <div className="flex items-center justify-end gap-1">
                   <button
                     className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-brand-50 hover:text-brand-600"
-                    onClick={() => setDetailId(inv.id)}
-                    title="Detalhes / editar"
+                    onClick={() => setViewId(inv.id)}
+                    title="Visualizar / editar"
                   >
-                    <Pencil className="h-4 w-4" />
+                    <Eye className="h-4 w-4" />
                   </button>
                   <button
                     className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600"
@@ -518,7 +532,7 @@ function PurchasesList() {
           ))}
           {data?.items.length === 0 && (
             <tr>
-              <td colSpan={6} className="py-10 text-center text-slate-400">
+              <td colSpan={7} className="py-10 text-center text-slate-400">
                 Nenhuma compra lançada.
               </td>
             </tr>
@@ -526,15 +540,21 @@ function PurchasesList() {
         </tbody>
       </table>
 
-      {detailId && <PurchaseDetail id={detailId} onClose={() => setDetailId(null)} />}
+      {viewId && <PurchaseDetail id={viewId} onClose={() => setViewId(null)} onChanged={() => qc.invalidateQueries({ queryKey: ['invoices'] })} />}
     </div>
   );
 }
 
-function PurchaseDetail({ id, onClose }: { id: string; onClose: () => void }) {
+function PurchaseDetail({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged: () => void }) {
   const qc = useQueryClient();
   const [notes, setNotes] = useState('');
-  const { data, isLoading } = useQuery({
+  const [refazerMode, setRefazerMode] = useState(false);
+  const [parcels, setParcels] = useState(1);
+  const [firstDue, setFirstDue] = useState(() => new Date().toISOString().slice(0, 10));
+  const [intervalDays, setIntervalDays] = useState(30);
+  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+  const { data, isLoading, refetch } = useQuery({
     queryKey: ['invoice', id],
     queryFn: async () => {
       const inv = await api.get<{
@@ -542,7 +562,7 @@ function PurchaseDetail({ id, onClose }: { id: string; onClose: () => void }) {
         notes: string | null;
         issueDate: string;
         totalAmount: number;
-        supplier: { name: string };
+        supplier: { name: string; id: string };
         items: Array<{ id: string; quantity: number; unitCost: number; variant: { description: string; product: { name: string } } }>;
         financialAccounts: Array<{ id: string; description: string; amount: number; dueDate: string; status: string }>;
       }>(`/api/invoices/${id}`);
@@ -553,12 +573,35 @@ function PurchaseDetail({ id, onClose }: { id: string; onClose: () => void }) {
 
   const save = useMutation({
     mutationFn: () => api.put(`/api/invoices/${id}`, { notes: notes.trim() || null }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['invoices'] });
-      onClose();
-    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['invoices'] }); onChanged(); onClose(); },
     onError: (e) => window.alert(e instanceof ApiError ? e.message : 'Falha ao salvar'),
   });
+
+  const deleteFinancial = useMutation({
+    mutationFn: () => api.del(`/api/invoices/${id}/financial`),
+    onSuccess: () => { refetch(); onChanged(); },
+    onError: (e) => window.alert(e instanceof ApiError ? e.message : 'Falha ao excluir financeiro'),
+  });
+
+  const refazerFinancial = useMutation({
+    mutationFn: () => {
+      const total = Number(data!.totalAmount);
+      const n = Math.max(1, parcels);
+      const base = Math.floor((total / n) * 100) / 100;
+      const installments = Array.from({ length: n }, (_, i) => {
+        const amount = i === n - 1 ? round2(total - base * i) : base;
+        const d = new Date(firstDue + 'T00:00:00');
+        d.setDate(d.getDate() + i * intervalDays);
+        return { dueDate: d.toISOString(), amount };
+      });
+      return api.post(`/api/invoices/${id}/financial`, { installments });
+    },
+    onSuccess: () => { refetch(); onChanged(); setRefazerMode(false); },
+    onError: (e) => window.alert(e instanceof ApiError ? e.message : 'Falha ao refazer financeiro'),
+  });
+
+  const hasFinancial = (data?.financialAccounts.length ?? 0) > 0;
+  const hasPaid = data?.financialAccounts.some((a) => a.status !== 'PENDING') ?? false;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
@@ -579,34 +622,87 @@ function PurchaseDetail({ id, onClose }: { id: string; onClose: () => void }) {
             <div className="mb-2 text-sm text-slate-500">
               {data.supplier.name} · {new Date(data.issueDate).toLocaleDateString('pt-BR')}
             </div>
+
             <ul className="mb-3 divide-y divide-slate-100 text-sm">
               {data.items.map((it) => (
                 <li key={it.id} className="flex justify-between py-1.5">
-                  <span>
-                    {it.variant.product.name} — {it.variant.description}
-                  </span>
-                  <span className="text-slate-500">
-                    {it.quantity} × {brl(it.unitCost)}
-                  </span>
+                  <span>{it.variant.product.name} — {it.variant.description}</span>
+                  <span className="text-slate-500">{it.quantity} × {brl(it.unitCost)}</span>
                 </li>
               ))}
             </ul>
-            {data.financialAccounts.length > 0 && (
-              <div className="mb-3 rounded-xl bg-slate-50 p-3 text-sm">
-                <div className="mb-1 font-semibold">Contas a pagar</div>
-                {data.financialAccounts.map((a) => (
-                  <div key={a.id} className="flex justify-between text-slate-600">
-                    <span>
-                      {new Date(a.dueDate).toLocaleDateString('pt-BR')} · {a.status}
-                    </span>
-                    <span>{brl(a.amount)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+
             <div className="flex justify-between border-t border-slate-100 pt-2 font-bold">
               <span>Total</span>
               <span>{brl(data.totalAmount)}</span>
+            </div>
+
+            {/* Financeiro */}
+            <div className="mt-4 rounded-xl border border-slate-200 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="font-semibold text-sm">Contas a pagar</span>
+                {hasFinancial && !hasPaid && (
+                  <button
+                    className="text-xs font-semibold text-rose-600 hover:underline disabled:opacity-50"
+                    disabled={deleteFinancial.isPending}
+                    onClick={() => {
+                      if (window.confirm('Excluir todos os títulos a pagar pendentes desta compra?'))
+                        deleteFinancial.mutate();
+                    }}
+                  >
+                    Excluir financeiro
+                  </button>
+                )}
+                {!hasFinancial && !refazerMode && (
+                  <button className="text-xs font-semibold text-brand-600 hover:underline" onClick={() => setRefazerMode(true)}>
+                    Gerar financeiro
+                  </button>
+                )}
+                {hasFinancial && !refazerMode && (
+                  <button className="text-xs font-semibold text-brand-600 hover:underline" onClick={() => setRefazerMode(true)} disabled={!hasPaid}>
+                    {hasPaid ? '' : 'Refazer financeiro'}
+                  </button>
+                )}
+              </div>
+
+              {hasFinancial && !refazerMode && (
+                <ul className="space-y-0.5 text-xs text-slate-600">
+                  {data.financialAccounts.map((a) => (
+                    <li key={a.id} className="flex justify-between">
+                      <span>{new Date(a.dueDate + 'T00:00:00').toLocaleDateString('pt-BR')} · {a.status}</span>
+                      <span>{brl(a.amount)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {!hasFinancial && !refazerMode && (
+                <p className="text-xs text-slate-400">Nenhuma conta a pagar gerada.</p>
+              )}
+
+              {refazerMode && (
+                <div className="mt-2 space-y-2">
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    <label className="block">
+                      <span className="label">Parcelas</span>
+                      <input className="input h-9" type="number" min={1} value={parcels} onChange={(e) => setParcels(Number(e.target.value) || 1)} />
+                    </label>
+                    <label className="block">
+                      <span className="label">1º vencimento</span>
+                      <input className="input h-9" type="date" value={firstDue} onChange={(e) => setFirstDue(e.target.value)} />
+                    </label>
+                    <label className="block">
+                      <span className="label">Intervalo (dias)</span>
+                      <input className="input h-9" type="number" value={intervalDays} onChange={(e) => setIntervalDays(Number(e.target.value) || 30)} />
+                    </label>
+                  </div>
+                  <div className="flex gap-2">
+                    <button className="btn-ghost flex-1 text-xs" onClick={() => setRefazerMode(false)}>Cancelar</button>
+                    <button className="btn-primary flex-1 text-xs" disabled={refazerFinancial.isPending} onClick={() => refazerFinancial.mutate()}>
+                      {refazerFinancial.isPending ? 'Gerando...' : 'Confirmar'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <label className="mt-3 block">
@@ -615,11 +711,9 @@ function PurchaseDetail({ id, onClose }: { id: string; onClose: () => void }) {
             </label>
 
             <div className="mt-4 flex justify-end gap-2">
-              <button className="btn-ghost" onClick={onClose}>
-                Fechar
-              </button>
+              <button className="btn-ghost" onClick={onClose}>Fechar</button>
               <button className="btn-primary" disabled={save.isPending} onClick={() => save.mutate()}>
-                Salvar observação
+                {save.isPending ? 'Salvando...' : 'Salvar observação'}
               </button>
             </div>
           </>
@@ -638,55 +732,139 @@ interface VariantHit {
   tracksLot: boolean;
 }
 
+/** Abre um modal completo com busca + filtros (marca/grupo) para selecionar produto. */
 function ProductSearch({ onPick }: { onPick: (v: VariantHit) => void }) {
-  const [term, setTerm] = useState('');
-  const { data } = useQuery({
-    queryKey: ['manual-product-search', term],
-    queryFn: () =>
-      api.get<{
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        className="btn-ghost w-full justify-start gap-2 text-slate-500"
+        onClick={() => setOpen(true)}
+      >
+        <Search className="h-4 w-4" /> Selecionar produto do catálogo...
+      </button>
+      {open && (
+        <ProductPickerModal
+          onPick={(v) => { onPick(v); setOpen(false); }}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+function ProductPickerModal({ onPick, onClose }: { onPick: (v: VariantHit) => void; onClose: () => void }) {
+  const [search, setSearch] = useState('');
+  const [brand, setBrand] = useState('');
+  const [group, setGroup] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['picker-products', search, brand, group],
+    queryFn: () => {
+      const qs = new URLSearchParams({ pageSize: '80' });
+      if (search.trim()) qs.set('search', search.trim());
+      if (brand.trim()) qs.set('brand', brand.trim());
+      if (group.trim()) qs.set('group', group.trim());
+      return api.get<{
         items: Array<{
+          id: string;
           name: string;
+          brand: string;
+          group: string;
           tracksLotValidity: boolean;
-          variants: Array<{ id: string; description: string; sku: string; salePrice: number; costPrice: number }>;
+          variants: Array<{ id: string; description: string; sku: string; salePrice: number; costPrice: number; stockQty: number }>;
         }>;
-      }>(`/api/products?search=${encodeURIComponent(term)}`),
-    enabled: term.trim().length >= 2,
+      }>(`/api/products?${qs.toString()}`);
+    },
   });
 
   return (
-    <div className="relative">
-      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-      <input
-        className="input pl-9"
-        value={term}
-        onChange={(e) => setTerm(e.target.value)}
-        placeholder="Buscar produto cadastrado para adicionar..."
-      />
-      {data && term.trim().length >= 2 && (
-        <div className="mt-1 max-h-44 overflow-auto rounded-xl border border-slate-200">
-          {data.items.flatMap((p) =>
-            p.variants.map((v) => (
-              <button
-                key={v.id}
-                className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
-                onClick={() => {
-                  onPick({
-                    id: v.id,
-                    label: `${p.name} — ${v.description} (${v.sku})`,
-                    salePrice: v.salePrice,
-                    costPrice: v.costPrice,
-                    tracksLot: p.tracksLotValidity,
-                  });
-                  setTerm('');
-                }}
-              >
-                {p.name} — {v.description} <span className="text-slate-400">({v.sku})</span>
-              </button>
-            )),
-          )}
-          {data.items.length === 0 && <div className="px-3 py-2 text-sm text-slate-400">Nenhum produto encontrado.</div>}
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
+      <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-elevated animate-scale-in">
+        {/* Cabeçalho */}
+        <div className="flex items-center justify-between gap-3 border-b border-slate-100 p-4">
+          <h3 className="font-display text-lg font-bold">Selecionar produto</h3>
+          <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
+            <X className="h-5 w-5" />
+          </button>
         </div>
-      )}
+
+        {/* Busca + filtros */}
+        <div className="border-b border-slate-100 p-4 space-y-2">
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                className="input pl-9"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar por nome, marca ou SKU..."
+                autoFocus
+              />
+            </div>
+            <button
+              className={showFilters ? 'btn-primary px-3' : 'btn-ghost px-3'}
+              onClick={() => setShowFilters((v) => !v)}
+            >
+              <Filter className="h-4 w-4" />
+            </button>
+          </div>
+          {showFilters && (
+            <div className="grid grid-cols-2 gap-2 animate-fade-in">
+              <label className="block">
+                <span className="label">Marca</span>
+                <input className="input h-9 text-sm" value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="Todas" />
+              </label>
+              <label className="block">
+                <span className="label">Grupo</span>
+                <input className="input h-9 text-sm" value={group} onChange={(e) => setGroup(e.target.value)} placeholder="Todos" />
+              </label>
+            </div>
+          )}
+        </div>
+
+        {/* Grid de produtos */}
+        <div className="flex-1 overflow-auto p-4">
+          {isLoading ? (
+            <div className="grid h-32 place-items-center text-slate-500">Carregando...</div>
+          ) : (
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {data?.items.flatMap((p) =>
+                p.variants.map((v) => (
+                  <button
+                    key={v.id}
+                    className="card-hover flex flex-col items-start gap-0.5 p-3 text-left text-sm"
+                    onClick={() =>
+                      onPick({
+                        id: v.id,
+                        label: `${p.name} — ${v.description} (${v.sku})`,
+                        salePrice: v.salePrice,
+                        costPrice: v.costPrice,
+                        tracksLot: p.tracksLotValidity,
+                      })
+                    }
+                  >
+                    <div className="flex w-full items-start justify-between gap-1">
+                      <span className="font-semibold leading-snug">{p.name}</span>
+                      {p.brand && <span className="badge-brand shrink-0 text-[10px]">{p.brand}</span>}
+                    </div>
+                    <span className="text-xs text-slate-500">{v.description} · {v.sku}</span>
+                    <div className="mt-1 flex w-full items-center justify-between">
+                      <span className="font-bold text-brand-700">{brl(v.costPrice)}</span>
+                      <span className="text-xs text-slate-400">est. {v.stockQty}</span>
+                    </div>
+                  </button>
+                )),
+              )}
+              {data?.items.length === 0 && (
+                <p className="col-span-full py-10 text-center text-slate-400">Nenhum produto encontrado.</p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

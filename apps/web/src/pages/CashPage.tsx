@@ -189,8 +189,9 @@ function CurrentCash() {
       {closeResult && (
         <div className="card animate-scale-in border-2 border-brand-200">
           <h3 className="mb-3 flex items-center gap-2 font-semibold">
-            <Scale className="h-5 w-5 text-brand-600" /> Resumo do fechamento
+            <Scale className="h-5 w-5 text-brand-600" /> Resumo do último fechamento
           </h3>
+          <p className="mb-2 text-xs text-slate-400">Referente ao caixa que acabou de ser fechado.</p>
           <Row label="Esperado em caixa" value={brl(closeResult.expectedCash)} />
           <Row
             label="Diferença"

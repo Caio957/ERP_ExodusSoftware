@@ -445,7 +445,14 @@ interface EditItem {
   quantity: number;
 }
 
+function localDateStr(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function genInstallments(total: number, n: number, firstDue: string, intervalDays: number) {
+  // T00:00:00 → interpreta como horário LOCAL, evita shift de fuso (UTC-3)
+  const base0 = firstDue.trim() ? new Date(firstDue + 'T00:00:00') : null;
+  if (!base0 || isNaN(base0.getTime())) return [];
   const count = Math.max(1, Math.floor(n));
   const base = Math.floor((total / count) * 100) / 100;
   const parts: { dueDate: string; amount: number }[] = [];
@@ -453,9 +460,9 @@ function genInstallments(total: number, n: number, firstDue: string, intervalDay
   for (let i = 0; i < count; i++) {
     const amount = i === count - 1 ? round2(total - acc) : base;
     acc = round2(acc + amount);
-    const d = new Date(firstDue);
+    const d = new Date(base0);
     d.setDate(d.getDate() + i * intervalDays);
-    parts.push({ dueDate: d.toISOString().slice(0, 10), amount });
+    parts.push({ dueDate: localDateStr(d), amount });
   }
   return parts;
 }
