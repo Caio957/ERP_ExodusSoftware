@@ -503,6 +503,15 @@ Railway a cada deploy (`prisma migrate deploy`).
   - **Fix mobile**: PrintSaleModal header em 2 linhas; FinancialPage `flex-wrap`;
     PurchaseDetail modal hoistado ao nível do `PurchasesPage` (fora de `.card`).
   - `npm run typecheck` + `npm run build` → **0 erros**. Commit `86766ce`.
+- ✅ **Onda 2026-06-08b — Fixes PDV mobile** (2026-06-08):
+  - **Fix layout A prazo** (campo data): `grid-cols-2 sm:grid-cols-3` com campo "1º
+    vencimento" ocupando `col-span-2` no mobile (linha inteira, sem sobreposição).
+    Commit `b57009c`.
+  - **Fix lógica: botão "Confirmar venda" bloqueado corretamente**: condição trocada de
+    `aPrazoTotal <= 0` para `!lines.some(l.method === 'A_PRAZO')` — basta existir
+    qualquer linha com método A_PRAZO (mesmo com valor 0) para exigir cliente cadastrado;
+    `min-w-0 w-full` no input de data + `overflow-hidden` no grid impedem o campo de
+    vazar fora do card no iOS/Safari. Commit `5e9b7c7`.
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---
