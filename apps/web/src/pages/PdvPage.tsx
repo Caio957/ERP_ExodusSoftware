@@ -726,7 +726,7 @@ function PaymentModal({
                 Selecione um cliente no carrinho para vender a prazo.
               </div>
             )}
-            <div className="grid grid-cols-3 gap-2 text-sm">
+            <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
               <label>
                 <span className="mb-1 block text-xs text-slate-500">Parcelas</span>
                 <input
@@ -737,7 +737,7 @@ function PaymentModal({
                   className="input h-9"
                 />
               </label>
-              <label>
+              <label className="col-span-2 sm:col-span-1">
                 <span className="mb-1 block text-xs text-slate-500">1º vencimento *</span>
                 <input
                   type="date"
