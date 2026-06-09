@@ -80,7 +80,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
     '/confirm',
     { preHandler: app.authenticate, schema: { body: confirmInvoiceSchema } },
     async (req, reply) => {
-      const { supplierId, accessKey, issueDate, totalAmount, items, duplicates } = req.body;
+      const { supplierId, accessKey, issueDate, totalAmount, items, duplicates, customInstallments } = req.body;
 
       const exists = await prisma.invoice.findUnique({ where: { accessKey } });
       if (exists) throw new ConflictError('Nota fiscal já importada', { accessKey });
@@ -104,11 +104,15 @@ export async function invoiceRoutes(app: FastifyInstance) {
           include: { items: true },
         });
 
-        // Entrada de estoque + razão
+        // Entrada de estoque + custo + (novo preço de venda, opcional)
         for (const it of items) {
           await tx.productVariant.update({
             where: { id: it.variantId },
-            data: { stockQty: { increment: it.quantity }, costPrice: it.unitCost },
+            data: {
+              stockQty: { increment: it.quantity },
+              costPrice: it.unitCost,
+              ...(it.newSalePrice != null ? { salePrice: it.newSalePrice } : {}),
+            },
           });
           await tx.stockMovement.create({
             data: {
@@ -141,19 +145,29 @@ export async function invoiceRoutes(app: FastifyInstance) {
           });
         }
 
-        // Contas a Pagar a partir das duplicatas
-        if (duplicates.length) {
-          await tx.financialAccount.createMany({
-            data: duplicates.map((d) => ({
-              type: 'PAYABLE',
+        // Contas a Pagar: customInstallments tem prioridade; fallback para duplicatas do XML
+        const financialRows = customInstallments?.length
+          ? customInstallments.map((inst, i) => ({
+              type: 'PAYABLE' as const,
+              description: `NF ${accessKey.slice(-6)} - parcela ${i + 1}/${customInstallments.length}`,
+              amount: inst.amount,
+              dueDate: inst.dueDate,
+              status: 'PENDING',
+              invoiceId: created.id,
+              personId: supplierId,
+            }))
+          : duplicates.map((d) => ({
+              type: 'PAYABLE' as const,
               description: `NF ${accessKey.slice(-6)} - dup ${d.number ?? ''}`.trim(),
               amount: d.amount,
               dueDate: d.dueDate,
               status: 'PENDING',
               invoiceId: created.id,
               personId: supplierId,
-            })),
-          });
+            }));
+
+        if (financialRows.length) {
+          await tx.financialAccount.createMany({ data: financialRows });
         }
 
         return created;

@@ -19,17 +19,17 @@ import {
 import { useAuth } from '../store/auth';
 import { StatusBadge } from './StatusBadge';
 
-const navItems: { to: string; label: string; icon: LucideIcon; adminOnly?: boolean }[] = [
-  { to: '/dashboard', label: 'Dashboard', icon: LineChart, adminOnly: true },
-  { to: '/pdv', label: 'PDV', icon: ShoppingCart },
-  { to: '/produtos', label: 'Produtos', icon: Package },
-  { to: '/estoque', label: 'Estoque', icon: ClipboardCheck, adminOnly: true },
-  { to: '/caixa', label: 'Caixa', icon: Wallet },
-  { to: '/cadastros', label: 'Cadastros', icon: Users },
-  { to: '/vendas', label: 'Vendas', icon: Receipt, adminOnly: true },
-  { to: '/compras', label: 'Compras', icon: Truck, adminOnly: true },
-  { to: '/financeiro', label: 'Financeiro', icon: BarChart3, adminOnly: true },
-  { to: '/configuracoes', label: 'Config', icon: Settings, adminOnly: true },
+const navItems: { to: string; label: string; icon: LucideIcon; pageKey: string }[] = [
+  { to: '/dashboard', label: 'Dashboard', icon: LineChart, pageKey: 'dashboard' },
+  { to: '/pdv', label: 'PDV', icon: ShoppingCart, pageKey: 'pdv' },
+  { to: '/produtos', label: 'Produtos', icon: Package, pageKey: 'products' },
+  { to: '/estoque', label: 'Estoque', icon: ClipboardCheck, pageKey: 'stock' },
+  { to: '/caixa', label: 'Caixa', icon: Wallet, pageKey: 'cash' },
+  { to: '/cadastros', label: 'Cadastros', icon: Users, pageKey: 'registrations' },
+  { to: '/vendas', label: 'Vendas', icon: Receipt, pageKey: 'sales' },
+  { to: '/compras', label: 'Compras', icon: Truck, pageKey: 'purchases' },
+  { to: '/financeiro', label: 'Financeiro', icon: BarChart3, pageKey: 'financial' },
+  { to: '/configuracoes', label: 'Config', icon: Settings, pageKey: 'settings' },
 ];
 
 function initials(name?: string) {
@@ -48,11 +48,11 @@ function navItemClass(isActive: boolean) {
 }
 
 export function Layout() {
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout, canAccess } = useAuth();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const items = navItems.filter((item) => !item.adminOnly || isAdmin());
+  const items = navItems.filter((item) => canAccess(item.pageKey));
   const bottomItems = items.slice(0, 4); // principais no bottom nav (celular)
 
   function doLogout() {

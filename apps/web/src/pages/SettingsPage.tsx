@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ProductFormSettings, CompanyProfile, PaymentType } from '@exodus/shared';
-import { Settings, Save, Check, Package, CreditCard, Building2, Plus, Trash2 } from 'lucide-react';
+import { Settings, Save, Check, Package, CreditCard, Building2, Plus, Trash2, Users, Pencil, X, ShieldCheck } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
+import { useAuth } from '../store/auth';
 
 export function SettingsPage() {
-  const [tab, setTab] = useState<'produto' | 'recebimentos' | 'empresa'>('produto');
+  const [tab, setTab] = useState<'produto' | 'recebimentos' | 'empresa' | 'usuarios'>('produto');
   return (
     <div className="mx-auto max-w-2xl space-y-5">
       <div className="flex items-center gap-3">
@@ -28,11 +29,15 @@ export function SettingsPage() {
         <button className={tab === 'empresa' ? 'btn-primary' : 'btn-ghost'} onClick={() => setTab('empresa')}>
           <Building2 className="h-5 w-5" /> Empresa
         </button>
+        <button className={tab === 'usuarios' ? 'btn-primary' : 'btn-ghost'} onClick={() => setTab('usuarios')}>
+          <Users className="h-5 w-5" /> Usuários
+        </button>
       </div>
 
       {tab === 'produto' && <ProductFormSettingsCard />}
       {tab === 'recebimentos' && <PaymentTypesCard />}
       {tab === 'empresa' && <CompanyCard />}
+      {tab === 'usuarios' && <UsersCard />}
     </div>
   );
 }
@@ -263,6 +268,290 @@ function CompanyCard() {
         <button className="btn-primary" disabled={save.isPending} onClick={() => save.mutate()}>
           <Save className="h-5 w-5" /> {save.isPending ? 'Salvando...' : 'Salvar'}
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Gerenciamento de Usuários
+// ---------------------------------------------------------------------------
+interface UserRecord {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  allowedPages: string[] | null;
+  createdAt: string;
+}
+
+const ALL_PAGES = [
+  { key: 'dashboard', label: 'Dashboard' },
+  { key: 'pdv', label: 'PDV' },
+  { key: 'products', label: 'Produtos' },
+  { key: 'stock', label: 'Estoque' },
+  { key: 'cash', label: 'Caixa' },
+  { key: 'registrations', label: 'Cadastros' },
+  { key: 'sales', label: 'Vendas' },
+  { key: 'purchases', label: 'Compras' },
+  { key: 'financial', label: 'Financeiro' },
+  { key: 'settings', label: 'Configurações' },
+];
+
+const CASHIER_DEFAULT = ['pdv', 'products', 'cash', 'registrations'];
+
+function UsersCard() {
+  const qc = useQueryClient();
+  const { user: me } = useAuth();
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<UserRecord | null>(null);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['users'],
+    queryFn: () => api.get<UserRecord[]>('/api/auth/users'),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => api.del(`/api/auth/users/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+    onError: (e) => window.alert(e instanceof ApiError ? e.message : 'Falha ao excluir'),
+  });
+
+  if (isLoading) return <div className="grid h-40 place-items-center text-slate-500">Carregando...</div>;
+
+  return (
+    <div className="card space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 font-semibold">
+          <Users className="h-5 w-5 text-brand-600" /> Usuários do sistema
+        </div>
+        <button className="btn-primary" onClick={() => setCreating(true)}>
+          <Plus className="h-5 w-5" /> Novo usuário
+        </button>
+      </div>
+
+      <div className="divide-y divide-slate-100">
+        {data?.map((u) => (
+          <div key={u.id} className="flex items-center justify-between gap-3 py-3">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-brand-gradient text-sm font-bold text-white shadow-brand">
+                {u.name.charAt(0).toUpperCase()}
+              </span>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 font-medium">
+                  {u.name}
+                  {u.id === me?.id && <span className="rounded-full bg-brand-100 px-2 py-0.5 text-[10px] font-semibold text-brand-700">você</span>}
+                </div>
+                <div className="text-xs text-slate-400">{u.email}</div>
+                <div className="mt-0.5 flex flex-wrap gap-1">
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${u.role === 'ADMIN' ? 'bg-accent-100 text-accent-700' : 'bg-slate-100 text-slate-600'}`}>
+                    {u.role === 'ADMIN' ? 'ADMIN' : 'OPERADOR'}
+                  </span>
+                  {u.role !== 'ADMIN' && u.allowedPages !== null && (
+                    <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-semibold text-brand-700">
+                      {u.allowedPages?.length ?? 0} tela(s) personalizada(s)
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="flex shrink-0 gap-1">
+              <button
+                className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-brand-50 hover:text-brand-600"
+                onClick={() => setEditing(u)}
+                title="Editar"
+              >
+                <Pencil className="h-4 w-4" />
+              </button>
+              {u.id !== me?.id && (
+                <button
+                  className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                  onClick={() => {
+                    if (window.confirm(`Excluir o usuário "${u.name}"? Esta ação não pode ser desfeita.`))
+                      remove.mutate(u.id);
+                  }}
+                  title="Excluir"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+        {data?.length === 0 && (
+          <div className="py-8 text-center text-slate-400">Nenhum usuário cadastrado.</div>
+        )}
+      </div>
+
+      {creating && (
+        <UserFormModal
+          onClose={() => setCreating(false)}
+          onSaved={() => { setCreating(false); qc.invalidateQueries({ queryKey: ['users'] }); }}
+        />
+      )}
+      {editing && (
+        <UserFormModal
+          user={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); qc.invalidateQueries({ queryKey: ['users'] }); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function UserFormModal({
+  user,
+  onClose,
+  onSaved,
+}: {
+  user?: UserRecord;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const isEdit = !!user;
+  const [name, setName] = useState(user?.name ?? '');
+  const [email, setEmail] = useState(user?.email ?? '');
+  const [password, setPassword] = useState('');
+  const [role, setRole] = useState<'ADMIN' | 'CASHIER'>((user?.role as 'ADMIN' | 'CASHIER') ?? 'CASHIER');
+  const [useCustomPages, setUseCustomPages] = useState(user ? user.allowedPages !== null : false);
+  const [selectedPages, setSelectedPages] = useState<string[]>(
+    user?.allowedPages ?? CASHIER_DEFAULT
+  );
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  function togglePage(key: string) {
+    setSelectedPages((prev) => prev.includes(key) ? prev.filter((p) => p !== key) : [...prev, key]);
+  }
+
+  const save = useMutation({
+    mutationFn: () => {
+      const body: Record<string, unknown> = { name, email, role };
+      if (password.trim()) body.password = password;
+      if (role === 'ADMIN') {
+        body.allowedPages = null;
+      } else {
+        body.allowedPages = useCustomPages ? selectedPages : null;
+      }
+      if (isEdit) {
+        return api.put(`/api/auth/users/${user!.id}`, body);
+      } else {
+        if (!password.trim()) throw new Error('Informe a senha.');
+        return api.post('/api/auth/register', body);
+      }
+    },
+    onSuccess: onSaved,
+    onError: (e) => setLocalError(e instanceof ApiError ? e.message : (e as Error).message || 'Falha ao salvar'),
+  });
+
+  function submit() {
+    setLocalError(null);
+    if (name.trim().length < 2) return setLocalError('Nome deve ter pelo menos 2 caracteres.');
+    if (!email.includes('@')) return setLocalError('E-mail inválido.');
+    if (!isEdit && password.trim().length < 8) return setLocalError('Senha deve ter ao menos 8 caracteres.');
+    if (isEdit && password.trim() && password.trim().length < 8) return setLocalError('Nova senha deve ter ao menos 8 caracteres.');
+    save.mutate();
+  }
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal-sheet sm:max-w-lg">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="font-display text-lg font-bold flex items-center gap-2">
+            <ShieldCheck className="h-5 w-5 text-brand-600" />
+            {isEdit ? 'Editar usuário' : 'Novo usuário'}
+          </h2>
+          <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          <label className="block">
+            <span className="label">Nome *</span>
+            <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome completo" />
+          </label>
+          <label className="block">
+            <span className="label">E-mail *</span>
+            <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@exemplo.com" />
+          </label>
+          <label className="block">
+            <span className="label">{isEdit ? 'Nova senha (deixe em branco para manter)' : 'Senha *'}</span>
+            <input
+              className="input"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={isEdit ? '••••••••' : 'Mínimo 8 caracteres'}
+              autoComplete="new-password"
+            />
+          </label>
+          <label className="block">
+            <span className="label">Perfil *</span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className={role === 'ADMIN' ? 'btn-primary flex-1' : 'btn-ghost flex-1'}
+                onClick={() => setRole('ADMIN')}
+              >
+                Administrador
+              </button>
+              <button
+                type="button"
+                className={role === 'CASHIER' ? 'btn-primary flex-1' : 'btn-ghost flex-1'}
+                onClick={() => setRole('CASHIER')}
+              >
+                Operador
+              </button>
+            </div>
+          </label>
+
+          {role === 'CASHIER' && (
+            <div className="rounded-xl border border-slate-200 p-3">
+              <label className="flex cursor-pointer items-center gap-3">
+                <input
+                  type="checkbox"
+                  className="h-5 w-5 accent-brand-600"
+                  checked={useCustomPages}
+                  onChange={(e) => setUseCustomPages(e.target.checked)}
+                />
+                <div>
+                  <div className="font-medium text-slate-800 text-sm">Personalizar telas acessíveis</div>
+                  <div className="text-xs text-slate-500">
+                    Sem personalização: PDV, Produtos, Caixa e Cadastros (padrão do Operador).
+                  </div>
+                </div>
+              </label>
+
+              {useCustomPages && (
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  {ALL_PAGES.map((p) => (
+                    <label key={p.key} className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm hover:bg-brand-50">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-brand-600"
+                        checked={selectedPages.includes(p.key)}
+                        onChange={() => togglePage(p.key)}
+                      />
+                      {p.label}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {localError && (
+            <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{localError}</div>
+          )}
+        </div>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button className="btn-ghost" onClick={onClose}>Cancelar</button>
+          <button className="btn-primary" disabled={save.isPending} onClick={submit}>
+            {save.isPending ? 'Salvando...' : isEdit ? 'Salvar alterações' : 'Criar usuário'}
+          </button>
+        </div>
       </div>
     </div>
   );

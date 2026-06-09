@@ -1,9 +1,20 @@
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { createUserSchema, loginSchema, type JwtPayload } from '@exodus/shared';
 import { prisma } from '../lib/prisma.js';
 import { hashPassword, verifyPassword } from '../lib/password.js';
-import { UnauthorizedError } from '../lib/errors.js';
+import { AppError, NotFoundError, UnauthorizedError } from '../lib/errors.js';
+
+const idParam = z.object({ id: z.string().uuid() });
+
+const updateUserSchema = z.object({
+  name: z.string().trim().min(2).optional(),
+  email: z.string().trim().toLowerCase().email().optional(),
+  password: z.string().min(8).optional(),
+  role: z.enum(['ADMIN', 'CASHIER']).optional(),
+  allowedPages: z.array(z.string()).nullable().optional(),
+});
 
 export async function authRoutes(app: FastifyInstance) {
   const r = app.withTypeProvider<ZodTypeProvider>();
@@ -44,6 +55,60 @@ export async function authRoutes(app: FastifyInstance) {
     },
   );
 
-  // GET /api/auth/me
-  r.get('/me', { preHandler: app.authenticate }, async (req) => req.user);
+  // GET /api/auth/me — retorna dados do usuário logado incluindo allowedPages
+  r.get('/me', { preHandler: app.authenticate }, async (req) => {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.sub },
+      select: { id: true, name: true, email: true, role: true, allowedPages: true },
+    });
+    if (!user) throw new UnauthorizedError('Usuário não encontrado');
+    return { ...req.user, allowedPages: user.allowedPages ?? null };
+  });
+
+  // GET /api/auth/users — lista todos os usuários (ADMIN)
+  r.get('/users', { preHandler: app.authorize(['ADMIN']) }, async () => {
+    return prisma.user.findMany({
+      select: { id: true, name: true, email: true, role: true, allowedPages: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    });
+  });
+
+  // PUT /api/auth/users/:id — edita usuário (ADMIN)
+  r.put(
+    '/users/:id',
+    { preHandler: app.authorize(['ADMIN']), schema: { params: idParam, body: updateUserSchema } },
+    async (req) => {
+      const { id } = req.params;
+      const { name, email, password, role, allowedPages } = req.body;
+      const data: Record<string, unknown> = {};
+      if (name !== undefined) data.name = name;
+      if (email !== undefined) data.email = email;
+      if (role !== undefined) data.role = role;
+      if (allowedPages !== undefined) data.allowedPages = allowedPages;
+      if (password) data.passwordHash = await hashPassword(password);
+
+      const user = await prisma.user.update({
+        where: { id },
+        data,
+        select: { id: true, name: true, email: true, role: true, allowedPages: true },
+      });
+      return user;
+    },
+  );
+
+  // DELETE /api/auth/users/:id — exclui usuário (ADMIN, não pode excluir a si mesmo)
+  r.delete(
+    '/users/:id',
+    { preHandler: app.authorize(['ADMIN']), schema: { params: idParam } },
+    async (req) => {
+      const { id } = req.params;
+      if (id === req.user.sub) {
+        throw new AppError(400, 'Você não pode excluir seu próprio usuário.', 'SELF_DELETE');
+      }
+      const existing = await prisma.user.findUnique({ where: { id } });
+      if (!existing) throw new NotFoundError('Usuário');
+      await prisma.user.delete({ where: { id } });
+      return { success: true };
+    },
+  );
 }

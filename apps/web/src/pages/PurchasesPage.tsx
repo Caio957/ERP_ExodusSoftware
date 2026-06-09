@@ -25,25 +25,36 @@ interface Suggestion {
   description: string;
   productName: string;
   brand: string;
+  group: string;
+  subgroup?: string | null;
   stockQty: number;
   soldInWindow: number;
   avgPerDay: number;
   suggestedQty: number;
+  lastCost?: number;
 }
 
 type Tab = 'sugestao' | 'xml' | 'manual' | 'lancadas';
 
 export function PurchasesPage() {
+  const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>('sugestao');
   const [windowDays, setWindowDays] = useState(30);
   const [leadTimeDays, setLeadTimeDays] = useState(15);
+  const [suggBrand, setSuggBrand] = useState('');
+  const [suggGroup, setSuggGroup] = useState('');
+  const [suggSubgroup, setSuggSubgroup] = useState('');
+  const [viewInvoiceId, setViewInvoiceId] = useState<string | null>(null);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['suggestions', windowDays, leadTimeDays],
-    queryFn: () =>
-      api.get<{ suggestions: Suggestion[] }>(
-        `/api/purchase-suggestions?windowDays=${windowDays}&leadTimeDays=${leadTimeDays}`,
-      ),
+    queryKey: ['suggestions', windowDays, leadTimeDays, suggBrand, suggGroup, suggSubgroup],
+    queryFn: () => {
+      const qs = new URLSearchParams({ windowDays: String(windowDays), leadTimeDays: String(leadTimeDays) });
+      if (suggBrand.trim()) qs.set('brand', suggBrand.trim());
+      if (suggGroup.trim()) qs.set('group', suggGroup.trim());
+      if (suggSubgroup.trim()) qs.set('subgroup', suggSubgroup.trim());
+      return api.get<{ suggestions: Suggestion[] }>(`/api/purchase-suggestions?${qs.toString()}`);
+    },
     enabled: tab === 'sugestao',
   });
 
@@ -73,24 +84,40 @@ export function PurchasesPage() {
 
       {tab === 'sugestao' && (
         <>
-          <div className="card flex flex-wrap items-end gap-4">
-            <label className="text-sm">
-              <span className="mb-1 block font-medium text-slate-500">Janela de vendas</span>
-              <select className="input" value={windowDays} onChange={(e) => setWindowDays(Number(e.target.value))}>
-                <option value={30}>30 dias</option>
-                <option value={60}>60 dias</option>
-                <option value={90}>90 dias</option>
-              </select>
-            </label>
-            <label className="text-sm">
-              <span className="mb-1 block font-medium text-slate-500">Tempo de reposição (dias)</span>
-              <input
-                className="input"
-                type="number"
-                value={leadTimeDays}
-                onChange={(e) => setLeadTimeDays(Number(e.target.value))}
-              />
-            </label>
+          <div className="card space-y-3">
+            <div className="flex flex-wrap items-end gap-4">
+              <label className="text-sm">
+                <span className="mb-1 block font-medium text-slate-500">Janela de vendas</span>
+                <select className="input" value={windowDays} onChange={(e) => setWindowDays(Number(e.target.value))}>
+                  <option value={30}>30 dias</option>
+                  <option value={60}>60 dias</option>
+                  <option value={90}>90 dias</option>
+                </select>
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block font-medium text-slate-500">Tempo de reposição (dias)</span>
+                <input
+                  className="input"
+                  type="number"
+                  value={leadTimeDays}
+                  onChange={(e) => setLeadTimeDays(Number(e.target.value))}
+                />
+              </label>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <label className="block">
+                <span className="label">Marca (filtro)</span>
+                <input className="input h-10 text-sm" value={suggBrand} onChange={(e) => setSuggBrand(e.target.value)} placeholder="Todas" />
+              </label>
+              <label className="block">
+                <span className="label">Grupo (filtro)</span>
+                <input className="input h-10 text-sm" value={suggGroup} onChange={(e) => setSuggGroup(e.target.value)} placeholder="Todos" />
+              </label>
+              <label className="block">
+                <span className="label">Subgrupo (filtro)</span>
+                <input className="input h-10 text-sm" value={suggSubgroup} onChange={(e) => setSuggSubgroup(e.target.value)} placeholder="Todos" />
+              </label>
+            </div>
           </div>
 
           {error instanceof ApiError && (
@@ -109,37 +136,54 @@ export function PurchasesPage() {
                     <th className="text-right">Estoque</th>
                     <th className="text-right">Vendas</th>
                     <th className="text-right">Média/dia</th>
-                    <th className="text-right">Sugerido</th>
+                    <th className="text-right text-brand-700">Sugerido</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {data.suggestions.map((s) => (
-                    <tr key={s.variantId}>
+                    <tr key={s.variantId} className={s.suggestedQty > 0 ? '' : 'opacity-60'}>
                       <td className="py-2">
                         <div className="font-medium">{s.productName}</div>
-                        <div className="text-xs text-slate-400">
-                          {s.brand} · {s.description}
+                        <div className="flex flex-wrap gap-1 text-xs text-slate-400">
+                          {s.brand && <span>{s.brand}</span>}
+                          {s.group && <span>· {s.group}</span>}
+                          {s.subgroup && <span>· {s.subgroup}</span>}
+                          <span>· {s.description}</span>
                         </div>
                       </td>
                       <td className="text-slate-500">{s.sku}</td>
                       <td className="text-right">{s.stockQty}</td>
                       <td className="text-right">{s.soldInWindow}</td>
                       <td className="text-right">{s.avgPerDay}</td>
-                      <td className="text-right text-base font-bold text-brand-700">+{s.suggestedQty}</td>
+                      <td className={`text-right text-base font-bold ${s.suggestedQty > 0 ? 'text-brand-700' : 'text-slate-400'}`}>
+                        {s.suggestedQty > 0 ? `+${s.suggestedQty}` : '—'}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           ) : (
-            <p className="py-8 text-center text-slate-400">Nenhuma reposição sugerida para os parâmetros atuais.</p>
+            <p className="py-8 text-center text-slate-400">Nenhum produto encontrado para os filtros selecionados.</p>
           )}
         </>
       )}
 
-      {tab === 'xml' && <XmlImport />}
+      {tab === 'xml' && <XmlImport onSuccess={() => { qc.invalidateQueries({ queryKey: ['invoices'] }); qc.invalidateQueries({ queryKey: ['products'] }); }} />}
       {tab === 'manual' && <ManualPurchase />}
-      {tab === 'lancadas' && <PurchasesList />}
+      {tab === 'lancadas' && <PurchasesList onView={setViewInvoiceId} />}
+
+      {/* Modal fora de qualquer .card para evitar stacking-context do backdrop-blur */}
+      {viewInvoiceId && (
+        <PurchaseDetail
+          id={viewInvoiceId}
+          onClose={() => setViewInvoiceId(null)}
+          onChanged={() => {
+            setViewInvoiceId(null);
+            qc.invalidateQueries({ queryKey: ['invoices'] });
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -453,9 +497,8 @@ interface InvoiceListItem {
   items: Array<{ id: string }>;
 }
 
-function PurchasesList() {
+function PurchasesList({ onView }: { onView: (id: string) => void }) {
   const qc = useQueryClient();
-  const [viewId, setViewId] = useState<string | null>(null);
   const { data, isLoading } = useQuery({
     queryKey: ['invoices'],
     queryFn: () => api.get<{ items: InvoiceListItem[] }>('/api/invoices?pageSize=100'),
@@ -512,7 +555,7 @@ function PurchasesList() {
                 <div className="flex items-center justify-end gap-1">
                   <button
                     className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-brand-50 hover:text-brand-600"
-                    onClick={() => setViewId(inv.id)}
+                    onClick={() => onView(inv.id)}
                     title="Visualizar / editar"
                   >
                     <Eye className="h-4 w-4" />
@@ -540,12 +583,11 @@ function PurchasesList() {
         </tbody>
       </table>
 
-      {viewId && <PurchaseDetail id={viewId} onClose={() => setViewId(null)} onChanged={() => qc.invalidateQueries({ queryKey: ['invoices'] })} />}
     </div>
   );
 }
 
-function PurchaseDetail({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged: () => void }) {
+function PurchaseDetail({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged?: () => void }) {
   const qc = useQueryClient();
   const [notes, setNotes] = useState('');
   const [refazerMode, setRefazerMode] = useState(false);
@@ -573,13 +615,13 @@ function PurchaseDetail({ id, onClose, onChanged }: { id: string; onClose: () =>
 
   const save = useMutation({
     mutationFn: () => api.put(`/api/invoices/${id}`, { notes: notes.trim() || null }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['invoices'] }); onChanged(); onClose(); },
+    onSuccess: () => { onChanged?.(); onClose(); },
     onError: (e) => window.alert(e instanceof ApiError ? e.message : 'Falha ao salvar'),
   });
 
   const deleteFinancial = useMutation({
     mutationFn: () => api.del(`/api/invoices/${id}/financial`),
-    onSuccess: () => { refetch(); onChanged(); },
+    onSuccess: () => { refetch(); onChanged?.(); },
     onError: (e) => window.alert(e instanceof ApiError ? e.message : 'Falha ao excluir financeiro'),
   });
 
@@ -596,7 +638,7 @@ function PurchaseDetail({ id, onClose, onChanged }: { id: string; onClose: () =>
       });
       return api.post(`/api/invoices/${id}/financial`, { installments });
     },
-    onSuccess: () => { refetch(); onChanged(); setRefazerMode(false); },
+    onSuccess: () => { refetch(); onChanged?.(); setRefazerMode(false); },
     onError: (e) => window.alert(e instanceof ApiError ? e.message : 'Falha ao refazer financeiro'),
   });
 

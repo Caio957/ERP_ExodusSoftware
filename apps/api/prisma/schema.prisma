@@ -28,7 +28,9 @@ model User {
   email        String   @unique
   name         String
   passwordHash String
-  role         String // 'ADMIN' | 'CASHIER'
+  role         String   // 'ADMIN' | 'CASHIER'
+  // null = usa padrão do papel; array de chaves de páginas para restringir CASHIER
+  allowedPages Json?
   createdAt    DateTime @default(now())
 
   cashRegisters CashRegister[]

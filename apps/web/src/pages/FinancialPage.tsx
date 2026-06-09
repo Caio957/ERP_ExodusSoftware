@@ -105,8 +105,8 @@ export function FinancialPage() {
         </button>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex gap-2">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <div className="flex flex-wrap gap-2">
           <button className={type === 'PAYABLE' ? 'btn-primary' : 'btn-ghost'} onClick={() => changeType('PAYABLE')}>
             <ArrowUpCircle className="h-5 w-5" /> A Pagar
           </button>
@@ -117,7 +117,7 @@ export function FinancialPage() {
             <Filter className="h-5 w-5" /> Filtros
           </button>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <div className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-right shadow-soft">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Saldo em aberto</div>
             <div className={`text-xl font-bold ${type === 'PAYABLE' ? 'text-rose-600' : 'text-emerald-600'}`}>

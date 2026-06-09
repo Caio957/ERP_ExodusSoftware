@@ -57,5 +57,8 @@ export const purchaseSuggestionQuerySchema = z.object({
     message: 'Janela deve ser 30, 60 ou 90 dias',
   }).default(30),
   leadTimeDays: z.coerce.number().int().min(1).default(15),
+  brand: z.string().trim().optional(),
+  group: z.string().trim().optional(),
+  subgroup: z.string().trim().optional(),
 });
 export type PurchaseSuggestionQuery = z.infer<typeof purchaseSuggestionQuerySchema>;

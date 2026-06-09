@@ -49,6 +49,8 @@ export const confirmInvoiceItemSchema = z.object({
   quantity: positiveInt,
   unitCost: money,
   cfop: z.string().min(1),
+  /** Novo preço de venda; se omitido, mantém o atual da variante. */
+  newSalePrice: money.optional(),
   // Para gravar o De/Para:
   supplierItemCode: z.string().optional(),
   supplierBarcode: z.string().nullish(),
@@ -61,6 +63,7 @@ export const confirmInvoiceSchema = z.object({
   issueDate: z.coerce.date(),
   totalAmount: money,
   items: z.array(confirmInvoiceItemSchema).min(1, 'Nota sem itens'),
+  /** Duplicatas do XML (mantido para compatibilidade). */
   duplicates: z
     .array(
       z.object({
@@ -70,6 +73,13 @@ export const confirmInvoiceSchema = z.object({
       }),
     )
     .default([]),
+  /**
+   * Parcelas definidas pelo usuário no passo 3 do fluxo de importação.
+   * Se presente, substitui `duplicates` para geração das contas a pagar.
+   */
+  customInstallments: z
+    .array(z.object({ dueDate: z.coerce.date(), amount: money }))
+    .optional(),
 });
 export type ConfirmInvoiceInput = z.infer<typeof confirmInvoiceSchema>;
 

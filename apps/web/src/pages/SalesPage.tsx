@@ -401,28 +401,30 @@ function PrintSaleModal({ saleId, onClose }: { saleId: string; onClose: () => vo
   return (
     <div className="modal-overlay print:bg-white print:p-0">
       <div className="flex max-h-[92dvh] w-full animate-slide-up flex-col overflow-hidden rounded-t-3xl bg-white shadow-elevated sm:max-h-[90vh] sm:max-w-3xl sm:animate-scale-in sm:rounded-2xl print:max-h-none print:shadow-none">
-        <div className="flex items-center justify-between border-b border-slate-100 p-4 print:hidden">
-          <h2 className="font-display text-lg font-bold">Imprimir comprovante</h2>
-          <div className="flex items-center gap-2">
-            <div className="flex rounded-xl bg-slate-100 p-1">
+        <div className="border-b border-slate-100 p-4 print:hidden">
+          <div className="flex items-center justify-between">
+            <h2 className="font-display text-lg font-bold">Imprimir comprovante</h2>
+            <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          <div className="mt-3 flex items-center gap-2">
+            <div className="flex flex-1 rounded-xl bg-slate-100 p-1">
               <button
-                className={`rounded-lg px-3 py-1.5 text-sm font-medium ${format === 'thermal' ? 'bg-white shadow-soft' : 'text-slate-500'}`}
+                className={`flex-1 rounded-lg px-3 py-1.5 text-sm font-medium ${format === 'thermal' ? 'bg-white shadow-soft' : 'text-slate-500'}`}
                 onClick={() => setFormat('thermal')}
               >
                 Cupom térmico
               </button>
               <button
-                className={`rounded-lg px-3 py-1.5 text-sm font-medium ${format === 'a4' ? 'bg-white shadow-soft' : 'text-slate-500'}`}
+                className={`flex-1 rounded-lg px-3 py-1.5 text-sm font-medium ${format === 'a4' ? 'bg-white shadow-soft' : 'text-slate-500'}`}
                 onClick={() => setFormat('a4')}
               >
                 Folha A4
               </button>
             </div>
-            <button className="btn-primary" onClick={() => printReceipt()}>
+            <button className="btn-primary shrink-0" onClick={() => printReceipt()}>
               <Printer className="h-4 w-4" /> Imprimir
-            </button>
-            <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
-              <X className="h-5 w-5" />
             </button>
           </div>
         </div>
