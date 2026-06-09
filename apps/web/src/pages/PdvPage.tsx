@@ -640,7 +640,9 @@ function PaymentModal({
   const installments = aPrazoTotal > 0 && firstDueValid ? genInstallments() : undefined;
   const weekendParcelas = installments?.filter((p) => isWeekend(p.dueDate)) ?? [];
   const balanced = Math.abs(remaining) < 0.01;
-  const aPrazoOk = aPrazoTotal <= 0 || (hasClient && parcels >= 1 && firstDueValid);
+  // Basta existir UMA linha com método A_PRAZO para exigir cliente cadastrado.
+  const hasAPrazoLine = lines.some((l) => l.method === 'A_PRAZO');
+  const aPrazoOk = !hasAPrazoLine || (hasClient && parcels >= 1 && firstDueValid);
   const canConfirm = balanced && aPrazoOk && lines.every((l) => l.amount > 0);
 
   return (
@@ -726,7 +728,7 @@ function PaymentModal({
                 Selecione um cliente no carrinho para vender a prazo.
               </div>
             )}
-            <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
+            <div className="grid grid-cols-2 gap-2 overflow-hidden text-sm sm:grid-cols-3">
               <label>
                 <span className="mb-1 block text-xs text-slate-500">Parcelas</span>
                 <input
@@ -737,13 +739,13 @@ function PaymentModal({
                   className="input h-9"
                 />
               </label>
-              <label className="col-span-2 sm:col-span-1">
+              <label className="col-span-2 min-w-0 sm:col-span-1">
                 <span className="mb-1 block text-xs text-slate-500">1º vencimento *</span>
                 <input
                   type="date"
                   value={firstDue}
                   onChange={(e) => setFirstDue(e.target.value)}
-                  className={`input h-9 ${!firstDueValid ? 'border-rose-400 focus:border-rose-500 focus:ring-rose-400/20' : ''}`}
+                  className={`input h-9 w-full min-w-0 ${!firstDueValid ? 'border-rose-400 focus:border-rose-500 focus:ring-rose-400/20' : ''}`}
                 />
                 {!firstDueValid && (
                   <span className="mt-0.5 block text-xs font-medium text-rose-600">Informe a data</span>
