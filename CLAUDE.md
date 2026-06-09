@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-06-07
+- **Última atualização:** 2026-06-08
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -214,7 +214,9 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   Endpoints: `GET/PUT/DELETE /products/stock-adjustments(/:id)`.
 - ✅ **Configurações** (ADMIN) em abas: **Produto** (campos obrigatórios + lote/validade
   padrão), **Recebimentos** (tipos de pagamento configuráveis: renomear/ativar/adicionar,
-  consumidos dinamicamente pelo PDV) e **Empresa** (dados cadastrais do contratante).
+  consumidos dinamicamente pelo PDV), **Empresa** (dados cadastrais do contratante) e
+  **Usuários** (CRUD completo: criar/editar/excluir; definir quais telas cada operador
+  pode acessar via checkboxes — `allowedPages` granular por usuário).
 - ✅ **Recibo térmico** 58/80mm + `window.print()` (§4.7).
 - ✅ **PWA**: manifest + Service Worker (Workbox) com cache de app shell e API.
 
@@ -247,6 +249,7 @@ O schema Prisma do briefing foi **mantido como base, porém corrigido e estendid
 | Mudança | Motivo |
 |--------|--------|
 | `User.passwordHash` | O model original não tinha campo de senha; necessário para JWT/bcrypt. |
+| `User.allowedPages Json?` | Controle granular de acesso por página para CASHIER (null = padrão do papel). |
 | `ProductVariant.batch` (nullable) | Lote agora **opcional** — obrigatório só quando `Product.tracksLotValidity = true` (configurável por produto). |
 | `Product.tracksLotValidity` (booleano) | Liga/desliga exigência de lote/validade por produto (migração `add_lot_validity_control`). |
 | `Person.document` opcional (mantém `@unique`) | Clientes de balcão sem CPF; no Postgres, múltiplos `NULL` não colidem. |
@@ -476,6 +479,30 @@ Railway a cada deploy (`prisma migrate deploy`).
     degradê azul→dourado. **PDV**: botões de pagamento harmonizados (a prazo dourado).
   - Favicon e `theme_color` atualizados para azul/dourado.
   - `npm run typecheck` + `npm run build` → **0 erros**.
+- ✅ **Onda 2026-06-08 — Usuários, XML multi-etapas, Sugestão de compras** (2026-06-08):
+  - **Gerenciamento de usuários** (Configurações > Usuários): CRUD completo de usuários
+    (criar/editar/excluir); para cada operador define-se quais telas pode acessar via
+    checkboxes (`allowedPages`); ADMIN sempre tem acesso total independente de `allowedPages`.
+  - **Schema + migração** `20260608000000_user_allowed_pages`: `User.allowedPages JSONB`
+    (null = usa padrão do papel; array = restrição personalizada para CASHIER).
+  - **Backend auth**: `GET /api/auth/users`, `PUT /api/auth/users/:id`,
+    `DELETE /api/auth/users/:id` (não pode excluir a si mesmo); `GET /api/auth/me`
+    inclui `allowedPages`.
+  - **Store auth**: `canAccess(pageKey)` substitui `adminOnly`; CASHIER padrão =
+    `['pdv', 'products', 'cash', 'registrations']`; Layout filtra nav por `canAccess`.
+  - **Sugestão de compras**: retorna TODOS os produtos/variantes (não só os com vendas
+    na janela); filtros `brand`/`group`/`subgroup`; ordena por sugestão desc + nome.
+  - **Importação XML — fluxo 3 etapas**:
+    1. De/Para: modal catálogo completo (busca + filtros marca/grupo + grid de produtos)
+    2. Revisão de preços: custo anterior, custo XML, preço de venda atual e campo para
+       novo preço de venda por item (deixar vazio = manter).
+    3. Contas a pagar: opções — duplicatas do XML, parcelamento personalizado ou sem
+       financeiro.
+  - **Backend invoice confirm**: aplica `newSalePrice` por item; `customInstallments`
+    sobrepõe `duplicates` na geração de contas a pagar.
+  - **Fix mobile**: PrintSaleModal header em 2 linhas; FinancialPage `flex-wrap`;
+    PurchaseDetail modal hoistado ao nível do `PurchasesPage` (fora de `.card`).
+  - `npm run typecheck` + `npm run build` → **0 erros**. Commit `86766ce`.
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---
