@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-06-08
+- **Última atualização:** 2026-06-09
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -512,6 +512,18 @@ Railway a cada deploy (`prisma migrate deploy`).
     qualquer linha com método A_PRAZO (mesmo com valor 0) para exigir cliente cadastrado;
     `min-w-0 w-full` no input de data + `overflow-hidden` no grid impedem o campo de
     vazar fora do card no iOS/Safari. Commit `5e9b7c7`.
+- ✅ **Onda 2026-06-09 — Fixes UX inputs numéricos + layout carrinho PDV** (2026-06-09):
+  - **Fix inputs numéricos** (`PdvPage`, `SalesPage`, `ProductsPage`): `onFocus={(e) => e.target.select()}`
+    em todos os inputs de valor unitário, custo e preço de venda — ao tocar no campo o valor é
+    selecionado inteiro, evitando o bug onde digitar "30" sobre "0" resultava em "030".
+    `parseFloat` substitui `Number()` no `onChange` para consistência no parser.
+    Arquivos: `PdvPage.tsx` (valor unitário do carrinho), `SalesPage.tsx` (valor unitário na
+    edição de venda), `ProductsPage.tsx` (custo/venda das variantes + componente `PriceField`).
+  - **Fix layout carrinho PDV mobile**: valores de total grandes (ex: R$ 3.000,00) estouravam
+    a div pai no mobile. Container flex recebeu `min-w-0`; grupo de controles (−/qtd/+) e
+    grupo do input receberam `shrink-0`; span do total trocou `w-20` fixo por
+    `min-w-0 flex-1 truncate` — absorve o espaço restante sem vazar a tela.
+  - `npm run typecheck` → **0 erros**. Commit `0d1283d`.
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---
