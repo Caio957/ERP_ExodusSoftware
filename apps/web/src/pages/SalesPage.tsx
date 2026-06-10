@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Receipt,
@@ -632,14 +632,9 @@ function EditSaleModal({
                     </div>
                     <div className="flex items-center gap-1 text-sm">
                       <span className="text-slate-400">R$</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
+                      <EditItemPriceInput
                         value={it.unitPrice}
-                        onChange={(e) => setItem(it.variantId, { unitPrice: Math.max(0, parseFloat(e.target.value) || 0) })}
-                        onFocus={(e) => e.target.select()}
-                        className="w-20 rounded-lg border border-slate-200 px-2 py-1 text-right outline-none focus:border-brand-400"
+                        onChange={(v) => setItem(it.variantId, { unitPrice: v })}
                       />
                     </div>
                     <span className="w-20 text-right font-bold">{brl(it.unitPrice * it.quantity)}</span>
@@ -851,5 +846,31 @@ function ClientPicker({
         </div>
       )}
     </div>
+  );
+}
+
+function EditItemPriceInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const [raw, setRaw] = useState(() => (value !== 0 ? String(value) : ''));
+  const skipSync = useRef(false);
+
+  useEffect(() => {
+    if (skipSync.current) { skipSync.current = false; return; }
+    setRaw(value !== 0 ? String(value) : '');
+  }, [value]);
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={raw}
+      onChange={(e) => {
+        const cleaned = e.target.value.replace(/^0+(?=\d)/, '');
+        setRaw(cleaned);
+        skipSync.current = true;
+        onChange(Math.max(0, parseFloat(cleaned) || 0));
+      }}
+      onFocus={(e) => e.target.select()}
+      className="w-20 rounded-lg border border-slate-200 px-2 py-1 text-right outline-none focus:border-brand-400"
+    />
   );
 }

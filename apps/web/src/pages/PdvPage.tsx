@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { type PaymentType, DEFAULT_PAYMENT_TYPES } from '@exodus/shared';
 import {
@@ -387,16 +387,9 @@ export function PdvPage() {
                     {/* Valor unitário editável (Requisito B4) */}
                     <div className="flex shrink-0 items-center gap-1 text-sm">
                       <span className="text-slate-400">R$</span>
-                      <input
-                        type="number"
-                        inputMode="decimal"
-                        step="0.01"
-                        min="0"
+                      <UnitPriceInput
                         value={it.unitPrice}
-                        onChange={(e) => changeUnitPrice(it.variantId, parseFloat(e.target.value) || 0)}
-                        onFocus={(e) => e.target.select()}
-                        className="w-20 rounded-lg border border-slate-200 bg-white px-2 py-1 text-right font-medium outline-none focus:border-brand-400"
-                        title="Valor unitário"
+                        onChange={(v) => changeUnitPrice(it.variantId, v)}
                       />
                     </div>
                     <span className="min-w-0 flex-1 truncate text-right font-bold text-slate-800">
@@ -960,5 +953,32 @@ function AdjustRow({
         </div>
       </div>
     </div>
+  );
+}
+
+function UnitPriceInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const [raw, setRaw] = useState(() => (value !== 0 ? String(value) : ''));
+  const skipSync = useRef(false);
+
+  useEffect(() => {
+    if (skipSync.current) { skipSync.current = false; return; }
+    setRaw(value !== 0 ? String(value) : '');
+  }, [value]);
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={raw}
+      onChange={(e) => {
+        const cleaned = e.target.value.replace(/^0+(?=\d)/, '');
+        setRaw(cleaned);
+        skipSync.current = true;
+        onChange(parseFloat(cleaned) || 0);
+      }}
+      onFocus={(e) => e.target.select()}
+      className="w-20 rounded-lg border border-slate-200 bg-white px-2 py-1 text-right font-medium outline-none focus:border-brand-400"
+      title="Valor unitário"
+    />
   );
 }

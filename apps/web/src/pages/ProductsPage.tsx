@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   marginFromPrice,
@@ -552,28 +552,18 @@ function EditProductModal({
                     onChange={(e) => setVariant(v.id, { barcode: e.target.value })}
                   />
                 </label>
-                <label className="block">
-                  <Lbl required>Custo (R$)</Lbl>
-                  <input
-                    className="input"
-                    type="number"
-                    inputMode="decimal"
-                    value={v.costPrice}
-                    onChange={(e) => setVariant(v.id, { costPrice: parseFloat(e.target.value) || 0 })}
-                    onFocus={(e) => e.target.select()}
-                  />
-                </label>
-                <label className="block">
-                  <Lbl required>Venda (R$)</Lbl>
-                  <input
-                    className="input"
-                    type="number"
-                    inputMode="decimal"
-                    value={v.salePrice}
-                    onChange={(e) => setVariant(v.id, { salePrice: parseFloat(e.target.value) || 0 })}
-                    onFocus={(e) => e.target.select()}
-                  />
-                </label>
+                <NumField
+                  label="Custo (R$)"
+                  required
+                  value={v.costPrice}
+                  onChange={(val) => setVariant(v.id, { costPrice: val })}
+                />
+                <NumField
+                  label="Venda (R$)"
+                  required
+                  value={v.salePrice}
+                  onChange={(val) => setVariant(v.id, { salePrice: val })}
+                />
                 {tracksLotValidity && (
                   <>
                     <label className="block">
@@ -654,6 +644,14 @@ function NumField({
   required?: boolean;
   onChange: (v: number) => void;
 }) {
+  const [raw, setRaw] = useState(() => (value !== 0 ? String(value) : ''));
+  const skipSync = useRef(false);
+
+  useEffect(() => {
+    if (skipSync.current) { skipSync.current = false; return; }
+    setRaw(value !== 0 ? String(value) : '');
+  }, [value]);
+
   return (
     <label className="block">
       <span className="label">
@@ -662,10 +660,15 @@ function NumField({
       </span>
       <input
         className="input"
-        type="number"
+        type="text"
         inputMode="decimal"
-        value={Number.isFinite(value) ? value : 0}
-        onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+        value={raw}
+        onChange={(e) => {
+          const cleaned = e.target.value.replace(/^0+(?=\d)/, '');
+          setRaw(cleaned);
+          skipSync.current = true;
+          onChange(parseFloat(cleaned) || 0);
+        }}
         onFocus={(e) => e.target.select()}
       />
     </label>
