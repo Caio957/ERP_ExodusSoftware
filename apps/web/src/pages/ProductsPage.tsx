@@ -559,7 +559,8 @@ function EditProductModal({
                     type="number"
                     inputMode="decimal"
                     value={v.costPrice}
-                    onChange={(e) => setVariant(v.id, { costPrice: Number(e.target.value) })}
+                    onChange={(e) => setVariant(v.id, { costPrice: parseFloat(e.target.value) || 0 })}
+                    onFocus={(e) => e.target.select()}
                   />
                 </label>
                 <label className="block">
@@ -569,7 +570,8 @@ function EditProductModal({
                     type="number"
                     inputMode="decimal"
                     value={v.salePrice}
-                    onChange={(e) => setVariant(v.id, { salePrice: Number(e.target.value) })}
+                    onChange={(e) => setVariant(v.id, { salePrice: parseFloat(e.target.value) || 0 })}
+                    onFocus={(e) => e.target.select()}
                   />
                 </label>
                 {tracksLotValidity && (
@@ -663,7 +665,8 @@ function NumField({
         type="number"
         inputMode="decimal"
         value={Number.isFinite(value) ? value : 0}
-        onChange={(e) => onChange(Number(e.target.value))}
+        onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+        onFocus={(e) => e.target.select()}
       />
     </label>
   );

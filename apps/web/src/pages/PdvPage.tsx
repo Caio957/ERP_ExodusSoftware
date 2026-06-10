@@ -368,8 +368,8 @@ export function PdvPage() {
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <div className="flex shrink-0 items-center gap-1.5">
                       <button
                         className="grid h-9 w-9 place-items-center rounded-lg bg-white text-slate-600 shadow-sm ring-1 ring-slate-200 transition active:scale-90 hover:text-brand-600"
                         onClick={() => changeQty(it.variantId, -1)}
@@ -385,7 +385,7 @@ export function PdvPage() {
                       </button>
                     </div>
                     {/* Valor unitário editável (Requisito B4) */}
-                    <div className="flex items-center gap-1 text-sm">
+                    <div className="flex shrink-0 items-center gap-1 text-sm">
                       <span className="text-slate-400">R$</span>
                       <input
                         type="number"
@@ -393,12 +393,13 @@ export function PdvPage() {
                         step="0.01"
                         min="0"
                         value={it.unitPrice}
-                        onChange={(e) => changeUnitPrice(it.variantId, Number(e.target.value))}
+                        onChange={(e) => changeUnitPrice(it.variantId, parseFloat(e.target.value) || 0)}
+                        onFocus={(e) => e.target.select()}
                         className="w-20 rounded-lg border border-slate-200 bg-white px-2 py-1 text-right font-medium outline-none focus:border-brand-400"
                         title="Valor unitário"
                       />
                     </div>
-                    <span className="w-20 text-right font-bold text-slate-800">
+                    <span className="min-w-0 flex-1 truncate text-right font-bold text-slate-800">
                       {brl(it.unitPrice * it.quantity)}
                     </span>
                   </div>

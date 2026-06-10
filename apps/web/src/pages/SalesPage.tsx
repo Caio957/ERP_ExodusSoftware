@@ -637,7 +637,8 @@ function EditSaleModal({
                         step="0.01"
                         min="0"
                         value={it.unitPrice}
-                        onChange={(e) => setItem(it.variantId, { unitPrice: Math.max(0, Number(e.target.value)) })}
+                        onChange={(e) => setItem(it.variantId, { unitPrice: Math.max(0, parseFloat(e.target.value) || 0) })}
+                        onFocus={(e) => e.target.select()}
                         className="w-20 rounded-lg border border-slate-200 px-2 py-1 text-right outline-none focus:border-brand-400"
                       />
                     </div>
