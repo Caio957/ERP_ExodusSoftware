@@ -682,7 +682,8 @@ function EditSaleModal({
                   step="0.01"
                   min="0"
                   value={discount || ''}
-                  onChange={(e) => setDiscount(Number(e.target.value) || 0)}
+                  onKeyDown={(e) => { if (e.key === '-') e.preventDefault(); }}
+                  onChange={(e) => setDiscount(Math.max(0, parseFloat(e.target.value) || 0))}
                   className="w-24 rounded-lg border border-slate-200 px-2 py-1 text-right outline-none"
                   placeholder="0,00"
                 />
@@ -694,7 +695,8 @@ function EditSaleModal({
                   step="0.01"
                   min="0"
                   value={surcharge || ''}
-                  onChange={(e) => setSurcharge(Number(e.target.value) || 0)}
+                  onKeyDown={(e) => { if (e.key === '-') e.preventDefault(); }}
+                  onChange={(e) => setSurcharge(Math.max(0, parseFloat(e.target.value) || 0))}
                   className="w-24 rounded-lg border border-slate-200 px-2 py-1 text-right outline-none"
                   placeholder="0,00"
                 />
