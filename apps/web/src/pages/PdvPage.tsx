@@ -933,7 +933,7 @@ function AdjustRow({
             step="0.01"
             min="0"
             value={amount || ''}
-            onKeyDown={(e) => { if (e.key === '-') e.preventDefault(); }}
+            onKeyDown={(e) => { if (['-', '+', 'e', 'E'].includes(e.key)) e.preventDefault(); }}
             onChange={(e) => onAmount(Math.max(0, parseFloat(e.target.value) || 0))}
             className="w-16 py-1 text-right outline-none"
             placeholder="0,00"
@@ -946,7 +946,7 @@ function AdjustRow({
             step="0.1"
             min="0"
             value={pct || ''}
-            onKeyDown={(e) => { if (e.key === '-') e.preventDefault(); }}
+            onKeyDown={(e) => { if (['-', '+', 'e', 'E'].includes(e.key)) e.preventDefault(); }}
             onChange={(e) => onPct(Math.max(0, parseFloat(e.target.value) || 0))}
             className="w-12 py-1 text-right outline-none"
             placeholder="0"
