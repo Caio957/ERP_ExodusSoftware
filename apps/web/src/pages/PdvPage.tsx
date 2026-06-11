@@ -956,13 +956,23 @@ function AdjustRow({
   );
 }
 
+function sanitizeBr(s: string): string {
+  let v = s.replace(/\./g, ',');
+  v = v.replace(/[^\d,]/g, '');
+  v = v.replace(/^,/, '');
+  const parts = v.split(',');
+  if (parts.length > 1) v = parts[0] + ',' + parts.slice(1).join('');
+  return v.replace(/^0+(?=\d)/, '');
+}
+
 function UnitPriceInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  const [raw, setRaw] = useState(() => (value !== 0 ? String(value) : ''));
+  const toRaw = (n: number) => (n !== 0 ? String(n).replace('.', ',') : '');
+  const [raw, setRaw] = useState(() => toRaw(value));
   const skipSync = useRef(false);
 
   useEffect(() => {
     if (skipSync.current) { skipSync.current = false; return; }
-    setRaw(value !== 0 ? String(value) : '');
+    setRaw(toRaw(value));
   }, [value]);
 
   return (
@@ -971,10 +981,10 @@ function UnitPriceInput({ value, onChange }: { value: number; onChange: (v: numb
       inputMode="decimal"
       value={raw}
       onChange={(e) => {
-        const cleaned = e.target.value.replace(/^0+(?=\d)/, '');
+        const cleaned = sanitizeBr(e.target.value);
         setRaw(cleaned);
         skipSync.current = true;
-        onChange(parseFloat(cleaned) || 0);
+        onChange(parseFloat(cleaned.replace(',', '.')) || 0);
       }}
       onFocus={(e) => e.target.select()}
       className="w-20 rounded-lg border border-slate-200 bg-white px-2 py-1 text-right font-medium outline-none focus:border-brand-400"
