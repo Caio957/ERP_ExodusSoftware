@@ -677,28 +677,20 @@ function EditSaleModal({
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-rose-600">Desconto (R$)</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={discount || ''}
-                  onKeyDown={(e) => { if (['-', '+', 'e', 'E'].includes(e.key)) e.preventDefault(); }}
-                  onChange={(e) => setDiscount(Math.max(0, parseFloat(e.target.value) || 0))}
-                  className="w-24 rounded-lg border border-slate-200 px-2 py-1 text-right outline-none"
+                <FinancialAdjustInput
+                  value={discount}
+                  onChange={setDiscount}
                   placeholder="0,00"
+                  className="w-24 rounded-lg border border-slate-200 px-2 py-1 text-right outline-none"
                 />
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-emerald-600">Acréscimo (R$)</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={surcharge || ''}
-                  onKeyDown={(e) => { if (['-', '+', 'e', 'E'].includes(e.key)) e.preventDefault(); }}
-                  onChange={(e) => setSurcharge(Math.max(0, parseFloat(e.target.value) || 0))}
-                  className="w-24 rounded-lg border border-slate-200 px-2 py-1 text-right outline-none"
+                <FinancialAdjustInput
+                  value={surcharge}
+                  onChange={setSurcharge}
                   placeholder="0,00"
+                  className="w-24 rounded-lg border border-slate-200 px-2 py-1 text-right outline-none"
                 />
               </div>
               <div className="flex items-center justify-between">
@@ -883,6 +875,45 @@ function EditItemPriceInput({ value, onChange }: { value: number; onChange: (v: 
       }}
       onFocus={(e) => e.target.select()}
       className="w-20 rounded-lg border border-slate-200 px-2 py-1 text-right outline-none focus:border-brand-400"
+    />
+  );
+}
+
+function FinancialAdjustInput({
+  value,
+  onChange,
+  placeholder,
+  className,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  placeholder?: string;
+  className?: string;
+}) {
+  const toRaw = (n: number) => (n !== 0 ? String(n).replace('.', ',') : '');
+  const [raw, setRaw] = useState(() => toRaw(value));
+  const skipSync = useRef(false);
+
+  useEffect(() => {
+    if (skipSync.current) { skipSync.current = false; return; }
+    setRaw(toRaw(value));
+  }, [value]);
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={raw}
+      placeholder={placeholder}
+      className={className}
+      onKeyDown={(e) => { if (['-', '+', 'e', 'E'].includes(e.key)) e.preventDefault(); }}
+      onChange={(e) => {
+        const cleaned = sanitizeBr(e.target.value);
+        setRaw(cleaned);
+        skipSync.current = true;
+        onChange(Math.max(0, parseFloat(cleaned.replace(',', '.')) || 0));
+      }}
+      onFocus={(e) => e.target.select()}
     />
   );
 }

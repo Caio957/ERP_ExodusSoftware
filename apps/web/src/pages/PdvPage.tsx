@@ -920,6 +920,22 @@ function AdjustRow({
   onAmount: (v: number) => void;
   onPct: (v: number) => void;
 }) {
+  const toRaw = (n: number) => (n !== 0 ? String(n).replace('.', ',') : '');
+
+  const [rawAmount, setRawAmount] = useState(() => toRaw(amount));
+  const skipAmount = useRef(false);
+  useEffect(() => {
+    if (skipAmount.current) { skipAmount.current = false; return; }
+    setRawAmount(toRaw(amount));
+  }, [amount]);
+
+  const [rawPct, setRawPct] = useState(() => toRaw(pct));
+  const skipPct = useRef(false);
+  useEffect(() => {
+    if (skipPct.current) { skipPct.current = false; return; }
+    setRawPct(toRaw(pct));
+  }, [pct]);
+
   const color = tone === 'rose' ? 'text-rose-600' : 'text-emerald-600';
   return (
     <div className="flex items-center justify-between gap-2">
@@ -928,26 +944,34 @@ function AdjustRow({
         <div className="flex items-center gap-1 rounded-lg border border-slate-200 px-2">
           <span className="text-xs text-slate-400">R$</span>
           <input
-            type="number"
+            type="text"
             inputMode="decimal"
-            step="0.01"
-            min="0"
-            value={amount || ''}
+            value={rawAmount}
             onKeyDown={(e) => { if (['-', '+', 'e', 'E'].includes(e.key)) e.preventDefault(); }}
-            onChange={(e) => onAmount(Math.max(0, parseFloat(e.target.value) || 0))}
+            onChange={(e) => {
+              const cleaned = sanitizeBr(e.target.value);
+              setRawAmount(cleaned);
+              skipAmount.current = true;
+              onAmount(Math.max(0, parseFloat(cleaned.replace(',', '.')) || 0));
+            }}
+            onFocus={(e) => e.target.select()}
             className="w-16 py-1 text-right outline-none"
             placeholder="0,00"
           />
         </div>
         <div className="flex items-center gap-1 rounded-lg border border-slate-200 px-2">
           <input
-            type="number"
+            type="text"
             inputMode="decimal"
-            step="0.1"
-            min="0"
-            value={pct || ''}
+            value={rawPct}
             onKeyDown={(e) => { if (['-', '+', 'e', 'E'].includes(e.key)) e.preventDefault(); }}
-            onChange={(e) => onPct(Math.max(0, parseFloat(e.target.value) || 0))}
+            onChange={(e) => {
+              const cleaned = sanitizeBr(e.target.value);
+              setRawPct(cleaned);
+              skipPct.current = true;
+              onPct(Math.max(0, parseFloat(cleaned.replace(',', '.')) || 0));
+            }}
+            onFocus={(e) => e.target.select()}
             className="w-12 py-1 text-right outline-none"
             placeholder="0"
           />
