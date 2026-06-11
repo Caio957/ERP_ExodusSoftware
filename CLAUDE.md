@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-06-09
+- **Última atualização:** 2026-06-10
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -524,6 +524,31 @@ Railway a cada deploy (`prisma migrate deploy`).
     grupo do input receberam `shrink-0`; span do total trocou `w-20` fixo por
     `min-w-0 flex-1 truncate` — absorve o espaço restante sem vazar a tela.
   - `npm run typecheck` → **0 erros**. Commit `0d1283d`.
+- ✅ **Onda 2026-06-10 — Ciclo de qualidade QA: inputs numéricos BR** (2026-06-10):
+  - **Fix "zero fantasma" (causa raiz)** (`PdvPage`, `SalesPage`, `ProductsPage`): migração de
+    `type="number"` para `type="text"` + estado local de string (`raw`) com ref `skipSync` em
+    todos os inputs de valor unitário, custo e preço. O campo pode ficar vazio ao apagar;
+    o pai recebe `parseFloat || 0` a cada tecla sem round-trip que recria o "0". Novos
+    componentes: `UnitPriceInput` (`PdvPage`), `EditItemPriceInput` (`SalesPage`); `NumField`
+    refatorado (`ProductsPage`); inputs inline de variante substituídos por `NumField`.
+    Commit `eb47ad1`.
+  - **Padrão BR de vírgula decimal** (`PdvPage`, `SalesPage`, `ProductsPage`): função
+    `sanitizeBr()` adicionada nos três arquivos — converte ponto em vírgula, remove caracteres
+    inválidos, garante uma única vírgula, elimina zeros à esquerda. `onChange` chama
+    `parseFloat(cleaned.replace(',', '.'))` para repasse ao estado numérico do pai. Inicialização
+    e `useEffect` de sync usam `String(value).replace('.', ',')`. Commit `295d7c8`.
+  - **Bloqueio de negativos em desconto/acréscimo** (`PdvPage` — `AdjustRow`, `SalesPage`):
+    `onKeyDown` bloqueia `-` + `Math.max(0, ...)` no `onChange` como rede de segurança.
+    `min="0"` já existia para as setas nativas. Commit `550eb9d`.
+  - **Bloqueio de `+`, `e`, `E`** nos mesmos 4 inputs: `onKeyDown` expandido para
+    `['-', '+', 'e', 'E']` — impede notação científica (`10e2`) e sinal positivo explícito.
+    Commit `f802d84`.
+  - **`sanitizeBr` nos campos de desconto/acréscimo** (`PdvPage` — `AdjustRow`, `SalesPage`):
+    `AdjustRow` ganhou estados locais `rawAmount`/`rawPct` com `skipSync` independentes;
+    ambos os inputs migrados para `type="text"`. Na `SalesPage`, os dois inputs inline
+    foram substituídos pelo novo componente `FinancialAdjustInput` (mesmo padrão do
+    `EditItemPriceInput`). Commit `73f2439`.
+  - `npm run typecheck` → **0 erros** em todos os commits.
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---
