@@ -725,11 +725,10 @@ function PaymentModal({
             <div className="grid grid-cols-2 gap-2 overflow-hidden text-sm sm:grid-cols-3">
               <label>
                 <span className="mb-1 block text-xs text-slate-500">Parcelas</span>
-                <input
-                  type="number"
-                  min="1"
+                <IntegerInput
                   value={parcels}
-                  onChange={(e) => setParcels(Number(e.target.value) || 1)}
+                  onChange={setParcels}
+                  min={1}
                   className="input h-9"
                 />
               </label>
@@ -747,11 +746,10 @@ function PaymentModal({
               </label>
               <label>
                 <span className="mb-1 block text-xs text-slate-500">Intervalo (dias)</span>
-                <input
-                  type="number"
-                  min="1"
+                <IntegerInput
                   value={intervalDays}
-                  onChange={(e) => setIntervalDays(Number(e.target.value) || 30)}
+                  onChange={setIntervalDays}
+                  min={1}
                   className="input h-9"
                 />
               </label>
@@ -1043,6 +1041,43 @@ function SplitAmountInput({ value, onChange }: { value: number; onChange: (v: nu
       onFocus={(e) => e.target.select()}
       className="h-10 w-24 rounded-lg border border-slate-200 px-2 text-right text-sm outline-none focus:border-brand-400"
       placeholder="0,00"
+    />
+  );
+}
+
+function IntegerInput({
+  value,
+  onChange,
+  min = 1,
+  className,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  min?: number;
+  className?: string;
+}) {
+  const [raw, setRaw] = useState(() => String(value));
+  const skipSync = useRef(false);
+
+  useEffect(() => {
+    if (skipSync.current) { skipSync.current = false; return; }
+    setRaw(String(value));
+  }, [value]);
+
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      value={raw}
+      className={className}
+      onKeyDown={(e) => { if (['-', '+', 'e', 'E', '.', ','].includes(e.key)) e.preventDefault(); }}
+      onChange={(e) => {
+        const cleaned = e.target.value.replace(/\D/g, '');
+        setRaw(cleaned);
+        skipSync.current = true;
+        onChange(parseInt(cleaned, 10) || min);
+      }}
+      onFocus={(e) => e.target.select()}
     />
   );
 }
