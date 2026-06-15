@@ -670,18 +670,18 @@ function PaymentModal({
                   </option>
                 ))}
               </select>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={l.amount || ''}
-                onChange={(e) =>
-                  setLines((prev) =>
-                    prev.map((x, j) => (j === i ? { ...x, amount: Number(e.target.value) || 0 } : x)),
-                  )
-                }
-                className="h-10 w-24 rounded-lg border border-slate-200 px-2 text-right text-sm outline-none focus:border-brand-400"
-                placeholder="0,00"
+              <SplitAmountInput
+                value={l.amount}
+                onChange={(v) => {
+                  setLines((prev) => {
+                    const next = prev.map((x, j) => (j === i ? { ...x, amount: v } : x));
+                    if (i > 0 && next[0]) {
+                      const othersSum = round2(next.slice(1).reduce((a, x) => a + x.amount, 0));
+                      next[0] = { ...next[0], amount: Math.max(0, round2(total - othersSum)) };
+                    }
+                    return next;
+                  });
+                }}
               />
               <button
                 className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-500 disabled:opacity-30"
@@ -1015,6 +1015,34 @@ function UnitPriceInput({ value, onChange }: { value: number; onChange: (v: numb
       onFocus={(e) => e.target.select()}
       className="w-20 rounded-lg border border-slate-200 bg-white px-2 py-1 text-right font-medium outline-none focus:border-brand-400"
       title="Valor unitário"
+    />
+  );
+}
+
+function SplitAmountInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const toRaw = (n: number) => (n !== 0 ? String(n).replace('.', ',') : '');
+  const [raw, setRaw] = useState(() => toRaw(value));
+  const skipSync = useRef(false);
+
+  useEffect(() => {
+    if (skipSync.current) { skipSync.current = false; return; }
+    setRaw(toRaw(value));
+  }, [value]);
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={raw}
+      onChange={(e) => {
+        const cleaned = sanitizeBr(e.target.value);
+        setRaw(cleaned);
+        skipSync.current = true;
+        onChange(Math.max(0, parseFloat(cleaned.replace(',', '.')) || 0));
+      }}
+      onFocus={(e) => e.target.select()}
+      className="h-10 w-24 rounded-lg border border-slate-200 px-2 text-right text-sm outline-none focus:border-brand-400"
+      placeholder="0,00"
     />
   );
 }
