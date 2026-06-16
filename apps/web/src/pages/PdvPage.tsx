@@ -1300,8 +1300,8 @@ function ChangeCalculatorModal({
             Valor exato (Pular)
           </button>
           <button
-            className="btn-primary flex-1"
-            disabled={insufficient}
+            className="btn-primary flex-1 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={received < total}
             onClick={onConfirm}
           >
             Confirmar venda
