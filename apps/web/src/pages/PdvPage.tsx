@@ -799,7 +799,17 @@ function PaymentModal({
                 <span className="mb-1 block text-xs text-slate-500">Parcelas</span>
                 <IntegerInput
                   value={parcels}
-                  onChange={(v) => { setParcels(v); setCustomDates({}); }}
+                  onChange={(val) => {
+                    setParcels(val);
+                    setCustomDates({});
+                    const parsed = conditionStr
+                      .split(/[\/\-,.]/)
+                      .map((n) => parseInt(n.trim(), 10))
+                      .filter((n) => !isNaN(n));
+                    if (parsed.length > 1) {
+                      setConditionStr(String(parsed[0] ?? 30));
+                    }
+                  }}
                   min={1}
                   className="input h-9"
                 />
