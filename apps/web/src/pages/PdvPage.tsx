@@ -78,6 +78,7 @@ export function PdvPage() {
   const [notes, setNotes] = useState('');
   const [client, setClient] = useState<{ id: string; name: string } | null>(null);
   const [showPayment, setShowPayment] = useState(false);
+  const [showClientSearch, setShowClientSearch] = useState(false);
   const [confirmMethod, setConfirmMethod] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [lastSale, setLastSale] = useState<{
@@ -529,9 +530,18 @@ export function PdvPage() {
         <PaymentModal
           total={total}
           hasClient={!!client}
+          clientName={client?.name ?? null}
           types={paymentTypes}
           onClose={() => setShowPayment(false)}
           onConfirm={(payments, installments) => void doSale(payments, installments)}
+          onRequestSelectClient={() => setShowClientSearch(true)}
+        />
+      )}
+
+      {showClientSearch && (
+        <ClientSearchOverlay
+          onSelect={(c) => { setClient(c); setShowClientSearch(false); }}
+          onClose={() => setShowClientSearch(false)}
         />
       )}
 
@@ -574,18 +584,22 @@ export function PdvPage() {
 function PaymentModal({
   total,
   hasClient,
+  clientName,
   types,
   onClose,
   onConfirm,
+  onRequestSelectClient,
 }: {
   total: number;
   hasClient: boolean;
+  clientName: string | null;
   types: PaymentType[];
   onClose: () => void;
   onConfirm: (
     payments: { method: string; amount: number }[],
     installments?: { dueDate: string; amount: number }[],
   ) => void;
+  onRequestSelectClient: () => void;
 }) {
   const firstCode = types[0]?.code ?? 'CASH';
   const [lines, setLines] = useState<{ method: string; amount: number }[]>([
@@ -655,6 +669,24 @@ function PaymentModal({
           <span className="text-xl font-bold">{brl(total)}</span>
         </div>
 
+        {/* Cliente vinculado à venda */}
+        <div className="mb-3 flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+          <div className="flex items-center gap-2">
+            <User className="h-4 w-4 shrink-0 text-slate-400" />
+            <div>
+              <p className="text-xs text-slate-500">Cliente</p>
+              <p className="text-sm font-semibold text-slate-900">{clientName ?? 'Balcão'}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onRequestSelectClient}
+            className="text-sm font-semibold text-brand-600 hover:text-brand-800"
+          >
+            {clientName ? 'Alterar' : 'Selecionar'}
+          </button>
+        </div>
+
         <div className="space-y-2">
           {lines.map((l, i) => (
             <div key={i} className="flex items-center gap-2">
@@ -720,7 +752,14 @@ function PaymentModal({
             </div>
             {!hasClient && (
               <div className="mb-2 text-xs font-medium text-rose-600">
-                Selecione um cliente no carrinho para vender a prazo.
+                Selecione um cliente para vender a prazo.{' '}
+                <button
+                  type="button"
+                  onClick={onRequestSelectClient}
+                  className="font-semibold underline hover:text-rose-700"
+                >
+                  Vincular agora
+                </button>
               </div>
             )}
             <div className="grid grid-cols-2 gap-2 overflow-hidden text-sm sm:grid-cols-3">
@@ -1095,5 +1134,55 @@ function IntegerInput({
       }}
       onFocus={(e) => e.target.select()}
     />
+  );
+}
+
+/** Overlay de busca de cliente sobreposto ao PaymentModal (z-index superior). */
+function ClientSearchOverlay({
+  onSelect,
+  onClose,
+}: {
+  onSelect: (c: { id: string; name: string }) => void;
+  onClose: () => void;
+}) {
+  const [term, setTerm] = useState('');
+  const { data } = useQuery({
+    queryKey: ['client-search-overlay', term],
+    queryFn: () =>
+      api.get<{ items: Array<{ id: string; name: string; document: string | null }> }>(
+        `/api/persons?type=CLIENT&pageSize=20${term.trim() ? `&search=${encodeURIComponent(term.trim())}` : ''}`,
+      ),
+  });
+
+  return (
+    <div className="modal-overlay" style={{ zIndex: 60 }}>
+      <div className="modal-sheet sm:max-w-sm">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="font-display font-bold">Selecionar cliente</h3>
+          <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <input
+          className="input h-10 text-sm"
+          value={term}
+          onChange={(e) => setTerm(e.target.value)}
+          placeholder="Buscar cliente..."
+          autoFocus
+        />
+        <div className="mt-2 max-h-60 overflow-auto">
+          {data?.items.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => onSelect({ id: c.id, name: c.name })}
+              className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50"
+            >
+              {c.name}
+              {c.document && <span className="ml-1 text-xs text-slate-400">{c.document}</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
