@@ -607,7 +607,8 @@ function PaymentModal({
   ]);
   const [parcels, setParcels] = useState(2);
   const [firstDue, setFirstDue] = useState(() => new Date().toISOString().slice(0, 10));
-  const [intervalDays, setIntervalDays] = useState(30);
+  const [conditionStr, setConditionStr] = useState('30');
+  const [customDates, setCustomDates] = useState<Record<number, string>>({});
 
   const paid = round2(lines.reduce((a, l) => a + (l.amount || 0), 0));
   const remaining = round2(total - paid);
@@ -630,13 +631,32 @@ function PaymentModal({
     const base = Math.floor((aPrazoTotal / n) * 100) / 100;
     const parts: { dueDate: string; amount: number }[] = [];
     let acc = 0;
+    // Parser: "30" → [30]; "30/60/90" → [30,60,90]; "30-60" → [30,60]
+    const intervals = conditionStr
+      .split(/[\/\-,. ]+/)
+      .map((s) => parseInt(s.trim(), 10))
+      .filter((v) => !isNaN(v) && v > 0);
+    const multiInterval = intervals.length > 1;
     for (let i = 0; i < n; i++) {
       const amount = i === n - 1 ? round2(aPrazoTotal - acc) : base;
       acc = round2(acc + amount);
-      // Cria data em horário LOCAL para evitar deslocamento de 1 dia (UTC-3).
-      const d = new Date(firstDueDate);
-      d.setDate(d.getDate() + i * intervalDays);
-      parts.push({ dueDate: localDateStr(d), amount });
+      let dueDate: string;
+      if (multiInterval) {
+        // Cada parcela cai "intervals[i]" dias a partir de hoje; último intervalo como fallback.
+        const fallback = intervals[intervals.length - 1] ?? 30;
+        const interval = intervals[i] ?? fallback;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        today.setDate(today.getDate() + interval);
+        dueDate = localDateStr(today);
+      } else {
+        // Intervalo único: firstDue + i * interval (comportamento anterior).
+        const interval = intervals[0] ?? 30;
+        const d = new Date(firstDueDate);
+        d.setDate(d.getDate() + i * interval);
+        dueDate = localDateStr(d);
+      }
+      parts.push({ dueDate, amount });
     }
     return parts;
   }
@@ -647,7 +667,12 @@ function PaymentModal({
   }
 
   const installments = aPrazoTotal > 0 && firstDueValid ? genInstallments() : undefined;
-  const weekendParcelas = installments?.filter((p) => isWeekend(p.dueDate)) ?? [];
+  // Aplica overrides manuais de data antes de enviar ao backend e exibir ao usuário.
+  const resolvedInstallments = installments?.map((p, i) => ({
+    ...p,
+    dueDate: customDates[i] ?? p.dueDate,
+  }));
+  const weekendParcelas = resolvedInstallments?.filter((p) => isWeekend(p.dueDate)) ?? [];
   const balanced = Math.abs(remaining) < 0.01;
   // Basta existir UMA linha com método A_PRAZO para exigir cliente cadastrado.
   const hasAPrazoLine = lines.some((l) => l.method === 'A_PRAZO');
@@ -767,7 +792,7 @@ function PaymentModal({
                 <span className="mb-1 block text-xs text-slate-500">Parcelas</span>
                 <IntegerInput
                   value={parcels}
-                  onChange={setParcels}
+                  onChange={(v) => { setParcels(v); setCustomDates({}); }}
                   min={1}
                   className="input h-9"
                 />
@@ -777,7 +802,7 @@ function PaymentModal({
                 <input
                   type="date"
                   value={firstDue}
-                  onChange={(e) => setFirstDue(e.target.value)}
+                  onChange={(e) => { setFirstDue(e.target.value); setCustomDates({}); }}
                   className={`input h-9 w-full min-w-0 ${!firstDueValid ? 'border-rose-400 focus:border-rose-500 focus:ring-rose-400/20' : ''}`}
                 />
                 {!firstDueValid && (
@@ -785,26 +810,34 @@ function PaymentModal({
                 )}
               </label>
               <label>
-                <span className="mb-1 block text-xs text-slate-500">Intervalo (dias)</span>
-                <IntegerInput
-                  value={intervalDays}
-                  onChange={setIntervalDays}
-                  min={1}
+                <span className="mb-1 block text-xs text-slate-500">Condição (dias)</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={conditionStr}
+                  onChange={(e) => { setConditionStr(e.target.value); setCustomDates({}); }}
+                  placeholder="Ex: 30 ou 30/60/90"
                   className="input h-9"
                 />
               </label>
             </div>
-            {installments && (
+            {resolvedInstallments && (
               <>
-                <ul className="mt-2 space-y-0.5 text-xs text-slate-600">
-                  {installments.map((p, i) => {
+                <ul className="mt-2 space-y-1 text-xs text-slate-600">
+                  {resolvedInstallments.map((p, i) => {
                     const wknd = isWeekend(p.dueDate);
                     return (
-                      <li key={i} className={`flex justify-between rounded px-1 ${wknd ? 'bg-amber-50 text-amber-700' : ''}`}>
-                        <span>
-                          {i + 1}ª · {new Date(p.dueDate + 'T00:00:00').toLocaleDateString('pt-BR')}
-                          {wknd && ' ⚠️ fim de semana'}
-                        </span>
+                      <li key={i} className={`flex items-center justify-between gap-1 rounded px-1 ${wknd ? 'bg-amber-50 text-amber-700' : ''}`}>
+                        <div className="flex items-center gap-1">
+                          <span className="shrink-0">{i + 1}ª ·</span>
+                          <input
+                            type="date"
+                            value={p.dueDate}
+                            onChange={(e) => setCustomDates((prev) => ({ ...prev, [i]: e.target.value }))}
+                            className="rounded border border-slate-200 px-1 py-0.5 text-xs outline-none focus:border-brand-400"
+                          />
+                          {wknd && <span>⚠️ fim de semana</span>}
+                        </div>
                         <span className="font-medium">{brl(p.amount)}</span>
                       </li>
                     );
@@ -828,7 +861,7 @@ function PaymentModal({
           <button
             className="btn-primary"
             disabled={!canConfirm}
-            onClick={() => onConfirm(lines.filter((l) => l.amount > 0), installments)}
+            onClick={() => onConfirm(lines.filter((l) => l.amount > 0), resolvedInstallments)}
           >
             Confirmar venda
           </button>
