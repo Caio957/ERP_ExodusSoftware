@@ -19,6 +19,7 @@ import {
   User,
   Layers,
   Trash,
+  ChevronDown,
   type LucideIcon,
 } from 'lucide-react';
 import { api } from '../lib/api';
@@ -843,12 +844,20 @@ function ClientPicker({
 
   if (client) {
     return (
-      <div className="flex items-center justify-between rounded-lg bg-brand-50 px-3 py-1.5 text-sm">
-        <span className="flex items-center gap-1.5 font-medium text-brand-700">
-          <User className="h-4 w-4" /> {client.name}
-        </span>
-        <button className="text-brand-400 hover:text-rose-500" onClick={() => onChange(null)} title="Remover">
-          <X className="h-4 w-4" />
+      <div className="flex items-center justify-between gap-2 rounded-lg border border-brand-200 bg-brand-50 p-3 transition-colors hover:border-brand-400 hover:bg-brand-100">
+        <div className="flex min-w-0 items-center gap-2">
+          <User className="h-4 w-4 shrink-0 text-brand-600" />
+          <div className="min-w-0">
+            <p className="text-xs text-slate-500">Cliente</p>
+            <p className="truncate text-sm font-semibold text-slate-900">{client.name}</p>
+          </div>
+        </div>
+        <button
+          className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-rose-500 hover:bg-rose-50 transition-colors"
+          onClick={() => onChange(null)}
+          title="Remover cliente"
+        >
+          Remover
         </button>
       </div>
     );
@@ -857,10 +866,17 @@ function ClientPicker({
   return (
     <div className="relative">
       <button
-        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-50"
+        className="flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 transition-colors hover:border-brand-400 hover:bg-slate-100"
         onClick={() => setOpen((v) => !v)}
       >
-        <User className="h-4 w-4" /> Cliente: <span className="font-medium">Balcão</span>
+        <div className="flex items-center gap-2">
+          <User className="h-4 w-4 shrink-0 text-slate-400" />
+          <div className="text-left">
+            <p className="text-xs text-slate-500">Cliente</p>
+            <p className="text-sm font-semibold text-slate-900">Balcão</p>
+          </div>
+        </div>
+        <ChevronDown className="h-4 w-4 shrink-0 text-brand-500" />
       </button>
       {open && (
         <div className="absolute left-0 right-0 top-full z-20 mt-1 rounded-xl border border-slate-200 bg-white p-2 shadow-elevated">
