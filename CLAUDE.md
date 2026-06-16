@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-06-10
+- **Última atualização:** 2026-06-15
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -548,6 +548,37 @@ Railway a cada deploy (`prisma migrate deploy`).
     ambos os inputs migrados para `type="text"`. Na `SalesPage`, os dois inputs inline
     foram substituídos pelo novo componente `FinancialAdjustInput` (mesmo padrão do
     `EditItemPriceInput`). Commit `73f2439`.
+  - `npm run typecheck` → **0 erros** em todos os commits.
+- ✅ **Onda 2026-06-15 — Ciclo QA: PaymentModal e ChangeCalculatorModal** (2026-06-15):
+  - **Parser de condições de parcelamento** (`PaymentModal` — `PdvPage`): campo "Intervalo
+    (dias)" substituído por "Condição (dias)" (`type="text"`). Aceita intervalo único (`30`)
+    ou múltiplos separados por `/`, `-`, `,` ou `.` (`30/60/90`). Estado `conditionStr`
+    (string) substitui `intervalDays` (number). Commit `48174e8`.
+  - **Override manual de data por parcela**: estado `customDates: Record<number, string>`;
+    cada parcela da lista ganha `<input type="date">` editável. `resolvedInstallments`
+    aplica os overrides antes de enviar ao backend. `customDates` limpo ao alterar
+    `parcels`, `conditionStr` ou `firstDue`. Commit `48174e8`.
+  - **Interlock bidirecional parcelas ↔ condição**: ao digitar `30/60/90` o campo
+    "Parcelas" é setado para `3` automaticamente. Ao alterar "Parcelas" manualmente
+    quando `conditionStr` tem múltiplos intervalos, a string é resetada para o primeiro
+    intervalo (`"30"`). Commits `dc16fd5` e `2820ce8`.
+  - **Fallback matemático correto**: parcelas além dos intervalos declarados usam
+    `data_anterior + último_intervalo` (e não "hoje + último intervalo"). Commit `dc16fd5`.
+  - **ChangeCalculatorModal** (pagamento rápido em Dinheiro): modal de cálculo de troco
+    com input blindado (`sanitizeBr` + `raw` state + `inputMode="decimal"`); campo
+    "Valor recebido"; cálculo de troco em tempo real (verde se positivo); alerta
+    vermelho "Valor insuficiente"; botão "Valor exato (Pular)" (bypass direto);
+    botão "Confirmar venda" desabilitado com `disabled={received < total}` +
+    `disabled:opacity-50 disabled:cursor-not-allowed`. Commits `84d6446` e `b234ff9`.
+  - **Estado `changeConfig`** substitui `showChangeModal: boolean` — carrega
+    `{ amount, onConfirm }`, desacoplando valor e callback do fluxo que os origina
+    (pagamento rápido ou split). Commit `c8c4b7e`.
+  - **Interceptação de Dinheiro no split pay**: quando `PaymentModal` é confirmado com
+    linha `CASH`, fecha o modal de split e abre `ChangeCalculatorModal` com o valor
+    exato da parcela em dinheiro; `doSale` só é chamado após confirmação do troco.
+    Commit `c8c4b7e`.
+  - **Trava de duplicidade no split**: `<option disabled>` quando o código já está
+    selecionado em outra linha — impede duas linhas com o mesmo método. Commit `c8c4b7e`.
   - `npm run typecheck` → **0 erros** em todos os commits.
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
