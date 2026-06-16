@@ -79,7 +79,7 @@ export function PdvPage() {
   const [client, setClient] = useState<{ id: string; name: string } | null>(null);
   const [showPayment, setShowPayment] = useState(false);
   const [showClientSearch, setShowClientSearch] = useState(false);
-  const [showChangeModal, setShowChangeModal] = useState(false);
+  const [changeConfig, setChangeConfig] = useState<{ amount: number; onConfirm: () => void } | null>(null);
   const [confirmMethod, setConfirmMethod] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [lastSale, setLastSale] = useState<{
@@ -450,7 +450,11 @@ export function PdvPage() {
                 <button
                   key={opt.code}
                   disabled={cart.length === 0}
-                  onClick={() => opt.code === 'CASH' ? setShowChangeModal(true) : setConfirmMethod(opt.code)}
+                  onClick={() =>
+                    opt.code === 'CASH'
+                      ? setChangeConfig({ amount: total, onConfirm: () => { setChangeConfig(null); void finalize('CASH'); } })
+                      : setConfirmMethod(opt.code)
+                  }
                   className={`flex min-h-touch items-center justify-center gap-2 rounded-xl bg-gradient-to-br ${st.classes} px-3 py-3 font-semibold text-white shadow-soft transition active:scale-[0.97] disabled:pointer-events-none disabled:opacity-40`}
                 >
                   <st.icon className="h-5 w-5" />
@@ -534,7 +538,18 @@ export function PdvPage() {
           clientName={client?.name ?? null}
           types={paymentTypes}
           onClose={() => setShowPayment(false)}
-          onConfirm={(payments, installments) => void doSale(payments, installments)}
+          onConfirm={(payments, installments) => {
+            setShowPayment(false);
+            const cashLine = payments.find((p) => p.method === 'CASH');
+            if (cashLine) {
+              setChangeConfig({
+                amount: cashLine.amount,
+                onConfirm: () => { setChangeConfig(null); void doSale(payments, installments); },
+              });
+            } else {
+              void doSale(payments, installments);
+            }
+          }}
           onRequestSelectClient={() => setShowClientSearch(true)}
         />
       )}
@@ -546,11 +561,11 @@ export function PdvPage() {
         />
       )}
 
-      {showChangeModal && (
+      {changeConfig && (
         <ChangeCalculatorModal
-          total={total}
-          onClose={() => setShowChangeModal(false)}
-          onConfirm={() => { setShowChangeModal(false); void finalize('CASH'); }}
+          total={changeConfig.amount}
+          onClose={() => setChangeConfig(null)}
+          onConfirm={changeConfig.onConfirm}
         />
       )}
 
@@ -739,7 +754,11 @@ function PaymentModal({
                 }
               >
                 {types.map((t) => (
-                  <option key={t.code} value={t.code}>
+                  <option
+                    key={t.code}
+                    value={t.code}
+                    disabled={t.code !== l.method && lines.some((x, j) => j !== i && x.method === t.code)}
+                  >
                     {t.label}
                   </option>
                 ))}
