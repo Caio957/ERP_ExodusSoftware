@@ -637,18 +637,25 @@ function PaymentModal({
       .map((s) => parseInt(s.trim(), 10))
       .filter((v) => !isNaN(v) && v > 0);
     const multiInterval = intervals.length > 1;
+    const fallbackInterval = intervals[intervals.length - 1] ?? 30;
     for (let i = 0; i < n; i++) {
       const amount = i === n - 1 ? round2(aPrazoTotal - acc) : base;
       acc = round2(acc + amount);
       let dueDate: string;
       if (multiInterval) {
-        // Cada parcela cai "intervals[i]" dias a partir de hoje; último intervalo como fallback.
-        const fallback = intervals[intervals.length - 1] ?? 30;
-        const interval = intervals[i] ?? fallback;
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        today.setDate(today.getDate() + interval);
-        dueDate = localDateStr(today);
+        if (i < intervals.length) {
+          // Parcela dentro dos intervalos declarados: DataDaVenda + intervals[i] dias.
+          const interval = intervals[i] ?? fallbackInterval;
+          const d = new Date(firstDueDate);
+          d.setDate(d.getDate() + interval);
+          dueDate = localDateStr(d);
+        } else {
+          // Parcela extra (usuário forçou parcelas > intervalos): data anterior + último intervalo.
+          const prev = parts[i - 1];
+          const prevDate = prev ? new Date(prev.dueDate + 'T00:00:00') : new Date(firstDueDate);
+          prevDate.setDate(prevDate.getDate() + fallbackInterval);
+          dueDate = localDateStr(prevDate);
+        }
       } else {
         // Intervalo único: firstDue + i * interval (comportamento anterior).
         const interval = intervals[0] ?? 30;
@@ -815,7 +822,16 @@ function PaymentModal({
                   type="text"
                   inputMode="numeric"
                   value={conditionStr}
-                  onChange={(e) => { setConditionStr(e.target.value); setCustomDates({}); }}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setConditionStr(val);
+                    setCustomDates({});
+                    const parsed = val
+                      .split(/[\/\-,.]/)
+                      .map((n) => parseInt(n.trim(), 10))
+                      .filter((n) => !isNaN(n));
+                    if (parsed.length > 1) setParcels(parsed.length);
+                  }}
                   placeholder="Ex: 30 ou 30/60/90"
                   className="input h-9"
                 />
