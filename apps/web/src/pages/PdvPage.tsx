@@ -11,7 +11,6 @@ import {
   Zap,
   CreditCard,
   Coins,
-  Printer,
   X,
   CheckCircle2,
   Lock,
@@ -26,7 +25,7 @@ import { api } from '../lib/api';
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner';
 import { lookupByBarcode } from '../lib/products';
 import { enqueueSale } from '../lib/sync';
-import { ThermalReceipt, printReceipt, type ReceiptItem } from '../components/ThermalReceipt';
+import { ThermalReceipt, type ReceiptItem } from '../components/ThermalReceipt';
 
 interface CartItem {
   variantId: string;
@@ -87,6 +86,7 @@ export function PdvPage() {
     total: number;
     method: string;
   } | null>(null);
+  const [printMode, setPrintMode] = useState<'thermal' | 'a4' | null>(null);
 
   const { data: register, isLoading } = useQuery({
     queryKey: ['cash-current'],
@@ -176,6 +176,12 @@ export function PdvPage() {
     setClient(null);
   }
 
+  function handlePrint(type: 'thermal' | 'a4') {
+    setPrintMode(type);
+    window.addEventListener('afterprint', () => setPrintMode(null), { once: true });
+    window.setTimeout(() => window.print(), 100);
+  }
+
   async function doSale(
     payments: { method: string; amount: number }[],
     installments?: { dueDate: string; amount: number }[],
@@ -249,7 +255,8 @@ export function PdvPage() {
   );
 
   return (
-    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_400px] lg:items-start">
+    <>
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_400px] lg:items-start print:hidden">
       {/* Alerta de caixa do dia anterior */}
       {isStaleRegister && (
         <div className="col-span-full animate-scale-in rounded-2xl border-2 border-amber-300 bg-amber-50 px-5 py-4">
@@ -589,18 +596,65 @@ export function PdvPage() {
               <p className="text-sm text-slate-500">{brl(lastSale.total)} registrados</p>
             </div>
             <ThermalReceipt items={lastSale.items} total={lastSale.total} paymentMethod={lastSale.method} />
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <button className="btn-ghost" onClick={() => setLastSale(null)}>
+            <div className="mt-4 space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  className="btn-primary flex items-center justify-center gap-1.5 text-sm"
+                  onClick={() => handlePrint('thermal')}
+                >
+                  🖨️ Bobina (80mm)
+                </button>
+                <button
+                  className="btn-primary flex items-center justify-center gap-1.5 text-sm"
+                  onClick={() => handlePrint('a4')}
+                >
+                  📄 Papel A4
+                </button>
+              </div>
+              <button
+                className="btn-ghost flex w-full items-center justify-center gap-2"
+                onClick={() => setLastSale(null)}
+              >
                 <X className="h-4 w-4" /> Fechar
-              </button>
-              <button className="btn-primary" onClick={() => printReceipt()}>
-                <Printer className="h-4 w-4" /> Imprimir
               </button>
             </div>
           </div>
         </div>
       )}
     </div>
+
+    {printMode && (
+      <style>{printMode === 'thermal'
+        ? `@page { margin: 0; size: 80mm auto; }`
+        : `@page { margin: 15mm; size: A4 portrait; }`
+      }</style>
+    )}
+
+    {lastSale && (
+      <div className="hidden print:block w-full bg-white text-black">
+        {printMode === 'thermal' && (
+          <div className="w-[80mm] mx-auto p-2 font-mono text-[12px] whitespace-pre-wrap leading-tight text-left">
+            <ThermalReceipt
+              items={lastSale.items}
+              total={lastSale.total}
+              paymentMethod={lastSale.method}
+              width="80mm"
+            />
+          </div>
+        )}
+        {printMode === 'a4' && (
+          <div className="w-full max-w-[210mm] mx-auto p-8 font-mono text-[16px] whitespace-pre-wrap">
+            <ThermalReceipt
+              items={lastSale.items}
+              total={lastSale.total}
+              paymentMethod={lastSale.method}
+              width="100%"
+            />
+          </div>
+        )}
+      </div>
+    )}
+    </>
   );
 }
 

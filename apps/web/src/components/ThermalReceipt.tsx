@@ -8,7 +8,7 @@ interface Props {
   items: ReceiptItem[];
   total: number;
   paymentMethod: string;
-  width?: '58mm' | '80mm';
+  width?: string;
   storeName?: string;
   soldAt?: Date;
 }
