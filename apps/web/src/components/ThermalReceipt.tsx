@@ -44,6 +44,9 @@ export function ThermalReceipt({
       <div className="px-2 py-2">
         <div className="text-center">
           <div className="text-sm font-bold uppercase">{storeName}</div>
+          <div>Rua Principal, 123 - Centro</div>
+          <div>Montes Claros - MG</div>
+          <div>Tel: (38) 99999-9999</div>
           <div>Comprovante (não fiscal)</div>
           <div>{soldAt.toLocaleString('pt-BR')}</div>
         </div>

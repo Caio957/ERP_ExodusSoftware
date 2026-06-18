@@ -625,8 +625,8 @@ export function PdvPage() {
 
     {printMode && (
       <style>{printMode === 'thermal'
-        ? `@page { margin: 0; size: 80mm auto; }`
-        : `@page { margin: 15mm; size: A4 portrait; }`
+        ? `@page { margin: 0; size: 80mm 297mm; } @media print { body { margin: 0; padding: 0; background: white; } }`
+        : `@page { margin: 15mm; size: A4 portrait; } @media print { body { margin: 0; padding: 0; background: white; } }`
       }</style>
     )}
 
