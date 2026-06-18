@@ -685,7 +685,7 @@ export function PdvPage() {
     {lastSale && (
       <div className="fixed top-[-9999px] left-[-9999px] print:static print:top-auto print:left-auto w-full bg-white text-black">
         {printMode === 'thermal' && (
-          <div ref={receiptRef} className="w-[76mm] mx-auto flex justify-center overflow-hidden font-mono text-[12px] leading-tight">
+          <div ref={receiptRef} className="w-full max-w-[80mm] mx-auto flex justify-center overflow-hidden font-mono text-[11px] leading-tight">
             <ThermalReceipt
               items={lastSale.items}
               total={lastSale.total}

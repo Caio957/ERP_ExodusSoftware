@@ -38,7 +38,7 @@ export function ThermalReceipt({
 }: Props) {
   return (
     <div
-      className="thermal-receipt inline-block bg-white font-mono text-[12px] leading-tight text-black text-left whitespace-pre-wrap"
+      className="thermal-receipt w-full bg-white font-mono text-[12px] leading-tight text-black text-center whitespace-pre-wrap"
       style={{ width }}
     >
       <div className="px-2 py-2">
