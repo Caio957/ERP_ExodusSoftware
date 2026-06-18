@@ -625,7 +625,7 @@ export function PdvPage() {
 
     {printMode && (
       <style>{printMode === 'thermal'
-        ? `@page { margin: 0; size: 80mm 297mm; } @media print { body { margin: 0; padding: 0; background: white; } }`
+        ? `@page { margin: 0; size: 80mm auto; } @media print { body { margin: 0; padding: 0; background: white; } }`
         : `@page { margin: 15mm; size: A4 portrait; } @media print { body { margin: 0; padding: 0; background: white; } }`
       }</style>
     )}
@@ -633,7 +633,7 @@ export function PdvPage() {
     {lastSale && (
       <div className="hidden print:block w-full bg-white text-black">
         {printMode === 'thermal' && (
-          <div className="w-[80mm] mx-auto p-2 font-mono text-[12px] whitespace-pre-wrap leading-tight text-left">
+          <div className="w-[76mm] mx-auto flex justify-center overflow-hidden font-mono text-[12px] leading-tight">
             <ThermalReceipt
               items={lastSale.items}
               total={lastSale.total}
