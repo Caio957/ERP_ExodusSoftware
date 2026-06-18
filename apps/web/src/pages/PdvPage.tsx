@@ -87,6 +87,8 @@ export function PdvPage() {
     method: string;
   } | null>(null);
   const [printMode, setPrintMode] = useState<'thermal' | 'a4' | null>(null);
+  const [receiptHeight, setReceiptHeight] = useState<number>(0);
+  const receiptRef = useRef<HTMLDivElement>(null);
 
   const { data: register, isLoading } = useQuery({
     queryKey: ['cash-current'],
@@ -176,10 +178,23 @@ export function PdvPage() {
     setClient(null);
   }
 
-  function handlePrint(type: 'thermal' | 'a4') {
-    setPrintMode(type);
-    window.addEventListener('afterprint', () => setPrintMode(null), { once: true });
-    window.setTimeout(() => window.print(), 100);
+  function handlePrint(mode: 'thermal' | 'a4') {
+    setPrintMode(mode);
+    const afterPrint = () => {
+      setPrintMode(null);
+      setReceiptHeight(0);
+      window.removeEventListener('afterprint', afterPrint);
+    };
+    window.addEventListener('afterprint', afterPrint);
+
+    // Timeout 1: aguarda o React renderizar o DOM fora da tela para medir
+    window.setTimeout(() => {
+      if (mode === 'thermal' && receiptRef.current) {
+        setReceiptHeight(receiptRef.current.offsetHeight + 30);
+      }
+      // Timeout 2: aguarda o estado de altura atualizar o <style> antes de imprimir
+      window.setTimeout(() => window.print(), 50);
+    }, 50);
   }
 
   async function doSale(
@@ -625,15 +640,15 @@ export function PdvPage() {
 
     {printMode && (
       <style>{printMode === 'thermal'
-        ? `@page { margin: 0; size: 80mm auto; } @media print { body { margin: 0; padding: 0; background: white; } }`
+        ? `@page { margin: 0; size: 80mm ${receiptHeight > 0 ? receiptHeight + 'px' : 'auto'}; } @media print { body { margin: 0; padding: 0; background: white; } }`
         : `@page { margin: 15mm; size: A4 portrait; } @media print { body { margin: 0; padding: 0; background: white; } }`
       }</style>
     )}
 
     {lastSale && (
-      <div className="hidden print:block w-full bg-white text-black">
+      <div className="fixed top-[-9999px] left-[-9999px] print:static print:top-auto print:left-auto w-full bg-white text-black">
         {printMode === 'thermal' && (
-          <div className="w-[76mm] mx-auto flex justify-center overflow-hidden font-mono text-[12px] leading-tight">
+          <div ref={receiptRef} className="w-[76mm] mx-auto flex justify-center overflow-hidden font-mono text-[12px] leading-tight">
             <ThermalReceipt
               items={lastSale.items}
               total={lastSale.total}
