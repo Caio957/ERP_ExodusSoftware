@@ -92,6 +92,7 @@ export function PdvPage() {
     surcharge: number;
     clientName: string | null;
     soldAt: Date;
+    code: number;
   } | null>(null);
   const [printMode, setPrintMode] = useState<'thermal' | 'a4' | null>(null);
   const [receiptHeight, setReceiptHeight] = useState<number>(0);
@@ -220,8 +221,7 @@ export function PdvPage() {
       unitPrice: c.unitPrice,
     }));
 
-    // Offline-first: enfileira e confirma imediatamente (Requisito 4.4).
-    await enqueueSale({
+    const basePayload = {
       cashRegisterId: register.id,
       paymentMethod: payments[0]!.method,
       payments,
@@ -231,7 +231,25 @@ export function PdvPage() {
       discount: round2(discount),
       surcharge: round2(surcharge),
       notes: notes.trim() || undefined,
-    });
+    };
+
+    // Offline-first: enfileira garantindo idempotência via clientRef (Requisito 4.4).
+    const queued = await enqueueSale(basePayload);
+
+    // Se online, chama POST /api/sales com o mesmo clientRef para obter o code sequencial.
+    // O sync posterior detectará DUPLICATE e não criará duplicata.
+    let saleCode = 0;
+    try {
+      if (navigator.onLine) {
+        const created = await api.post<{ code: number }>('/api/sales', {
+          ...basePayload,
+          clientRef: queued.clientRef,
+        });
+        saleCode = created.code ?? 0;
+      }
+    } catch {
+      // offline ou erro transitório: code permanece 0
+    }
 
     setLastSale({
       items: cart.map((c) => ({
@@ -247,6 +265,7 @@ export function PdvPage() {
       surcharge: round2(surcharge),
       clientName: client?.name ?? null,
       soldAt: new Date(),
+      code: saleCode,
     });
     resetSale();
     setShowPayment(false);
@@ -658,8 +677,8 @@ export function PdvPage() {
 
     {printMode && (
       <style>{printMode === 'thermal'
-        ? `@page { margin: 0; size: 80mm ${receiptHeight > 0 ? receiptHeight + 'px' : 'auto'}; } @media print { body { margin: 0; padding: 0; background: white; } }`
-        : `@page { margin: 10mm; size: A4 portrait; } @media print { body { margin: 0; padding: 0; background: white; } }`
+        ? `@page { margin: 0; size: 80mm ${receiptHeight > 0 ? receiptHeight + 'px' : 'auto'}; } @media print { body { margin: 0; padding: 0; background: white; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }`
+        : `@page { margin: 10mm; size: A4 portrait; } @media print { body { margin: 0; padding: 0; background: white; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }`
       }</style>
     )}
 
@@ -680,7 +699,7 @@ export function PdvPage() {
             <SaleReceipt
               company={company ?? {}}
               sale={{
-                code: 0,
+                code: lastSale.code,
                 soldAt: lastSale.soldAt,
                 clientName: lastSale.clientName,
                 items: lastSale.items,
