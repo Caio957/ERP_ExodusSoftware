@@ -26,6 +26,7 @@ import { useBarcodeScanner } from '../hooks/useBarcodeScanner';
 import { lookupByBarcode } from '../lib/products';
 import { enqueueSale } from '../lib/sync';
 import { ThermalReceipt, type ReceiptItem } from '../components/ThermalReceipt';
+import { SaleReceipt, type CompanyInfo } from '../components/SaleReceipt';
 
 interface CartItem {
   variantId: string;
@@ -85,6 +86,12 @@ export function PdvPage() {
     items: ReceiptItem[];
     total: number;
     method: string;
+    payments: { method: string; amount: number }[];
+    subtotal: number;
+    discount: number;
+    surcharge: number;
+    clientName: string | null;
+    soldAt: Date;
   } | null>(null);
   const [printMode, setPrintMode] = useState<'thermal' | 'a4' | null>(null);
   const [receiptHeight, setReceiptHeight] = useState<number>(0);
@@ -102,6 +109,11 @@ export function PdvPage() {
   });
   const paymentTypes = (ptData?.types ?? DEFAULT_PAYMENT_TYPES).filter((t) => t.active);
   const quickTypes = paymentTypes.filter((t) => t.kind !== 'A_PRAZO');
+
+  const { data: company } = useQuery({
+    queryKey: ['settings', 'company'],
+    queryFn: () => api.get<CompanyInfo>('/api/settings/company'),
+  });
 
   // Busca: campo vazio lista todos os produtos (Requisito B1).
   const { data: results } = useQuery({
@@ -229,6 +241,12 @@ export function PdvPage() {
       })),
       total,
       method: payments.length === 1 ? payments[0]!.method : 'SPLIT',
+      payments,
+      subtotal,
+      discount: round2(discount),
+      surcharge: round2(surcharge),
+      clientName: client?.name ?? null,
+      soldAt: new Date(),
     });
     resetSale();
     setShowPayment(false);
@@ -641,7 +659,7 @@ export function PdvPage() {
     {printMode && (
       <style>{printMode === 'thermal'
         ? `@page { margin: 0; size: 80mm ${receiptHeight > 0 ? receiptHeight + 'px' : 'auto'}; } @media print { body { margin: 0; padding: 0; background: white; } }`
-        : `@page { margin: 15mm; size: A4 portrait; } @media print { body { margin: 0; padding: 0; background: white; } }`
+        : `@page { margin: 10mm; size: A4 portrait; } @media print { body { margin: 0; padding: 0; background: white; } }`
       }</style>
     )}
 
@@ -658,12 +676,21 @@ export function PdvPage() {
           </div>
         )}
         {printMode === 'a4' && (
-          <div className="w-full max-w-[210mm] mx-auto p-8 font-mono text-[16px] whitespace-pre-wrap">
-            <ThermalReceipt
-              items={lastSale.items}
-              total={lastSale.total}
-              paymentMethod={lastSale.method}
-              width="100%"
+          <div className="w-full max-w-[210mm] mx-auto bg-white">
+            <SaleReceipt
+              company={company ?? {}}
+              sale={{
+                code: 0,
+                soldAt: lastSale.soldAt,
+                clientName: lastSale.clientName,
+                items: lastSale.items,
+                subtotal: lastSale.subtotal,
+                discount: lastSale.discount,
+                surcharge: lastSale.surcharge,
+                total: lastSale.total,
+                payments: lastSale.payments,
+              }}
+              format="a4"
             />
           </div>
         )}
