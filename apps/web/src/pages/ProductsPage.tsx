@@ -338,85 +338,91 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
 
   return (
     <div className="modal-overlay">
-      <div className="modal-sheet mx-4 flex max-h-[90dvh] w-full flex-col overflow-hidden sm:mx-auto sm:max-w-2xl">
-        {/* Cabeçalho fixo */}
-        <div className="flex shrink-0 items-center gap-3 p-6 pb-4">
-          <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-100 text-brand-600">
-            <Package className="h-6 w-6" />
-          </span>
-          <div>
-            <h2 className="font-display text-lg font-bold">Novo produto</h2>
-            <p className="text-sm text-slate-500">Cadastre o produto e a primeira variante.</p>
-          </div>
-        </div>
-
-        {/* Corpo com scroll interno */}
-        <div className="flex-1 overflow-y-auto px-6 pb-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Nome" required value={form.name} onChange={set('name')} />
-            <Field label="Marca" required={brandRequired} value={form.brand} onChange={set('brand')} />
-            <Field label="Grupo" required={groupRequired} value={form.group} onChange={set('group')} />
-            <Field label="Subgrupo" required={subgroupRequired} value={form.subgroup} onChange={set('subgroup')} />
-            <Field label="SKU" required value={form.sku} onChange={set('sku')} />
-            <Field
-              label="Código de barras"
-              required={barcodeRequired}
-              value={form.barcode}
-              onChange={set('barcode')}
-            />
-            <Field label="Descrição da variante" value={form.description} onChange={set('description')} />
-            <Field label="Estoque inicial" type="number" value={form.stockQty} onChange={set('stockQty')} />
-          </div>
-
-          {/* Controle de lote e validade (Requisito 4.1 configurável) */}
-          <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <input
-              type="checkbox"
-              className="mt-0.5 h-5 w-5 accent-brand-600"
-              checked={tracksLotValidity}
-              onChange={(e) => setTracksLotValidity(e.target.checked)}
-            />
-            <span className="text-sm">
-              <span className="font-semibold text-slate-700">Controlar lote e validade</span>
-              <span className="block text-xs text-slate-500">
-                Quando ativado, lote e validade tornam-se obrigatórios para este produto.
-              </span>
+      {/* !p-0 neutraliza o padding do modal-sheet; overflow-hidden trava o container */}
+      <div className="modal-sheet !p-0 mx-4 flex h-[calc(100vh-4rem)] max-h-[90vh] w-full flex-col overflow-hidden sm:mx-auto sm:max-w-2xl">
+        <form
+          className="flex h-full flex-col overflow-hidden"
+          onSubmit={(e) => { e.preventDefault(); submit(); }}
+        >
+          {/* Cabeçalho fixo */}
+          <div className="shrink-0 flex items-center gap-3 p-6 pb-4">
+            <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-100 text-brand-600">
+              <Package className="h-6 w-6" />
             </span>
-          </label>
-
-          {tracksLotValidity && (
-            <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Lote" required value={form.batch} onChange={set('batch')} />
-              <Field label="Validade" required type="date" value={form.validity} onChange={set('validity')} />
-            </div>
-          )}
-
-          <div className="mt-4 rounded-xl border border-brand-100 bg-brand-50/60 p-4">
-            <div className="mb-2 text-sm font-semibold text-brand-700">Precificação (margem ⇄ markup)</div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <NumField label="Custo (R$)" required value={cost} onChange={applyCost} />
-              <NumField label="Margem (%)" value={margin} onChange={applyMargin} />
-              <NumField label="Markup (%)" value={markup} onChange={applyMarkup} />
-              <NumField label="Venda (R$)" required value={salePrice} onChange={applySalePrice} />
+            <div>
+              <h2 className="font-display text-lg font-bold">Novo produto</h2>
+              <p className="text-sm text-slate-500">Cadastre o produto e a primeira variante.</p>
             </div>
           </div>
 
-          {(localError || create.error instanceof ApiError) && (
-            <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
-              {localError ?? (create.error as ApiError).message}
+          {/* Corpo com scroll interno — min-h-0 impede o flexbox de estourar o wrapper */}
+          <div className="flex-1 overflow-y-auto min-h-0 px-6 pb-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="Nome" required value={form.name} onChange={set('name')} />
+              <Field label="Marca" required={brandRequired} value={form.brand} onChange={set('brand')} />
+              <Field label="Grupo" required={groupRequired} value={form.group} onChange={set('group')} />
+              <Field label="Subgrupo" required={subgroupRequired} value={form.subgroup} onChange={set('subgroup')} />
+              <Field label="SKU" required value={form.sku} onChange={set('sku')} />
+              <Field
+                label="Código de barras"
+                required={barcodeRequired}
+                value={form.barcode}
+                onChange={set('barcode')}
+              />
+              <Field label="Descrição da variante" value={form.description} onChange={set('description')} />
+              <Field label="Estoque inicial" type="number" value={form.stockQty} onChange={set('stockQty')} />
             </div>
-          )}
-        </div>
 
-        {/* Rodapé fixo */}
-        <div className="flex shrink-0 justify-end gap-2 border-t border-slate-100 p-6 pt-4">
-          <button className="btn-ghost" onClick={onClose}>
-            Cancelar
-          </button>
-          <button className="btn-primary" disabled={create.isPending} onClick={submit}>
-            {create.isPending ? 'Salvando...' : 'Salvar produto'}
-          </button>
-        </div>
+            {/* Controle de lote e validade (Requisito 4.1 configurável) */}
+            <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-5 w-5 accent-brand-600"
+                checked={tracksLotValidity}
+                onChange={(e) => setTracksLotValidity(e.target.checked)}
+              />
+              <span className="text-sm">
+                <span className="font-semibold text-slate-700">Controlar lote e validade</span>
+                <span className="block text-xs text-slate-500">
+                  Quando ativado, lote e validade tornam-se obrigatórios para este produto.
+                </span>
+              </span>
+            </label>
+
+            {tracksLotValidity && (
+              <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <Field label="Lote" required value={form.batch} onChange={set('batch')} />
+                <Field label="Validade" required type="date" value={form.validity} onChange={set('validity')} />
+              </div>
+            )}
+
+            <div className="mt-4 rounded-xl border border-brand-100 bg-brand-50/60 p-4">
+              <div className="mb-2 text-sm font-semibold text-brand-700">Precificação (margem ⇄ markup)</div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <NumField label="Custo (R$)" required value={cost} onChange={applyCost} />
+                <NumField label="Margem (%)" value={margin} onChange={applyMargin} />
+                <NumField label="Markup (%)" value={markup} onChange={applyMarkup} />
+                <NumField label="Venda (R$)" required value={salePrice} onChange={applySalePrice} />
+              </div>
+            </div>
+
+            {(localError || create.error instanceof ApiError) && (
+              <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                {localError ?? (create.error as ApiError).message}
+              </div>
+            )}
+          </div>
+
+          {/* Rodapé fixo */}
+          <div className="shrink-0 flex justify-end gap-2 border-t border-slate-100 p-6 pt-4">
+            <button type="button" className="btn-ghost" onClick={onClose}>
+              Cancelar
+            </button>
+            <button type="submit" className="btn-primary" disabled={create.isPending}>
+              {create.isPending ? 'Salvando...' : 'Salvar produto'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
@@ -489,131 +495,137 @@ function EditProductModal({
 
   return (
     <div className="modal-overlay">
-      <div className="modal-sheet mx-4 flex max-h-[90dvh] w-full flex-col overflow-hidden sm:mx-auto sm:max-w-2xl">
-        {/* Cabeçalho fixo */}
-        <div className="flex shrink-0 items-center justify-between p-6 pb-4">
-          <div className="flex items-center gap-3">
-            <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-100 text-brand-600">
-              <Pencil className="h-5 w-5" />
-            </span>
-            <div>
-              <h2 className="font-display text-lg font-bold">Editar produto</h2>
-              <p className="text-sm text-slate-500">Altere os dados e os preços das variantes.</p>
-            </div>
-          </div>
-          <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        {/* Corpo com scroll interno */}
-        <div className="flex-1 overflow-y-auto px-6 pb-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <label className="block">
-              <Lbl required>Nome</Lbl>
-              <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
-            </label>
-            <label className="block">
-              <Lbl required={brandRequired}>Marca</Lbl>
-              <input className="input" value={brand} onChange={(e) => setBrand(e.target.value)} />
-            </label>
-            <label className="block">
-              <Lbl required={groupRequired}>Grupo</Lbl>
-              <input className="input" value={group} onChange={(e) => setGroup(e.target.value)} />
-            </label>
-            <label className="block">
-              <Lbl required={subgroupRequired}>Subgrupo</Lbl>
-              <input className="input" value={subgroup} onChange={(e) => setSubgroup(e.target.value)} />
-            </label>
-          </div>
-
-          <label className="mt-4 flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <input
-              type="checkbox"
-              className="h-5 w-5 accent-brand-600"
-              checked={tracksLotValidity}
-              onChange={(e) => setTracksLotValidity(e.target.checked)}
-            />
-            <span className="text-sm font-semibold text-slate-700">Controlar lote e validade</span>
-          </label>
-
-          <div className="mt-4 space-y-3">
-            {variants.map((v) => (
-              <div key={v.id} className="rounded-xl border border-slate-200 p-3">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  Variante
-                </div>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <label className="block">
-                    <Lbl>Descrição</Lbl>
-                    <input
-                      className="input"
-                      value={v.description}
-                      onChange={(e) => setVariant(v.id, { description: e.target.value })}
-                    />
-                  </label>
-                  <label className="block">
-                    <Lbl required={barcodeRequired}>Código de barras</Lbl>
-                    <input
-                      className="input"
-                      value={v.barcode}
-                      onChange={(e) => setVariant(v.id, { barcode: e.target.value })}
-                    />
-                  </label>
-                  <NumField
-                    label="Custo (R$)"
-                    required
-                    value={v.costPrice}
-                    onChange={(val) => setVariant(v.id, { costPrice: val })}
-                  />
-                  <NumField
-                    label="Venda (R$)"
-                    required
-                    value={v.salePrice}
-                    onChange={(val) => setVariant(v.id, { salePrice: val })}
-                  />
-                  {tracksLotValidity && (
-                    <>
-                      <label className="block">
-                        <Lbl required>Lote</Lbl>
-                        <input
-                          className="input"
-                          value={v.batch}
-                          onChange={(e) => setVariant(v.id, { batch: e.target.value })}
-                        />
-                      </label>
-                      <label className="block">
-                        <Lbl required>Validade</Lbl>
-                        <input
-                          className="input"
-                          type="date"
-                          value={v.validity}
-                          onChange={(e) => setVariant(v.id, { validity: e.target.value })}
-                        />
-                      </label>
-                    </>
-                  )}
-                </div>
+      {/* !p-0 neutraliza o padding do modal-sheet; overflow-hidden trava o container */}
+      <div className="modal-sheet !p-0 mx-4 flex h-[calc(100vh-4rem)] max-h-[90vh] w-full flex-col overflow-hidden sm:mx-auto sm:max-w-2xl">
+        <form
+          className="flex h-full flex-col overflow-hidden"
+          onSubmit={(e) => { e.preventDefault(); save.mutate(); }}
+        >
+          {/* Cabeçalho fixo */}
+          <div className="shrink-0 flex items-center justify-between p-6 pb-4">
+            <div className="flex items-center gap-3">
+              <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-100 text-brand-600">
+                <Pencil className="h-5 w-5" />
+              </span>
+              <div>
+                <h2 className="font-display text-lg font-bold">Editar produto</h2>
+                <p className="text-sm text-slate-500">Altere os dados e os preços das variantes.</p>
               </div>
-            ))}
+            </div>
+            <button type="button" className="text-slate-400 hover:text-slate-700" onClick={onClose}>
+              <X className="h-5 w-5" />
+            </button>
           </div>
 
-          {save.error instanceof ApiError && (
-            <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
-              {save.error.message}
+          {/* Corpo com scroll interno — min-h-0 impede o flexbox de estourar o wrapper */}
+          <div className="flex-1 overflow-y-auto min-h-0 px-6 pb-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <label className="block">
+                <Lbl required>Nome</Lbl>
+                <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+              </label>
+              <label className="block">
+                <Lbl required={brandRequired}>Marca</Lbl>
+                <input className="input" value={brand} onChange={(e) => setBrand(e.target.value)} />
+              </label>
+              <label className="block">
+                <Lbl required={groupRequired}>Grupo</Lbl>
+                <input className="input" value={group} onChange={(e) => setGroup(e.target.value)} />
+              </label>
+              <label className="block">
+                <Lbl required={subgroupRequired}>Subgrupo</Lbl>
+                <input className="input" value={subgroup} onChange={(e) => setSubgroup(e.target.value)} />
+              </label>
             </div>
-          )}
-        </div>
 
-        {/* Rodapé fixo */}
-        <div className="flex shrink-0 justify-end gap-2 border-t border-slate-100 p-6 pt-4">
-          <button className="btn-ghost" onClick={onClose}>
-            Cancelar
-          </button>
-          <button className="btn-primary" disabled={save.isPending} onClick={() => save.mutate()}>
-            {save.isPending ? 'Salvando...' : 'Salvar alterações'}
-          </button>
-        </div>
+            <label className="mt-4 flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <input
+                type="checkbox"
+                className="h-5 w-5 accent-brand-600"
+                checked={tracksLotValidity}
+                onChange={(e) => setTracksLotValidity(e.target.checked)}
+              />
+              <span className="text-sm font-semibold text-slate-700">Controlar lote e validade</span>
+            </label>
+
+            <div className="mt-4 space-y-3">
+              {variants.map((v) => (
+                <div key={v.id} className="rounded-xl border border-slate-200 p-3">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    Variante
+                  </div>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <label className="block">
+                      <Lbl>Descrição</Lbl>
+                      <input
+                        className="input"
+                        value={v.description}
+                        onChange={(e) => setVariant(v.id, { description: e.target.value })}
+                      />
+                    </label>
+                    <label className="block">
+                      <Lbl required={barcodeRequired}>Código de barras</Lbl>
+                      <input
+                        className="input"
+                        value={v.barcode}
+                        onChange={(e) => setVariant(v.id, { barcode: e.target.value })}
+                      />
+                    </label>
+                    <NumField
+                      label="Custo (R$)"
+                      required
+                      value={v.costPrice}
+                      onChange={(val) => setVariant(v.id, { costPrice: val })}
+                    />
+                    <NumField
+                      label="Venda (R$)"
+                      required
+                      value={v.salePrice}
+                      onChange={(val) => setVariant(v.id, { salePrice: val })}
+                    />
+                    {tracksLotValidity && (
+                      <>
+                        <label className="block">
+                          <Lbl required>Lote</Lbl>
+                          <input
+                            className="input"
+                            value={v.batch}
+                            onChange={(e) => setVariant(v.id, { batch: e.target.value })}
+                          />
+                        </label>
+                        <label className="block">
+                          <Lbl required>Validade</Lbl>
+                          <input
+                            className="input"
+                            type="date"
+                            value={v.validity}
+                            onChange={(e) => setVariant(v.id, { validity: e.target.value })}
+                          />
+                        </label>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {save.error instanceof ApiError && (
+              <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                {save.error.message}
+              </div>
+            )}
+          </div>
+
+          {/* Rodapé fixo */}
+          <div className="shrink-0 flex justify-end gap-2 border-t border-slate-100 p-6 pt-4">
+            <button type="button" className="btn-ghost" onClick={onClose}>
+              Cancelar
+            </button>
+            <button type="submit" className="btn-primary" disabled={save.isPending}>
+              {save.isPending ? 'Salvando...' : 'Salvar alterações'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
