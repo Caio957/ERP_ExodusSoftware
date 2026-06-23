@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-06-15
+- **Última atualização:** 2026-06-17
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -91,7 +91,8 @@ ERP_ExodusSoftware/
 │           ├── hooks/          # useOnline, useBarcodeScanner
 │           ├── store/          # auth (Zustand persist)
 │           ├── components/     # Layout, ProtectedRoute, ErrorBoundary, StatusBadge,
-│           │                   # ThermalReceipt, XmlImport (upload de arquivo)
+│           │                   # ThermalReceipt, SaleReceipt (térmico+A4 unificado),
+│           │                   # XmlImport (upload de arquivo)
 │           └── pages/          # Login, Pdv, Products, StockAdjust, Cash, Registrations,
 │                               # Sales, Purchases, Financial, Dashboard, Settings
 ```
@@ -171,6 +172,11 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   recibo. Caixa fechado mostra tela de bloqueio.
   **Pagamento:** 4 formas à vista (atalho) + modal com **split (múltiplas formas)** e
   **"A prazo"** (nº de parcelas, 1º vencimento, intervalo → gera contas a receber).
+  **Motor de impressão dual** (`printMode` state): botões "🖨️ Bobina (80mm)" e "📄 Papel A4"
+  no modal pós-venda; `handlePrint` mede altura do recibo via `receiptRef.offsetHeight`
+  (Dynamic Measurement Engine), injeta `@page` com dimensões exatas e chama `window.print()`.
+  Bloco A4 reutiliza `<SaleReceipt format="a4">` (mesmo visual da tela Vendas); code real
+  obtido via `POST /api/sales` com `clientRef` idempotente ao finalizar online.
 - ✅ **Cadastros** (`/cadastros`, autenticado): CRUD de **clientes e fornecedores**
   (nome, CPF/CNPJ, telefone, e-mail, endereço) com exclusão protegida por origem.
 - ✅ **Vendas** (ADMIN, `/vendas`): **NºDOC sequencial** em todas as vendas; consulta
@@ -217,7 +223,11 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   consumidos dinamicamente pelo PDV), **Empresa** (dados cadastrais do contratante) e
   **Usuários** (CRUD completo: criar/editar/excluir; definir quais telas cada operador
   pode acessar via checkboxes — `allowedPages` granular por usuário).
-- ✅ **Recibo térmico** 58/80mm + `window.print()` (§4.7).
+- ✅ **Recibo térmico** 58/80mm e **comprovante A4** (§4.7): `ThermalReceipt` renderiza
+  cabeçalho completo (nome, endereço, cidade, tel) + itens + totais + pagamento.
+  `SaleReceipt` (componente unificado) entrega cupom térmico ou folha A4 estilizada com
+  logo, tabela de itens e dados da empresa. Impressão via `window.print()` com
+  `@page` e `print-color-adjust: exact` injetados dinamicamente.
 - ✅ **PWA**: manifest + Service Worker (Workbox) com cache de app shell e API.
 
 ---
@@ -229,11 +239,14 @@ Decisão: **fila própria no IndexedDB (Dexie)** em vez de Background Sync nativ
 
 1. Venda no PDV → `enqueueSale()` gera `clientRef` (uuid) e grava em `saleQueue`
    com status `PENDING`. O caixa recebe **sucesso imediato**.
-2. `startSyncEngine()` (em `main.tsx`) dispara `flushQueue()` ao **evento `online`**,
+2. Se **online**, `doSale` chama imediatamente `POST /api/sales` com o **mesmo
+   `clientRef`** para obter o `code` sequencial (usado no comprovante A4). O sync
+   posterior detecta `DUPLICATE` via `clientRef` — **sem duplicata**.
+3. `startSyncEngine()` (em `main.tsx`) dispara `flushQueue()` ao **evento `online`**,
    ao iniciar e a cada 30s.
-3. `flushQueue()` envia o lote para `POST /api/sales/sync`. O backend é
+4. `flushQueue()` envia o lote para `POST /api/sales/sync`. O backend é
    **idempotente**: `clientRef` já gravado retorna `DUPLICATE` (não duplica venda).
-4. Sucesso (`CREATED`/`DUPLICATE`) → remove da fila; `ERROR` → marca para retry.
+5. Sucesso (`CREATED`/`DUPLICATE`) → remove da fila; `ERROR` → marca para retry.
 
 Busca de produto por código de barras também tem fallback offline (cache
 `variants` no Dexie) — ver `apps/web/src/lib/products.ts`.
@@ -292,7 +305,7 @@ Outras decisões:
 | 4.5 | Caixa (abrir/fechar/sangria/suprimento) | `routes/cash.ts`, `CashPage.tsx` (saldo em tempo real) | ✅ |
 | 4.5 | Resumo financeiro só ADMIN | `routes/cash.ts` (`/summary`), `routes/financial.ts` | ✅ |
 | 4.6 | Sugestão de compra | `routes/purchase-suggestions.ts`, `PurchasesPage.tsx` | ✅ |
-| 4.7 | Recibo 58/80mm + print | `components/ThermalReceipt.tsx` | ✅ |
+| 4.7 | Recibo 58/80mm + print | `components/ThermalReceipt.tsx`, `components/SaleReceipt.tsx`, motor dual em `PdvPage.tsx` | ✅ |
 | 4.8 | Resiliência/Logs | `plugins/error-handler.ts`, `components/ErrorBoundary.tsx` | ✅ |
 | — | Produtos: filtros + editar + excluir | `routes/products.ts` (GET filtros, DELETE protegido), `ProductsPage.tsx` | ✅ |
 | — | PDV: desconto/acréscimo/observação + valor unitário editável | `PdvPage.tsx`, `services/sales.ts` | ✅ |
@@ -580,6 +593,32 @@ Railway a cada deploy (`prisma migrate deploy`).
   - **Trava de duplicidade no split**: `<option disabled>` quando o código já está
     selecionado em outra linha — impede duas linhas com o mesmo método. Commit `c8c4b7e`.
   - `npm run typecheck` → **0 erros** em todos os commits.
+- ✅ **Onda 2026-06-17 — Motor de Impressão Dual (QA cycle)** (2026-06-17):
+  - **Motor dual no PDV** (`PdvPage.tsx`): estado `printMode ('thermal'|'a4'|null)`;
+    botões "🖨️ Bobina (80mm)" e "📄 Papel A4" no modal pós-venda substituem o único
+    "Imprimir"; `handlePrint` usa dois timeouts aninhados (50+50ms) para medir
+    `receiptRef.offsetHeight + 30px` antes de chamar `window.print()` (Dynamic
+    Measurement Engine). Commits `3179ef0`→`a28dcfb`.
+  - **`@page` dinâmico**: térmico → `size: 80mm <Npx medido>; margin:0`; A4 →
+    `size: A4 portrait; margin:10mm`. Ambos incluem
+    `* { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important }`
+    para preservar backgrounds (logo gradiente). Regra `@media print { body { margin:0 } }`
+    colapsa margens do browser.
+  - **Container off-screen**: `fixed top-[-9999px] left-[-9999px]` + `print:static`
+    permite medir altura no DOM sem exibir o elemento; `overflow-hidden` evita scroll.
+  - **`ThermalReceipt.tsx`**: cabeçalho profissional (nome, endereço, cidade/UF, tel)
+    adicionado; root div com `w-full text-center whitespace-pre-wrap`. Wrapper no PDV:
+    `w-full max-w-[80mm] font-mono text-[11px]` (reduz clipping de 42 chars monospace).
+  - **Comprovante A4 reutiliza `SaleReceipt`** (`components/SaleReceipt.tsx`): mesmo
+    componente da tela Vendas — cabeçalho com logo inicial + dados da empresa, tabela
+    de itens, totais, bloco de pagamento, rodapé "Documento sem valor fiscal". Query
+    `/api/settings/company` adicionada ao PDV.
+  - **Captura do `code` real**: `doSale` agora chama `POST /api/sales` com o `clientRef`
+    gerado pelo `enqueueSale` quando online → obtém `Sale.code` sequencial para o
+    comprovante A4. Sync posterior detecta `DUPLICATE` — sem duplicata.
+  - **`lastSale` estendido**: campos `payments`, `subtotal`, `discount`, `surcharge`,
+    `clientName`, `soldAt`, `code` capturados antes do `resetSale()`.
+  - `npm run typecheck` → **0 erros** em todos os commits.
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---
@@ -595,7 +634,7 @@ Railway a cada deploy (`prisma migrate deploy`).
 7. ~~**Pagamento único por venda**~~ **RESOLVIDO** (PDV-B): split de pagamento + "A prazo".
 8. **Estoque pode ficar negativo** em vendas offline (decisão consciente). Avaliar política de bloqueio/alerta.
 9. **JWT sem refresh token** e sem revogação (expira em 12h).
-10. **Recibo**: layout 58/80mm pronto, mas **não testado em impressora térmica real**.
+10. **Recibo**: motor dual (térmico + A4) implementado no PDV; layout 80mm ainda **não testado em impressora térmica física real** (apenas Chrome "Salvar como PDF").
 11. **Ícones PWA** usam um único SVG (sem PNGs 192/512 dedicados).
 12. ~~**Tela de Suprimento/Sangria** usa `window.prompt()`~~ **RESOLVIDO** (Onda Caixa): modal próprio com observação.
 13. **Tipos de recebimento customizados** são tratados como "à vista não-dinheiro": o backend reconhece apenas os códigos literais `CASH` (entra no `expectedCash`) e `A_PRAZO` (gera parcelas). Um tipo novo com kind CASH/A_PRAZO não teria esse comportamento especial — por isso a tela de Configurações só permite adicionar tipos `OTHER` (os 5 base são fixos quanto a code/kind).
