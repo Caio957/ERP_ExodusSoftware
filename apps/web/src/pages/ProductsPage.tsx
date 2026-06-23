@@ -76,7 +76,7 @@ export function ProductsPage() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ['products'] });
 
   return (
-    <div className="relative flex flex-col space-y-5">
+    <div className="relative flex flex-col space-y-5 min-h-[calc(100vh-5rem)]">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="page-title">Produtos</h1>
@@ -338,9 +338,9 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
 
   return (
     <div className="absolute inset-0 z-50 grid place-items-center bg-slate-900/50 p-4 backdrop-blur-sm">
-      {/* form é o grid item direto: max-h-[95%] trava a altura; overflow-hidden habilita o flex interno */}
+      {/* form é o grid item direto: max-h-[calc(100vh-8rem)] trava a altura; overflow-hidden habilita o flex interno */}
       <form
-        className="flex w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-white/60 bg-white shadow-elevated max-h-[95%]"
+        className="flex w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-white/60 bg-white shadow-elevated max-h-[calc(100vh-8rem)]"
         onSubmit={(e) => { e.preventDefault(); submit(); }}
       >
         {/* Cabeçalho fixo */}
@@ -494,7 +494,7 @@ function EditProductModal({
   return (
     <div className="absolute inset-0 z-50 grid place-items-center bg-slate-900/50 p-4 backdrop-blur-sm">
       <form
-        className="flex w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-white/60 bg-white shadow-elevated max-h-[95%]"
+        className="flex w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-white/60 bg-white shadow-elevated max-h-[calc(100vh-8rem)]"
         onSubmit={(e) => { e.preventDefault(); save.mutate(); }}
       >
         {/* Cabeçalho fixo */}
