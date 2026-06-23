@@ -76,7 +76,7 @@ export function ProductsPage() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ['products'] });
 
   return (
-    <div className="relative flex flex-col space-y-5 min-h-[calc(100vh-5rem)]">
+    <div className="relative flex flex-col space-y-5 min-h-[calc(100vh-9rem)]">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="page-title">Produtos</h1>
