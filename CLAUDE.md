@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-06-17
+- **Última atualização:** 2026-06-22
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -18,6 +18,12 @@
 - **URL de produção:** https://exodus-web-production.up.railway.app
 - **Deploy:** **automático a cada `git push` na `main`** (GitHub → Railway). Migrações
   aplicadas no deploy. ⚠️ Só pushar código validado (typecheck + build).
+- **Fluxo de branches:** desenvolvimento acontece em **branches de feature** (`feature/*`);
+  commits são empurrados para o GitHub nessas branches; o **merge para `main` é feito
+  manualmente via PR no GitHub** (o merge dispara o auto-deploy no Railway). A IA
+  trabalha sempre na branch ativa indicada — nunca commita direto na `main` sem
+  instrução explícita. Branch ativa no momento: **`feature/tela-produtos-caio`**
+  (commits `c8ba129`→`6e94f1f` — ainda não mesclada; ver §11).
 - **Fase atual:** Sistema em **produção no Railway** (projeto `exodus-software`,
   conta helomramos40@gmail.com). Banco PostgreSQL gerenciado, seed do ADMIN executado,
   interface redesenhada (design system "beauty"). **Todo o backlog de funcionalidades
@@ -193,6 +199,17 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   **marca/grupo/subgrupo obrigatórios conforme a config da loja**; precificação:
   o **último percentual editado (margem OU markup) recalcula o preço de venda**,
   alterar o custo mantém o percentual e atualiza a venda.
+  **Modal de cadastro/edição responsivo** (`feature/tela-produtos-caio`): overlay
+  `absolute inset-0` ancorado ao wrapper `relative` da página (respeita header/sidebar);
+  scroll interno (`flex-1 min-h-0 overflow-y-auto`) com cabeçalho e rodapé `shrink-0`
+  fixos; `min-h-[calc(100vh-9rem)]` evita modal curto com lista vazia sem gerar
+  scrollbar global.
+  **Validação Zod dinâmica**: `buildProductFormSchema` e `buildVariantSchema` geram
+  schemas em runtime conforme as flags de Configurações (`brandRequired`, `groupRequired`,
+  `subgroupRequired`, `barcodeRequired`, `tracksLotValidity`). `submit()` / `handleSave()`
+  usam `safeParse` — erros por campo em `Record<string, string>` exibidos inline sob
+  cada input (`Field` e `NumField` receberam prop `error?: string` com borda vermelha
+  + `<span>` de mensagem).
 - ✅ **Caixa**: card gradiente com **saldo atual** (`expectedCash`); suprimento/sangria
   via **modal próprio com observação** (sem `window.prompt`); **timeline de
   movimentações** unindo vendas (leitura) + sangrias/suprimentos (editáveis/excluíveis
@@ -619,6 +636,45 @@ Railway a cada deploy (`prisma migrate deploy`).
   - **`lastSale` estendido**: campos `payments`, `subtotal`, `discount`, `surcharge`,
     `clientName`, `soldAt`, `code` capturados antes do `resetSale()`.
   - `npm run typecheck` → **0 erros** em todos os commits.
+- ✅ **Onda 2026-06-22a — QA de layout: modal de Produtos** (2026-06-22):
+  Branch `feature/tela-produtos-caio` — **ainda não mesclada na `main`**.
+  Seis commits corretivos em `ProductsPage.tsx` após testes funcionais do Comandante:
+  - **`c8ba129`**: `overflow-y-auto` no corpo do form — primeiro corte do footer cortado.
+  - **`81689b9`**: hierarquia flexbox definitiva: `flex-col + shrink-0` (header/footer)
+    + `flex-1 min-h-0 overflow-y-auto` (corpo). `min-h-0` é a classe crítica que impede
+    o flex de ignorar `max-h`.
+  - **`d4a744f`**: substituição de `modal-overlay` (com `fixed inset-0 flex items-end`)
+    por `grid place-items-center` inline — elimina o clip do topo em viewports pequenos.
+  - **`f95c12e`**: overlay trocado de `fixed inset-0` para `absolute inset-0` com wrapper
+    da página marcado como `relative` — modal passa a respeitar o header global e a
+    sidebar (não usa o viewport como referência).
+  - **`dc66e61`**: `min-h-[calc(100vh-5rem)]` no wrapper força altura mínima quando a
+    lista de produtos está vazia (overlay `absolute` colapsava com o conteúdo).
+  - **`73fceab`**: ajuste para `min-h-[calc(100vh-9rem)]` — descontando header (4rem)
+    + padding do `<main>` (`sm:p-6` = 1.5rem + `md:pb-8` = 2rem) + buffer (1.5rem) para
+    eliminar scrollbar global gerada pelo overshooting da versão anterior.
+  `npm run typecheck` → **0 erros** em todos os commits.
+- ✅ **Onda 2026-06-22b — Validação Zod dinâmica + erros por campo (Produtos)** (2026-06-22):
+  Branch `feature/tela-produtos-caio` — **ainda não mesclada na `main`**. Commit `6e94f1f`.
+  - **Schema dinâmico**: funções `buildProductFormSchema(brandReq, groupReq, subgroupReq,
+    barcodeReq, tracksLotValidity)` e `buildVariantSchema(barcodeReq, tracksLotValidity)`
+    definidas fora dos componentes — obrigatoriedade condicionada em runtime às flags
+    lidas de `/api/settings/product-form`. Campos `name`, `sku`, `cost`, `salePrice`
+    sempre obrigatórios; demais campos recebem `.min(1, msg)` só quando o flag está `true`.
+  - **`toFieldErrors(issues)`**: helper que extrai o primeiro erro Zod por campo para
+    `Record<string, string>`.
+  - **`ProductForm`**: `localError: string | null` substituído por `errors: Record<string, string>`;
+    `submit()` chama `schema.safeParse(...)`, popula `errors` por campo e retorna antes
+    de `create.mutate()` se houver falha. Banner genérico removido (só erro de API fica).
+  - **`EditProductModal`**: estados `productErrors` + `variantErrors: Record<string, Record<string, string>>`;
+    nova `handleSave()` valida produto e cada variante independentemente, acumula todos
+    os erros de uma só vez; `onSubmit` chama `handleSave()` em vez de `save.mutate()`.
+    Inputs inline (nome/marca/grupo/subgrupo + campos de variante) convertidos para
+    componente `Field` com prop `error`.
+  - **`Field` e `NumField`** (componentes): nova prop `error?: string` — aplica
+    `border-rose-400` no input + renderiza `<span className="text-xs text-rose-500">`
+    imediatamente abaixo do campo quando presente.
+  `npm run typecheck` → **0 erros**.
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---
