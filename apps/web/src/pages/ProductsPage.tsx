@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { z } from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   marginFromPrice,
@@ -215,6 +216,49 @@ export function ProductsPage() {
 }
 
 // ---------------------------------------------------------------------------
+// Schemas Zod dinâmicos — obrigatoriedade condicionada às configurações da loja
+// ---------------------------------------------------------------------------
+function buildProductFormSchema(
+  brandRequired: boolean,
+  groupRequired: boolean,
+  subgroupRequired: boolean,
+  barcodeRequired: boolean,
+  tracksLotValidity: boolean,
+) {
+  return z.object({
+    name: z.string().min(1, 'Nome é obrigatório'),
+    brand: brandRequired ? z.string().min(1, 'Marca é obrigatória') : z.string(),
+    group: groupRequired ? z.string().min(1, 'Grupo é obrigatório') : z.string(),
+    subgroup: subgroupRequired ? z.string().min(1, 'Subgrupo é obrigatório') : z.string(),
+    sku: z.string().min(1, 'SKU é obrigatório'),
+    barcode: barcodeRequired ? z.string().min(1, 'Código de barras é obrigatório') : z.string(),
+    cost: z.number({ invalid_type_error: 'Custo inválido' }).min(0.01, 'Custo deve ser maior que zero'),
+    salePrice: z.number({ invalid_type_error: 'Preço inválido' }).min(0.01, 'Preço de venda deve ser maior que zero'),
+    batch: tracksLotValidity ? z.string().min(1, 'Lote é obrigatório') : z.string(),
+    validity: tracksLotValidity ? z.string().min(1, 'Validade é obrigatória') : z.string(),
+  });
+}
+
+function buildVariantSchema(barcodeRequired: boolean, tracksLotValidity: boolean) {
+  return z.object({
+    barcode: barcodeRequired ? z.string().min(1, 'Código de barras é obrigatório') : z.string(),
+    costPrice: z.number({ invalid_type_error: 'Custo inválido' }).min(0.01, 'Custo deve ser maior que zero'),
+    salePrice: z.number({ invalid_type_error: 'Preço inválido' }).min(0.01, 'Preço de venda deve ser maior que zero'),
+    batch: tracksLotValidity ? z.string().min(1, 'Lote é obrigatório') : z.string(),
+    validity: tracksLotValidity ? z.string().min(1, 'Validade é obrigatória') : z.string(),
+  });
+}
+
+function toFieldErrors(issues: z.ZodIssue[]): Record<string, string> {
+  const errs: Record<string, string> = {};
+  for (const issue of issues) {
+    const key = String(issue.path[0] ?? '_');
+    if (!errs[key]) errs[key] = issue.message;
+  }
+  return errs;
+}
+
+// ---------------------------------------------------------------------------
 // Cadastro de novo produto
 // ---------------------------------------------------------------------------
 function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
@@ -231,7 +275,7 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
     stockQty: '0',
   });
   const [tracksLotValidity, setTracksLotValidity] = useState(false);
-  const [localError, setLocalError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   // Config da loja: define quais campos são obrigatórios (Onda 2).
   const { data: settings } = useQuery({
@@ -309,27 +353,26 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
   });
 
   function submit() {
-    setLocalError(null);
-    if (brandRequired && !form.brand.trim()) {
-      setLocalError('Marca é obrigatória (definido nas Configurações).');
+    const schema = buildProductFormSchema(
+      brandRequired, groupRequired, subgroupRequired, barcodeRequired, tracksLotValidity,
+    );
+    const result = schema.safeParse({
+      name: form.name,
+      brand: form.brand,
+      group: form.group,
+      subgroup: form.subgroup,
+      sku: form.sku,
+      barcode: form.barcode,
+      cost,
+      salePrice,
+      batch: form.batch,
+      validity: form.validity,
+    });
+    if (!result.success) {
+      setErrors(toFieldErrors(result.error.issues));
       return;
     }
-    if (groupRequired && !form.group.trim()) {
-      setLocalError('Grupo é obrigatório (definido nas Configurações).');
-      return;
-    }
-    if (subgroupRequired && !form.subgroup.trim()) {
-      setLocalError('Subgrupo é obrigatório (definido nas Configurações).');
-      return;
-    }
-    if (barcodeRequired && !form.barcode.trim()) {
-      setLocalError('Código de barras é obrigatório (definido nas Configurações).');
-      return;
-    }
-    if (tracksLotValidity && (!form.batch.trim() || !form.validity)) {
-      setLocalError('Lote e validade são obrigatórios quando o controle está ativado.');
-      return;
-    }
+    setErrors({});
     create.mutate();
   }
 
@@ -357,14 +400,15 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
         {/* Corpo com scroll interno — min-h-0 é obrigatório para o flexbox não estourar o wrapper */}
         <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Nome" required value={form.name} onChange={set('name')} />
-            <Field label="Marca" required={brandRequired} value={form.brand} onChange={set('brand')} />
-            <Field label="Grupo" required={groupRequired} value={form.group} onChange={set('group')} />
-            <Field label="Subgrupo" required={subgroupRequired} value={form.subgroup} onChange={set('subgroup')} />
-            <Field label="SKU" required value={form.sku} onChange={set('sku')} />
+            <Field label="Nome" required error={errors.name} value={form.name} onChange={set('name')} />
+            <Field label="Marca" required={brandRequired} error={errors.brand} value={form.brand} onChange={set('brand')} />
+            <Field label="Grupo" required={groupRequired} error={errors.group} value={form.group} onChange={set('group')} />
+            <Field label="Subgrupo" required={subgroupRequired} error={errors.subgroup} value={form.subgroup} onChange={set('subgroup')} />
+            <Field label="SKU" required error={errors.sku} value={form.sku} onChange={set('sku')} />
             <Field
               label="Código de barras"
               required={barcodeRequired}
+              error={errors.barcode}
               value={form.barcode}
               onChange={set('barcode')}
             />
@@ -390,24 +434,24 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
 
           {tracksLotValidity && (
             <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Lote" required value={form.batch} onChange={set('batch')} />
-              <Field label="Validade" required type="date" value={form.validity} onChange={set('validity')} />
+              <Field label="Lote" required error={errors.batch} value={form.batch} onChange={set('batch')} />
+              <Field label="Validade" required type="date" error={errors.validity} value={form.validity} onChange={set('validity')} />
             </div>
           )}
 
           <div className="mt-4 rounded-xl border border-brand-100 bg-brand-50/60 p-4">
             <div className="mb-2 text-sm font-semibold text-brand-700">Precificação (margem ⇄ markup)</div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <NumField label="Custo (R$)" required value={cost} onChange={applyCost} />
+              <NumField label="Custo (R$)" required error={errors.cost} value={cost} onChange={applyCost} />
               <NumField label="Margem (%)" value={margin} onChange={applyMargin} />
               <NumField label="Markup (%)" value={markup} onChange={applyMarkup} />
-              <NumField label="Venda (R$)" required value={salePrice} onChange={applySalePrice} />
+              <NumField label="Venda (R$)" required error={errors.salePrice} value={salePrice} onChange={applySalePrice} />
             </div>
           </div>
 
-          {(localError || create.error instanceof ApiError) && (
+          {create.error instanceof ApiError && (
             <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
-              {localError ?? (create.error as ApiError).message}
+              {(create.error as ApiError).message}
             </div>
           )}
         </div>
@@ -468,6 +512,46 @@ function EditProductModal({
   const subgroupRequired = settings?.subgroupRequired ?? false;
   const barcodeRequired = settings?.barcodeRequired ?? false;
 
+  const [productErrors, setProductErrors] = useState<Record<string, string>>({});
+  const [variantErrors, setVariantErrors] = useState<Record<string, Record<string, string>>>({});
+
+  function handleSave() {
+    const productSchema = z.object({
+      name: z.string().min(1, 'Nome é obrigatório'),
+      brand: brandRequired ? z.string().min(1, 'Marca é obrigatória') : z.string(),
+      group: groupRequired ? z.string().min(1, 'Grupo é obrigatório') : z.string(),
+      subgroup: subgroupRequired ? z.string().min(1, 'Subgrupo é obrigatório') : z.string(),
+    });
+    const varSchema = buildVariantSchema(barcodeRequired, tracksLotValidity);
+
+    const productResult = productSchema.safeParse({ name, brand, group, subgroup });
+    let hasErrors = false;
+    if (!productResult.success) {
+      setProductErrors(toFieldErrors(productResult.error.issues));
+      hasErrors = true;
+    } else {
+      setProductErrors({});
+    }
+
+    const newVarErrors: Record<string, Record<string, string>> = {};
+    for (const v of variants) {
+      const vResult = varSchema.safeParse({
+        barcode: v.barcode,
+        costPrice: v.costPrice,
+        salePrice: v.salePrice,
+        batch: v.batch,
+        validity: v.validity,
+      });
+      if (!vResult.success) {
+        newVarErrors[v.id] = toFieldErrors(vResult.error.issues);
+        hasErrors = true;
+      }
+    }
+    setVariantErrors(newVarErrors);
+
+    if (!hasErrors) save.mutate();
+  }
+
   const save = useMutation({
     mutationFn: async () => {
       await api.put(`/api/products/${product.id}`, {
@@ -495,7 +579,7 @@ function EditProductModal({
     <div className="absolute inset-0 z-50 grid place-items-center bg-slate-900/50 p-4 backdrop-blur-sm">
       <form
         className="flex w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-white/60 bg-white shadow-elevated max-h-[calc(100vh-8rem)]"
-        onSubmit={(e) => { e.preventDefault(); save.mutate(); }}
+        onSubmit={(e) => { e.preventDefault(); handleSave(); }}
       >
         {/* Cabeçalho fixo */}
         <div className="shrink-0 flex items-center justify-between p-6 pb-4">
@@ -516,22 +600,34 @@ function EditProductModal({
         {/* Corpo com scroll interno — min-h-0 impede o flexbox de estourar o wrapper */}
         <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <label className="block">
-              <Lbl required>Nome</Lbl>
-              <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
-            </label>
-            <label className="block">
-              <Lbl required={brandRequired}>Marca</Lbl>
-              <input className="input" value={brand} onChange={(e) => setBrand(e.target.value)} />
-            </label>
-            <label className="block">
-              <Lbl required={groupRequired}>Grupo</Lbl>
-              <input className="input" value={group} onChange={(e) => setGroup(e.target.value)} />
-            </label>
-            <label className="block">
-              <Lbl required={subgroupRequired}>Subgrupo</Lbl>
-              <input className="input" value={subgroup} onChange={(e) => setSubgroup(e.target.value)} />
-            </label>
+            <Field
+              label="Nome"
+              required
+              error={productErrors.name}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+            <Field
+              label="Marca"
+              required={brandRequired}
+              error={productErrors.brand}
+              value={brand}
+              onChange={(e) => setBrand(e.target.value)}
+            />
+            <Field
+              label="Grupo"
+              required={groupRequired}
+              error={productErrors.group}
+              value={group}
+              onChange={(e) => setGroup(e.target.value)}
+            />
+            <Field
+              label="Subgrupo"
+              required={subgroupRequired}
+              error={productErrors.subgroup}
+              value={subgroup}
+              onChange={(e) => setSubgroup(e.target.value)}
+            />
           </div>
 
           <label className="mt-4 flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -551,53 +647,49 @@ function EditProductModal({
                   Variante
                 </div>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <label className="block">
-                    <Lbl>Descrição</Lbl>
-                    <input
-                      className="input"
-                      value={v.description}
-                      onChange={(e) => setVariant(v.id, { description: e.target.value })}
-                    />
-                  </label>
-                  <label className="block">
-                    <Lbl required={barcodeRequired}>Código de barras</Lbl>
-                    <input
-                      className="input"
-                      value={v.barcode}
-                      onChange={(e) => setVariant(v.id, { barcode: e.target.value })}
-                    />
-                  </label>
+                  <Field
+                    label="Descrição"
+                    value={v.description}
+                    onChange={(e) => setVariant(v.id, { description: e.target.value })}
+                  />
+                  <Field
+                    label="Código de barras"
+                    required={barcodeRequired}
+                    error={variantErrors[v.id]?.barcode}
+                    value={v.barcode}
+                    onChange={(e) => setVariant(v.id, { barcode: e.target.value })}
+                  />
                   <NumField
                     label="Custo (R$)"
                     required
+                    error={variantErrors[v.id]?.costPrice}
                     value={v.costPrice}
                     onChange={(val) => setVariant(v.id, { costPrice: val })}
                   />
                   <NumField
                     label="Venda (R$)"
                     required
+                    error={variantErrors[v.id]?.salePrice}
                     value={v.salePrice}
                     onChange={(val) => setVariant(v.id, { salePrice: val })}
                   />
                   {tracksLotValidity && (
                     <>
-                      <label className="block">
-                        <Lbl required>Lote</Lbl>
-                        <input
-                          className="input"
-                          value={v.batch}
-                          onChange={(e) => setVariant(v.id, { batch: e.target.value })}
-                        />
-                      </label>
-                      <label className="block">
-                        <Lbl required>Validade</Lbl>
-                        <input
-                          className="input"
-                          type="date"
-                          value={v.validity}
-                          onChange={(e) => setVariant(v.id, { validity: e.target.value })}
-                        />
-                      </label>
+                      <Field
+                        label="Lote"
+                        required
+                        error={variantErrors[v.id]?.batch}
+                        value={v.batch}
+                        onChange={(e) => setVariant(v.id, { batch: e.target.value })}
+                      />
+                      <Field
+                        label="Validade"
+                        required
+                        type="date"
+                        error={variantErrors[v.id]?.validity}
+                        value={v.validity}
+                        onChange={(e) => setVariant(v.id, { validity: e.target.value })}
+                      />
                     </>
                   )}
                 </div>
@@ -640,12 +732,17 @@ function Lbl({ children, required }: { children: React.ReactNode; required?: boo
 function Field({
   label,
   required,
+  error,
   ...props
-}: { label: string; required?: boolean } & React.InputHTMLAttributes<HTMLInputElement>) {
+}: { label: string; required?: boolean; error?: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <label className="block">
       <Lbl required={required}>{label}</Lbl>
-      <input className="input" {...props} />
+      <input
+        className={`input${error ? ' border-rose-400 focus:border-rose-400 focus:ring-rose-200' : ''}`}
+        {...props}
+      />
+      {error && <span className="mt-1 block text-xs text-rose-500">{error}</span>}
     </label>
   );
 }
@@ -663,11 +760,13 @@ function NumField({
   label,
   value,
   required,
+  error,
   onChange,
 }: {
   label: string;
   value: number;
   required?: boolean;
+  error?: string;
   onChange: (v: number) => void;
 }) {
   const toRaw = (n: number) => (n !== 0 ? String(n).replace('.', ',') : '');
@@ -686,7 +785,7 @@ function NumField({
         {required && <span className="text-rose-500"> *</span>}
       </span>
       <input
-        className="input"
+        className={`input${error ? ' border-rose-400 focus:border-rose-400 focus:ring-rose-200' : ''}`}
         type="text"
         inputMode="decimal"
         value={raw}
@@ -698,6 +797,7 @@ function NumField({
         }}
         onFocus={(e) => e.target.select()}
       />
+      {error && <span className="mt-1 block text-xs text-rose-500">{error}</span>}
     </label>
   );
 }
