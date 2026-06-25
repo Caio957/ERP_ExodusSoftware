@@ -4,8 +4,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   marginFromPrice,
   markupFromPrice,
-  marginToMarkup,
-  markupToMargin,
   priceFromMargin,
   priceFromMarkup,
   type ProductFormSettings,
@@ -289,39 +287,49 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
   // Lote/validade é sempre opt-in: todo produto novo abre desmarcado e quem
   // decide é o usuário, por produto. Não bloqueia o cadastro por causa de lote.
 
-  // Precificação (Requisito 4.1). Fonte da verdade: custo + último percentual
-  // informado (margem OU markup) recalcula o preço de venda. Editar a venda
-  // diretamente recalcula ambos os percentuais.
+  // Precificação bidirecional (Requisito 4.1).
+  // lastPricingMode determina qual percentual é preservado quando o Custo muda.
+  // Regras matemáticas:
+  //   Margem (%) = ((Venda - Custo) / Venda) * 100
+  //   Markup (%) = ((Venda - Custo) / Custo) * 100
+  //   Venda via Margem = Custo / (1 - Margem/100)   [inválido se Margem ≥ 100]
+  //   Venda via Markup = Custo * (1 + Markup/100)
   const [cost, setCost] = useState(0);
   const [salePrice, setSalePrice] = useState(0);
   const [margin, setMargin] = useState(0);
   const [markup, setMarkup] = useState(0);
-  const [lastPct, setLastPct] = useState<'margin' | 'markup' | null>(null);
+  const [lastPricingMode, setLastPricingMode] = useState<'margin' | 'markup'>('margin');
 
   function applyCost(novoCusto: number) {
     setCost(novoCusto);
-    // Mantém o último percentual informado e recalcula a venda.
-    if (lastPct === 'margin') setSalePrice(priceFromMargin(novoCusto, margin));
-    else if (lastPct === 'markup') setSalePrice(priceFromMarkup(novoCusto, markup));
-    else {
-      setMargin(marginFromPrice(novoCusto, salePrice));
-      setMarkup(markupFromPrice(novoCusto, salePrice));
+    if (lastPricingMode === 'margin') {
+      if (margin >= 100) return; // Margem inválida: mantém salePrice intacto
+      const newSale = priceFromMargin(novoCusto, margin);
+      setSalePrice(newSale);
+      setMarkup(markupFromPrice(novoCusto, newSale)); // recalcula markup também
+    } else {
+      const newSale = priceFromMarkup(novoCusto, markup);
+      setSalePrice(newSale);
+      setMargin(marginFromPrice(novoCusto, newSale)); // recalcula margem também
     }
   }
   function applyMargin(v: number) {
-    setLastPct('margin');
+    setLastPricingMode('margin');
     setMargin(v);
-    setMarkup(marginToMarkup(v));
-    setSalePrice(priceFromMargin(cost, v));
+    if (v >= 100) { setMarkup(0); return; } // edge case: divisão por zero em priceFromMargin
+    const newSale = priceFromMargin(cost, v);
+    setSalePrice(newSale);
+    setMarkup(markupFromPrice(cost, newSale));
   }
   function applyMarkup(v: number) {
-    setLastPct('markup');
+    setLastPricingMode('markup');
     setMarkup(v);
-    setMargin(markupToMargin(v));
-    setSalePrice(priceFromMarkup(cost, v));
+    const newSale = priceFromMarkup(cost, v);
+    setSalePrice(newSale);
+    setMargin(marginFromPrice(cost, newSale));
   }
   function applySalePrice(v: number) {
-    setLastPct(null);
+    // Não altera lastPricingMode — apenas recalcula os percentuais
     setSalePrice(v);
     setMargin(marginFromPrice(cost, v));
     setMarkup(markupFromPrice(cost, v));
@@ -488,19 +496,62 @@ function EditProductModal({
   const [subgroup, setSubgroup] = useState(product.subgroup ?? '');
   const [tracksLotValidity, setTracksLotValidity] = useState(product.tracksLotValidity);
   const [variants, setVariants] = useState(
-    product.variants.map((v) => ({
-      id: v.id,
-      description: v.description,
-      barcode: v.barcode ?? '',
-      costPrice: v.costPrice,
-      salePrice: v.salePrice,
-      batch: v.batch ?? '',
-      validity: v.validity ? v.validity.slice(0, 10) : '',
-    })),
+    product.variants.map((v) => {
+      const cost = v.costPrice;
+      const sale = v.salePrice;
+      return {
+        id: v.id,
+        description: v.description,
+        barcode: v.barcode ?? '',
+        costPrice: cost,
+        salePrice: sale,
+        margin: marginFromPrice(cost, sale),
+        markup: markupFromPrice(cost, sale),
+        lastPricingMode: 'margin' as 'margin' | 'markup',
+        batch: v.batch ?? '',
+        validity: v.validity ? v.validity.slice(0, 10) : '',
+      };
+    }),
   );
 
   const setVariant = (id: string, patch: Partial<(typeof variants)[number]>) =>
     setVariants((vs) => vs.map((v) => (v.id === id ? { ...v, ...patch } : v)));
+
+  // Handlers de precificação bidirecional por variante (mesma lógica do ProductForm)
+  function applyVCost(id: string, newCost: number) {
+    setVariants((vs) => vs.map((v) => {
+      if (v.id !== id) return v;
+      if (v.lastPricingMode === 'margin') {
+        if (v.margin >= 100) return { ...v, costPrice: newCost };
+        const newSale = priceFromMargin(newCost, v.margin);
+        return { ...v, costPrice: newCost, salePrice: newSale, markup: markupFromPrice(newCost, newSale) };
+      } else {
+        const newSale = priceFromMarkup(newCost, v.markup);
+        return { ...v, costPrice: newCost, salePrice: newSale, margin: marginFromPrice(newCost, newSale) };
+      }
+    }));
+  }
+  function applyVMargin(id: string, newMargin: number) {
+    setVariants((vs) => vs.map((v) => {
+      if (v.id !== id) return v;
+      if (newMargin >= 100) return { ...v, margin: newMargin, lastPricingMode: 'margin' as const, markup: 0 };
+      const newSale = priceFromMargin(v.costPrice, newMargin);
+      return { ...v, margin: newMargin, lastPricingMode: 'margin' as const, salePrice: newSale, markup: markupFromPrice(v.costPrice, newSale) };
+    }));
+  }
+  function applyVMarkup(id: string, newMarkup: number) {
+    setVariants((vs) => vs.map((v) => {
+      if (v.id !== id) return v;
+      const newSale = priceFromMarkup(v.costPrice, newMarkup);
+      return { ...v, markup: newMarkup, lastPricingMode: 'markup' as const, salePrice: newSale, margin: marginFromPrice(v.costPrice, newSale) };
+    }));
+  }
+  function applyVSalePrice(id: string, newSale: number) {
+    setVariants((vs) => vs.map((v) => {
+      if (v.id !== id) return v;
+      return { ...v, salePrice: newSale, margin: marginFromPrice(v.costPrice, newSale), markup: markupFromPrice(v.costPrice, newSale) };
+    }));
+  }
 
   // Configurações de obrigatoriedade (para marcar os campos com *).
   const { data: settings } = useQuery({
@@ -664,14 +715,24 @@ function EditProductModal({
                     required
                     error={variantErrors[v.id]?.costPrice}
                     value={v.costPrice}
-                    onChange={(val) => setVariant(v.id, { costPrice: val })}
+                    onChange={(val) => applyVCost(v.id, val)}
+                  />
+                  <NumField
+                    label="Margem (%)"
+                    value={v.margin}
+                    onChange={(val) => applyVMargin(v.id, val)}
+                  />
+                  <NumField
+                    label="Markup (%)"
+                    value={v.markup}
+                    onChange={(val) => applyVMarkup(v.id, val)}
                   />
                   <NumField
                     label="Venda (R$)"
                     required
                     error={variantErrors[v.id]?.salePrice}
                     value={v.salePrice}
-                    onChange={(val) => setVariant(v.id, { salePrice: val })}
+                    onChange={(val) => applyVSalePrice(v.id, val)}
                   />
                   {tracksLotValidity && (
                     <>
