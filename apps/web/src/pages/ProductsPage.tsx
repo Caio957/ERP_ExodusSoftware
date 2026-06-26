@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { z } from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -368,10 +369,10 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  return (
+  return createPortal(
     <div className="modal-overlay">
       <form
-        className="modal-sheet w-full !h-[95dvh] sm:!h-auto !max-h-[95dvh] sm:!max-h-[90vh] sm:max-w-2xl flex flex-col overflow-hidden !p-0"
+        className="modal-sheet sm:max-w-2xl flex flex-col overflow-hidden !p-0"
         onSubmit={(e) => { e.preventDefault(); submit(); }}
       >
         {/* Cabeçalho fixo */}
@@ -459,7 +460,8 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
           </button>
         </div>
       </form>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -601,10 +603,10 @@ function EditProductModal({
     onSuccess: onSaved,
   });
 
-  return (
+  return createPortal(
     <div className="modal-overlay">
       <form
-        className="modal-sheet w-full !h-[95dvh] sm:!h-auto !max-h-[95dvh] sm:!max-h-[90vh] sm:max-w-2xl flex flex-col overflow-hidden !p-0"
+        className="modal-sheet sm:max-w-2xl flex flex-col overflow-hidden !p-0"
         onSubmit={(e) => { e.preventDefault(); handleSave(); }}
       >
         {/* Cabeçalho fixo */}
@@ -756,7 +758,8 @@ function EditProductModal({
           </button>
         </div>
       </form>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
