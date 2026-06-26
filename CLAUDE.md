@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-06-22
+- **Última atualização:** 2026-06-25
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -23,7 +23,7 @@
   manualmente via PR no GitHub** (o merge dispara o auto-deploy no Railway). A IA
   trabalha sempre na branch ativa indicada — nunca commita direto na `main` sem
   instrução explícita. Branch ativa no momento: **`feature/tela-produtos-caio`**
-  (commits `c8ba129`→`6e94f1f` — ainda não mesclada; ver §11).
+  (commits `c8ba129`→`a3e6b1c` — ainda não mesclada; ver §11).
 - **Fase atual:** Sistema em **produção no Railway** (projeto `exodus-software`,
   conta helomramos40@gmail.com). Banco PostgreSQL gerenciado, seed do ADMIN executado,
   interface redesenhada (design system "beauty"). **Todo o backlog de funcionalidades
@@ -196,14 +196,19 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   (asteriscos `*` também no modal Editar); excluir (com confirmação + bloqueio por
   origem); toggle **"controlar lote e validade"** (lote/validade só obrigatórios
   quando marcado); **descrição da variante opcional** (fallback = nome do produto);
-  **marca/grupo/subgrupo obrigatórios conforme a config da loja**; precificação:
-  o **último percentual editado (margem OU markup) recalcula o preço de venda**,
-  alterar o custo mantém o percentual e atualiza a venda.
-  **Modal de cadastro/edição responsivo** (`feature/tela-produtos-caio`): overlay
-  `absolute inset-0` ancorado ao wrapper `relative` da página (respeita header/sidebar);
-  scroll interno (`flex-1 min-h-0 overflow-y-auto`) com cabeçalho e rodapé `shrink-0`
-  fixos; `min-h-[calc(100vh-9rem)]` evita modal curto com lista vazia sem gerar
-  scrollbar global.
+  **marca/grupo/subgrupo obrigatórios conforme a config da loja**.
+  **Precificação com modo global** (`pricingMode`): ADMIN escolhe em Configurações
+  se o campo de percentual exibe Margem ou Markup; formulário exibe exatamente
+  3 campos [Custo | Margem OU Markup | Venda]. Alterar o custo preserva o
+  percentual e recalcula o preço; alterar o preço recalcula o percentual.
+  **Modal de cadastro/edição via React Portal** (`feature/tela-produtos-caio`):
+  `createPortal(..., document.body)` em ambos os modais — imune ao containing block
+  gerado pelo `animate-fade-in` do `<main>`. Usa `.modal-overlay` + `.modal-sheet`
+  do design system (bottom-sheet no mobile, card centralizado no desktop); scroll
+  interno (`flex-1 min-h-0 overflow-y-auto`) com cabeçalho e rodapé `shrink-0` fixos.
+  **Cabeçalho do modal Editar** exibe o código sequencial `#N` do produto.
+  **Campo SKU** restaurado no card de variante (obrigatório, validado pelo
+  `buildVariantSchema`, enviado ao `PUT /api/products/variants/:id`).
   **Validação Zod dinâmica**: `buildProductFormSchema` e `buildVariantSchema` geram
   schemas em runtime conforme as flags de Configurações (`brandRequired`, `groupRequired`,
   `subgroupRequired`, `barcodeRequired`, `tracksLotValidity`). `submit()` / `handleSave()`
@@ -236,7 +241,9 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   **histórico de acertos** com editar (recalcula estoque) e apagar (reverte diff).
   Endpoints: `GET/PUT/DELETE /products/stock-adjustments(/:id)`.
 - ✅ **Configurações** (ADMIN) em abas: **Produto** (campos obrigatórios + lote/validade
-  padrão), **Recebimentos** (tipos de pagamento configuráveis: renomear/ativar/adicionar,
+  padrão + **modelo de precificação** `pricingMode`: Margem ou Markup — radio group,
+  persistido em `Setting`, consumido dinamicamente pelo formulário de produto),
+  **Recebimentos** (tipos de pagamento configuráveis: renomear/ativar/adicionar,
   consumidos dinamicamente pelo PDV), **Empresa** (dados cadastrais do contratante) e
   **Usuários** (CRUD completo: criar/editar/excluir; definir quais telas cada operador
   pode acessar via checkboxes — `allowedPages` granular por usuário).
@@ -675,6 +682,46 @@ Railway a cada deploy (`prisma migrate deploy`).
     `border-rose-400` no input + renderiza `<span className="text-xs text-rose-500">`
     imediatamente abaixo do campo quando presente.
   `npm run typecheck` → **0 erros**.
+- ✅ **Onda 2026-06-25a — Configuração global de precificação + simplificação do formulário** (2026-06-25):
+  Branch `feature/tela-produtos-caio` — **ainda não mesclada na `main`**. Commit `1b001da`.
+  - **`packages/shared/src/schemas/settings.ts`**: `pricingMode: z.enum(['margin', 'markup']).default('margin')`
+    adicionado ao `productFormSettingsSchema` / `ProductFormSettings`.
+  - **`SettingsPage.tsx`**: radio group "Modelo de precificação" na aba Produto
+    (`productDefaults` atualizado; `toggle` tipado para excluir `pricingMode`).
+  - **`ProductsPage.tsx` — `ProductForm`**: estados `margin`, `markup` e `lastPricingMode`
+    substituídos por um único `pct`; 3 handlers simplificados; JSX com 3 colunas e
+    label condicional (Margem ou Markup conforme `pricingMode`).
+  - **`ProductsPage.tsx` — `EditProductModal`**: variant state sem `margin`/`markup`/
+    `lastPricingMode`; `pct` derivado no render em vez de guardado no estado;
+    handlers `applyVCost`, `applyVPct`, `applyVSalePrice` simplificados; query de
+    settings movida para antes dos handlers para evitar TDZ.
+  `npm run typecheck` → **0 erros**.
+- ✅ **Onda 2026-06-25b — Campo SKU e código do produto no modal Editar** (2026-06-25):
+  Branch `feature/tela-produtos-caio`. Commit `e0ac24e`.
+  - **Cabeçalho** do `EditProductModal`: exibe `#{product.code}` ao lado do título.
+  - **Campo SKU**: adicionado ao card da variante (`Field` com `required`, `error`,
+    `onChange` via `setVariants`); estado da variante inclui `sku: v.sku`; enviado
+    para `PUT /api/products/variants/:id`; `varSchema.safeParse` valida `sku`.
+  - **`buildVariantSchema`**: `sku: z.string().min(1, 'SKU é obrigatório')` inserido.
+  `npm run typecheck` → **0 erros**.
+- ✅ **Onda 2026-06-25c — Correção definitiva do posicionamento do modal de Produtos** (2026-06-25):
+  Branch `feature/tela-produtos-caio`. Commits `a5f1362`→`a3e6b1c` (5 commits, iteração
+  diagnóstica + solução canônica).
+  - **Causa raiz confirmada**: `Layout.tsx` renderiza a rota dentro de
+    `<div className="...animate-fade-in">`. O keyframe `fade-in` usa
+    `transform: translateY()` com `fill-mode: both` — o transform persiste como
+    `translateY(0)` e cria um **CSS containing block** que capturava qualquer
+    `position: fixed` descendente, ancorando o modal ao `<div>` alto (lista longa)
+    em vez do viewport.
+  - **Solução**: `createPortal(<div className="modal-overlay">…</div>, document.body)`
+    em **ambos** `ProductForm` e `EditProductModal` — renders fora da árvore do
+    `<main>`, `fixed inset-0` ancora corretamente no viewport.
+  - **Limpeza**: removidos hacks `!h-[95dvh]`, `sm:!h-auto`, `!max-h-[95dvh]`,
+    `sm:!max-h-[90vh]` acumulados nas iterações anteriores. Container volta a
+    `modal-sheet sm:max-w-2xl flex flex-col overflow-hidden !p-0` (o `!p-0` é
+    load-bearing para o padrão header/body/footer com scroll interno).
+  - **Import**: `createPortal` importado de `react-dom`.
+  `npm run typecheck` + `npm run build` → **0 erros**.
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---
