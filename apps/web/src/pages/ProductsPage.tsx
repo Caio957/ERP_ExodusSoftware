@@ -287,53 +287,32 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
   // Lote/validade é sempre opt-in: todo produto novo abre desmarcado e quem
   // decide é o usuário, por produto. Não bloqueia o cadastro por causa de lote.
 
-  // Precificação bidirecional (Requisito 4.1).
-  // lastPricingMode determina qual percentual é preservado quando o Custo muda.
-  // Regras matemáticas:
-  //   Margem (%) = ((Venda - Custo) / Venda) * 100
-  //   Markup (%) = ((Venda - Custo) / Custo) * 100
-  //   Venda via Margem = Custo / (1 - Margem/100)   [inválido se Margem ≥ 100]
-  //   Venda via Markup = Custo * (1 + Markup/100)
+  // Precificação unificada: um único estado `pct` representa Margem OU Markup
+  // conforme `pricingMode` lido das configurações da loja.
+  const pricingMode = settings?.pricingMode ?? 'margin';
   const [cost, setCost] = useState(0);
   const [salePrice, setSalePrice] = useState(0);
-  const [margin, setMargin] = useState(0);
-  const [markup, setMarkup] = useState(0);
-  const [lastPricingMode, setLastPricingMode] = useState<'margin' | 'markup'>('margin');
+  const [pct, setPct] = useState(0);
 
   function applyCost(novoCusto: number) {
+    const safePct = pricingMode === 'margin' ? Math.min(pct, 99.99) : pct;
     setCost(novoCusto);
-    if (lastPricingMode === 'margin') {
-      const safeMargin = Math.min(margin, 99.99); // clamp: nunca chega a 100
-      setMargin(safeMargin);
-      const newSale = priceFromMargin(novoCusto, safeMargin);
-      setSalePrice(newSale);
-      setMarkup(markupFromPrice(novoCusto, newSale) || 0);
-    } else {
-      const newSale = priceFromMarkup(novoCusto, markup);
-      setSalePrice(newSale);
-      setMargin(marginFromPrice(novoCusto, newSale) || 0);
-    }
+    setSalePrice(pricingMode === 'margin'
+      ? priceFromMargin(novoCusto, safePct)
+      : priceFromMarkup(novoCusto, safePct));
   }
-  function applyMargin(v: number) {
-    setLastPricingMode('margin');
-    const safeMargin = Math.min(v, 99.99); // clamp: evita divisão por zero e dessync do NumField
-    setMargin(safeMargin);
-    const newSale = priceFromMargin(cost, safeMargin);
-    setSalePrice(newSale);
-    setMarkup(markupFromPrice(cost, newSale) || 0);
-  }
-  function applyMarkup(v: number) {
-    setLastPricingMode('markup');
-    setMarkup(v);
-    const newSale = priceFromMarkup(cost, v);
-    setSalePrice(newSale);
-    setMargin(marginFromPrice(cost, newSale) || 0);
+  function applyPct(v: number) {
+    const safe = pricingMode === 'margin' ? Math.min(v, 99.99) : v;
+    setPct(safe);
+    setSalePrice(pricingMode === 'margin'
+      ? priceFromMargin(cost, safe)
+      : priceFromMarkup(cost, safe));
   }
   function applySalePrice(v: number) {
-    // Não altera lastPricingMode — apenas recalcula os percentuais
     setSalePrice(v);
-    setMargin(marginFromPrice(cost, v) || 0);
-    setMarkup(markupFromPrice(cost, v) || 0);
+    setPct(pricingMode === 'margin'
+      ? marginFromPrice(cost, v) || 0
+      : markupFromPrice(cost, v) || 0);
   }
 
   const create = useMutation({
@@ -449,11 +428,16 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
           )}
 
           <div className="mt-4 rounded-xl border border-brand-100 bg-brand-50/60 p-4">
-            <div className="mb-2 text-sm font-semibold text-brand-700">Precificação (margem ⇄ markup)</div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="mb-2 text-sm font-semibold text-brand-700">
+              Precificação — {pricingMode === 'margin' ? 'Margem sobre venda' : 'Markup sobre custo'}
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <NumField label="Custo (R$)" required error={errors.cost} value={cost} onChange={applyCost} />
-              <NumField label="Margem (%)" value={margin} onChange={applyMargin} />
-              <NumField label="Markup (%)" value={markup} onChange={applyMarkup} />
+              <NumField
+                label={pricingMode === 'margin' ? 'Margem (%)' : 'Markup (%)'}
+                value={pct}
+                onChange={applyPct}
+              />
               <NumField label="Venda (R$)" required error={errors.salePrice} value={salePrice} onChange={applySalePrice} />
             </div>
           </div>
@@ -497,68 +481,55 @@ function EditProductModal({
   const [subgroup, setSubgroup] = useState(product.subgroup ?? '');
   const [tracksLotValidity, setTracksLotValidity] = useState(product.tracksLotValidity);
   const [variants, setVariants] = useState(
-    product.variants.map((v) => {
-      const cost = v.costPrice;
-      const sale = v.salePrice;
-      return {
-        id: v.id,
-        description: v.description,
-        barcode: v.barcode ?? '',
-        costPrice: cost,
-        salePrice: sale,
-        margin: marginFromPrice(cost, sale),
-        markup: markupFromPrice(cost, sale),
-        lastPricingMode: 'margin' as 'margin' | 'markup',
-        batch: v.batch ?? '',
-        validity: v.validity ? v.validity.slice(0, 10) : '',
-      };
-    }),
+    product.variants.map((v) => ({
+      id: v.id,
+      description: v.description,
+      barcode: v.barcode ?? '',
+      costPrice: v.costPrice,
+      salePrice: v.salePrice,
+      batch: v.batch ?? '',
+      validity: v.validity ? v.validity.slice(0, 10) : '',
+    })),
   );
 
   const setVariant = (id: string, patch: Partial<(typeof variants)[number]>) =>
     setVariants((vs) => vs.map((v) => (v.id === id ? { ...v, ...patch } : v)));
 
-  // Handlers de precificação bidirecional por variante (mesma lógica do ProductForm)
-  function applyVCost(id: string, newCost: number) {
-    setVariants((vs) => vs.map((v) => {
-      if (v.id !== id) return v;
-      if (v.lastPricingMode === 'margin') {
-        const safeMargin = Math.min(v.margin, 99.99);
-        const newSale = priceFromMargin(newCost, safeMargin);
-        return { ...v, costPrice: newCost, margin: safeMargin, salePrice: newSale, markup: markupFromPrice(newCost, newSale) || 0 };
-      } else {
-        const newSale = priceFromMarkup(newCost, v.markup);
-        return { ...v, costPrice: newCost, salePrice: newSale, margin: marginFromPrice(newCost, newSale) || 0 };
-      }
-    }));
-  }
-  function applyVMargin(id: string, newMargin: number) {
-    setVariants((vs) => vs.map((v) => {
-      if (v.id !== id) return v;
-      const safeMargin = Math.min(newMargin, 99.99);
-      const newSale = priceFromMargin(v.costPrice, safeMargin);
-      return { ...v, margin: safeMargin, lastPricingMode: 'margin' as const, salePrice: newSale, markup: markupFromPrice(v.costPrice, newSale) || 0 };
-    }));
-  }
-  function applyVMarkup(id: string, newMarkup: number) {
-    setVariants((vs) => vs.map((v) => {
-      if (v.id !== id) return v;
-      const newSale = priceFromMarkup(v.costPrice, newMarkup);
-      return { ...v, markup: newMarkup, lastPricingMode: 'markup' as const, salePrice: newSale, margin: marginFromPrice(v.costPrice, newSale) || 0 };
-    }));
-  }
-  function applyVSalePrice(id: string, newSale: number) {
-    setVariants((vs) => vs.map((v) => {
-      if (v.id !== id) return v;
-      return { ...v, salePrice: newSale, margin: marginFromPrice(v.costPrice, newSale) || 0, markup: markupFromPrice(v.costPrice, newSale) || 0 };
-    }));
-  }
-
-  // Configurações de obrigatoriedade (para marcar os campos com *).
+  // Configurações necessárias antes dos handlers de precificação.
   const { data: settings } = useQuery({
     queryKey: ['settings', 'product-form'],
     queryFn: () => api.get<ProductFormSettings>('/api/settings/product-form'),
   });
+  const pricingMode = settings?.pricingMode ?? 'margin';
+
+  // Precificação: o pct (margem ou markup) é derivado de costPrice/salePrice no render.
+  // Os handlers recalculam salePrice a partir do pct corrente, sem estado extra.
+  function applyVCost(id: string, newCost: number) {
+    setVariants((vs) => vs.map((v) => {
+      if (v.id !== id) return v;
+      const curPct = pricingMode === 'margin'
+        ? Math.min(marginFromPrice(v.costPrice, v.salePrice) || 0, 99.99)
+        : markupFromPrice(v.costPrice, v.salePrice) || 0;
+      const newSale = pricingMode === 'margin'
+        ? priceFromMargin(newCost, curPct)
+        : priceFromMarkup(newCost, curPct);
+      return { ...v, costPrice: newCost, salePrice: newSale };
+    }));
+  }
+  function applyVPct(id: string, newPct: number) {
+    setVariants((vs) => vs.map((v) => {
+      if (v.id !== id) return v;
+      const safe = pricingMode === 'margin' ? Math.min(newPct, 99.99) : newPct;
+      const newSale = pricingMode === 'margin'
+        ? priceFromMargin(v.costPrice, safe)
+        : priceFromMarkup(v.costPrice, safe);
+      return { ...v, salePrice: newSale };
+    }));
+  }
+  function applyVSalePrice(id: string, newSale: number) {
+    setVariants((vs) => vs.map((v) => (v.id !== id ? v : { ...v, salePrice: newSale })));
+  }
+
   const brandRequired = settings?.brandRequired ?? false;
   const groupRequired = settings?.groupRequired ?? false;
   const subgroupRequired = settings?.subgroupRequired ?? false;
@@ -719,14 +690,11 @@ function EditProductModal({
                     onChange={(val) => applyVCost(v.id, val)}
                   />
                   <NumField
-                    label="Margem (%)"
-                    value={v.margin}
-                    onChange={(val) => applyVMargin(v.id, val)}
-                  />
-                  <NumField
-                    label="Markup (%)"
-                    value={v.markup}
-                    onChange={(val) => applyVMarkup(v.id, val)}
+                    label={pricingMode === 'margin' ? 'Margem (%)' : 'Markup (%)'}
+                    value={pricingMode === 'margin'
+                      ? marginFromPrice(v.costPrice, v.salePrice) || 0
+                      : markupFromPrice(v.costPrice, v.salePrice) || 0}
+                    onChange={(val) => applyVPct(v.id, val)}
                   />
                   <NumField
                     label="Venda (R$)"

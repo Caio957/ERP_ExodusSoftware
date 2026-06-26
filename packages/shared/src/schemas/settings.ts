@@ -11,6 +11,8 @@ export const productFormSettingsSchema = z.object({
   subgroupRequired: z.boolean().default(false),
   barcodeRequired: z.boolean().default(false),
   defaultTracksLotValidity: z.boolean().default(false),
+  /** Determina o campo de percentual exibido no formulário de produto. */
+  pricingMode: z.enum(['margin', 'markup']).default('margin'),
 });
 export type ProductFormSettings = z.infer<typeof productFormSettingsSchema>;
 

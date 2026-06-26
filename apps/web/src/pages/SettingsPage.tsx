@@ -58,6 +58,7 @@ const productDefaults: ProductFormSettings = {
   subgroupRequired: false,
   barcodeRequired: false,
   defaultTracksLotValidity: false,
+  pricingMode: 'margin',
 };
 
 function ProductFormSettingsCard() {
@@ -82,22 +83,61 @@ function ProductFormSettingsCard() {
     },
   });
 
-  const toggle = (k: keyof ProductFormSettings) => setForm((f) => ({ ...f, [k]: !f[k] }));
+  const toggle = (k: keyof Omit<ProductFormSettings, 'pricingMode'>) => setForm((f) => ({ ...f, [k]: !f[k] }));
+  const setPricingMode = (mode: 'margin' | 'markup') => setForm((f) => ({ ...f, pricingMode: mode }));
   if (isLoading) return <div className="grid h-40 place-items-center text-slate-500">Carregando...</div>;
 
   return (
-    <div className="card">
-      <div className="mb-4 flex items-center gap-2 font-semibold">
-        <Package className="h-5 w-5 text-brand-600" /> Cadastro de produto — campos obrigatórios
+    <div className="card space-y-5">
+      <div>
+        <div className="mb-3 flex items-center gap-2 font-semibold">
+          <Package className="h-5 w-5 text-brand-600" /> Campos obrigatórios
+        </div>
+        <div className="divide-y divide-slate-100">
+          <ToggleRow label="Exigir marca" desc="Torna o campo Marca obrigatório." checked={form.brandRequired} onChange={() => toggle('brandRequired')} />
+          <ToggleRow label="Exigir grupo" desc="Torna o campo Grupo obrigatório." checked={form.groupRequired} onChange={() => toggle('groupRequired')} />
+          <ToggleRow label="Exigir subgrupo" desc="Torna o campo Subgrupo obrigatório." checked={form.subgroupRequired} onChange={() => toggle('subgroupRequired')} />
+          <ToggleRow label="Exigir código de barras" desc="Torna o código de barras obrigatório." checked={form.barcodeRequired} onChange={() => toggle('barcodeRequired')} />
+          <ToggleRow label="Controlar lote/validade por padrão" desc="Novos produtos já vêm com o controle ativado." checked={form.defaultTracksLotValidity} onChange={() => toggle('defaultTracksLotValidity')} />
+        </div>
       </div>
-      <div className="divide-y divide-slate-100">
-        <ToggleRow label="Exigir marca" desc="Torna o campo Marca obrigatório." checked={form.brandRequired} onChange={() => toggle('brandRequired')} />
-        <ToggleRow label="Exigir grupo" desc="Torna o campo Grupo obrigatório." checked={form.groupRequired} onChange={() => toggle('groupRequired')} />
-        <ToggleRow label="Exigir subgrupo" desc="Torna o campo Subgrupo obrigatório." checked={form.subgroupRequired} onChange={() => toggle('subgroupRequired')} />
-        <ToggleRow label="Exigir código de barras" desc="Torna o código de barras obrigatório." checked={form.barcodeRequired} onChange={() => toggle('barcodeRequired')} />
-        <ToggleRow label="Controlar lote/validade por padrão" desc="Novos produtos já vêm com o controle ativado." checked={form.defaultTracksLotValidity} onChange={() => toggle('defaultTracksLotValidity')} />
+
+      <div className="rounded-xl border border-slate-200 p-4">
+        <div className="mb-1 text-sm font-semibold text-slate-700">Modelo de precificação</div>
+        <p className="mb-3 text-xs text-slate-500">
+          Define o campo de percentual exibido no formulário de produto.
+        </p>
+        <div className="flex flex-col gap-2">
+          <label className="flex cursor-pointer items-start gap-2">
+            <input
+              type="radio"
+              name="pricingMode"
+              className="mt-0.5 accent-brand-600"
+              checked={form.pricingMode === 'margin'}
+              onChange={() => setPricingMode('margin')}
+            />
+            <span className="text-sm">
+              <span className="font-medium">Margem (%)</span>
+              <span className="block text-xs text-slate-500">Lucro calculado sobre o preço de venda — ex.: vender por R$100 com 30% de margem → lucro de R$30</span>
+            </span>
+          </label>
+          <label className="flex cursor-pointer items-start gap-2">
+            <input
+              type="radio"
+              name="pricingMode"
+              className="mt-0.5 accent-brand-600"
+              checked={form.pricingMode === 'markup'}
+              onChange={() => setPricingMode('markup')}
+            />
+            <span className="text-sm">
+              <span className="font-medium">Markup (%)</span>
+              <span className="block text-xs text-slate-500">Lucro calculado sobre o custo — ex.: custo R$70, markup 43%: preço de venda ≈ R$100</span>
+            </span>
+          </label>
+        </div>
       </div>
-      <div className="mt-5 flex items-center justify-end gap-3">
+
+      <div className="flex items-center justify-end gap-3">
         <SavedTag show={saved} />
         <button className="btn-primary" disabled={save.isPending} onClick={() => save.mutate()}>
           <Save className="h-5 w-5" /> {save.isPending ? 'Salvando...' : 'Salvar'}
