@@ -371,7 +371,7 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
   return (
     <div className="modal-overlay">
       <form
-        className="modal-sheet w-full h-[95dvh] sm:h-auto max-h-[95dvh] sm:max-h-[90vh] sm:max-w-2xl flex flex-col overflow-hidden !p-0"
+        className="modal-sheet w-full !h-[95dvh] sm:!h-auto !max-h-[95dvh] sm:!max-h-[90vh] sm:max-w-2xl flex flex-col overflow-hidden !p-0"
         onSubmit={(e) => { e.preventDefault(); submit(); }}
       >
         {/* Cabeçalho fixo */}
@@ -386,7 +386,7 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
         </div>
 
         {/* Corpo com scroll interno — min-h-0 é obrigatório para o flexbox não estourar o wrapper */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-4">
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label="Nome" required error={errors.name} value={form.name} onChange={set('name')} />
             <Field label="Marca" required={brandRequired} error={errors.brand} value={form.brand} onChange={set('brand')} />
@@ -604,7 +604,7 @@ function EditProductModal({
   return (
     <div className="modal-overlay">
       <form
-        className="modal-sheet w-full h-[95dvh] sm:h-auto max-h-[95dvh] sm:max-h-[90vh] sm:max-w-2xl flex flex-col overflow-hidden !p-0"
+        className="modal-sheet w-full !h-[95dvh] sm:!h-auto !max-h-[95dvh] sm:!max-h-[90vh] sm:max-w-2xl flex flex-col overflow-hidden !p-0"
         onSubmit={(e) => { e.preventDefault(); handleSave(); }}
       >
         {/* Cabeçalho fixo */}
@@ -626,7 +626,7 @@ function EditProductModal({
         </div>
 
         {/* Corpo com scroll interno — min-h-0 impede o flexbox de estourar o wrapper */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-4">
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field
               label="Nome"
