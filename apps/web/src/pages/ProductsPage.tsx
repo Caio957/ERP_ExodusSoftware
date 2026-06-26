@@ -303,36 +303,37 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
   function applyCost(novoCusto: number) {
     setCost(novoCusto);
     if (lastPricingMode === 'margin') {
-      if (margin >= 100) return; // Margem inválida: mantém salePrice intacto
-      const newSale = priceFromMargin(novoCusto, margin);
+      const safeMargin = Math.min(margin, 99.99); // clamp: nunca chega a 100
+      setMargin(safeMargin);
+      const newSale = priceFromMargin(novoCusto, safeMargin);
       setSalePrice(newSale);
-      setMarkup(markupFromPrice(novoCusto, newSale)); // recalcula markup também
+      setMarkup(markupFromPrice(novoCusto, newSale) || 0);
     } else {
       const newSale = priceFromMarkup(novoCusto, markup);
       setSalePrice(newSale);
-      setMargin(marginFromPrice(novoCusto, newSale)); // recalcula margem também
+      setMargin(marginFromPrice(novoCusto, newSale) || 0);
     }
   }
   function applyMargin(v: number) {
     setLastPricingMode('margin');
-    setMargin(v);
-    if (v >= 100) { setMarkup(0); return; } // edge case: divisão por zero em priceFromMargin
-    const newSale = priceFromMargin(cost, v);
+    const safeMargin = Math.min(v, 99.99); // clamp: evita divisão por zero e dessync do NumField
+    setMargin(safeMargin);
+    const newSale = priceFromMargin(cost, safeMargin);
     setSalePrice(newSale);
-    setMarkup(markupFromPrice(cost, newSale));
+    setMarkup(markupFromPrice(cost, newSale) || 0);
   }
   function applyMarkup(v: number) {
     setLastPricingMode('markup');
     setMarkup(v);
     const newSale = priceFromMarkup(cost, v);
     setSalePrice(newSale);
-    setMargin(marginFromPrice(cost, newSale));
+    setMargin(marginFromPrice(cost, newSale) || 0);
   }
   function applySalePrice(v: number) {
     // Não altera lastPricingMode — apenas recalcula os percentuais
     setSalePrice(v);
-    setMargin(marginFromPrice(cost, v));
-    setMarkup(markupFromPrice(cost, v));
+    setMargin(marginFromPrice(cost, v) || 0);
+    setMarkup(markupFromPrice(cost, v) || 0);
   }
 
   const create = useMutation({
@@ -522,34 +523,34 @@ function EditProductModal({
     setVariants((vs) => vs.map((v) => {
       if (v.id !== id) return v;
       if (v.lastPricingMode === 'margin') {
-        if (v.margin >= 100) return { ...v, costPrice: newCost };
-        const newSale = priceFromMargin(newCost, v.margin);
-        return { ...v, costPrice: newCost, salePrice: newSale, markup: markupFromPrice(newCost, newSale) };
+        const safeMargin = Math.min(v.margin, 99.99);
+        const newSale = priceFromMargin(newCost, safeMargin);
+        return { ...v, costPrice: newCost, margin: safeMargin, salePrice: newSale, markup: markupFromPrice(newCost, newSale) || 0 };
       } else {
         const newSale = priceFromMarkup(newCost, v.markup);
-        return { ...v, costPrice: newCost, salePrice: newSale, margin: marginFromPrice(newCost, newSale) };
+        return { ...v, costPrice: newCost, salePrice: newSale, margin: marginFromPrice(newCost, newSale) || 0 };
       }
     }));
   }
   function applyVMargin(id: string, newMargin: number) {
     setVariants((vs) => vs.map((v) => {
       if (v.id !== id) return v;
-      if (newMargin >= 100) return { ...v, margin: newMargin, lastPricingMode: 'margin' as const, markup: 0 };
-      const newSale = priceFromMargin(v.costPrice, newMargin);
-      return { ...v, margin: newMargin, lastPricingMode: 'margin' as const, salePrice: newSale, markup: markupFromPrice(v.costPrice, newSale) };
+      const safeMargin = Math.min(newMargin, 99.99);
+      const newSale = priceFromMargin(v.costPrice, safeMargin);
+      return { ...v, margin: safeMargin, lastPricingMode: 'margin' as const, salePrice: newSale, markup: markupFromPrice(v.costPrice, newSale) || 0 };
     }));
   }
   function applyVMarkup(id: string, newMarkup: number) {
     setVariants((vs) => vs.map((v) => {
       if (v.id !== id) return v;
       const newSale = priceFromMarkup(v.costPrice, newMarkup);
-      return { ...v, markup: newMarkup, lastPricingMode: 'markup' as const, salePrice: newSale, margin: marginFromPrice(v.costPrice, newSale) };
+      return { ...v, markup: newMarkup, lastPricingMode: 'markup' as const, salePrice: newSale, margin: marginFromPrice(v.costPrice, newSale) || 0 };
     }));
   }
   function applyVSalePrice(id: string, newSale: number) {
     setVariants((vs) => vs.map((v) => {
       if (v.id !== id) return v;
-      return { ...v, salePrice: newSale, margin: marginFromPrice(v.costPrice, newSale), markup: markupFromPrice(v.costPrice, newSale) };
+      return { ...v, salePrice: newSale, margin: marginFromPrice(v.costPrice, newSale) || 0, markup: markupFromPrice(v.costPrice, newSale) || 0 };
     }));
   }
 
