@@ -371,7 +371,7 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
   return (
     <div className="modal-overlay">
       <form
-        className="modal-sheet sm:max-w-2xl flex flex-col overflow-hidden !p-0"
+        className="modal-sheet w-full h-[95dvh] sm:h-auto max-h-[95dvh] sm:max-h-[90vh] sm:max-w-2xl flex flex-col overflow-hidden !p-0"
         onSubmit={(e) => { e.preventDefault(); submit(); }}
       >
         {/* Cabeçalho fixo */}
@@ -604,7 +604,7 @@ function EditProductModal({
   return (
     <div className="modal-overlay">
       <form
-        className="modal-sheet sm:max-w-2xl flex flex-col overflow-hidden !p-0"
+        className="modal-sheet w-full h-[95dvh] sm:h-auto max-h-[95dvh] sm:max-h-[90vh] sm:max-w-2xl flex flex-col overflow-hidden !p-0"
         onSubmit={(e) => { e.preventDefault(); handleSave(); }}
       >
         {/* Cabeçalho fixo */}
