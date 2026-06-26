@@ -239,6 +239,7 @@ function buildProductFormSchema(
 
 function buildVariantSchema(barcodeRequired: boolean, tracksLotValidity: boolean) {
   return z.object({
+    sku: z.string().min(1, 'SKU é obrigatório'),
     barcode: barcodeRequired ? z.string().min(1, 'Código de barras é obrigatório') : z.string(),
     costPrice: z.number({ invalid_type_error: 'Custo inválido' }).min(0.01, 'Custo deve ser maior que zero'),
     salePrice: z.number({ invalid_type_error: 'Preço inválido' }).min(0.01, 'Preço de venda deve ser maior que zero'),
@@ -483,6 +484,7 @@ function EditProductModal({
   const [variants, setVariants] = useState(
     product.variants.map((v) => ({
       id: v.id,
+      sku: v.sku,
       description: v.description,
       barcode: v.barcode ?? '',
       costPrice: v.costPrice,
@@ -559,6 +561,7 @@ function EditProductModal({
     const newVarErrors: Record<string, Record<string, string>> = {};
     for (const v of variants) {
       const vResult = varSchema.safeParse({
+        sku: v.sku,
         barcode: v.barcode,
         costPrice: v.costPrice,
         salePrice: v.salePrice,
@@ -586,6 +589,7 @@ function EditProductModal({
       });
       for (const v of variants) {
         await api.put(`/api/products/variants/${v.id}`, {
+          sku: v.sku,
           description: v.description.trim() || undefined,
           barcode: v.barcode || null,
           costPrice: v.costPrice,
@@ -611,7 +615,9 @@ function EditProductModal({
               <Pencil className="h-5 w-5" />
             </span>
             <div>
-              <h2 className="font-display text-lg font-bold">Editar produto</h2>
+              <h2 className="font-display text-lg font-bold">
+                Editar produto <span className="text-brand-500">#{product.code}</span>
+              </h2>
               <p className="text-sm text-slate-500">Altere os dados e os preços das variantes.</p>
             </div>
           </div>
@@ -670,6 +676,13 @@ function EditProductModal({
                   Variante
                 </div>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <Field
+                    label="SKU"
+                    required
+                    error={variantErrors[v.id]?.sku}
+                    value={v.sku}
+                    onChange={(e) => setVariants((vs) => vs.map((x) => x.id === v.id ? { ...x, sku: e.target.value } : x))}
+                  />
                   <Field
                     label="Descrição"
                     value={v.description}
