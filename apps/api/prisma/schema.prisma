@@ -64,6 +64,7 @@ model ProductVariant {
   barcode     String?   @unique
   description String
   costPrice   Decimal   @db.Decimal(10, 2)
+  averageCost Decimal   @default(0) @db.Decimal(10, 2)
   salePrice   Decimal   @db.Decimal(10, 2)
   stockQty    Int       @default(0)
   batch       String? // lote (obrigatório só quando Product.tracksLotValidity)

@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { z } from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   marginFromPrice,
   markupFromPrice,
-  marginToMarkup,
-  markupToMargin,
   priceFromMargin,
   priceFromMarkup,
   type ProductFormSettings,
@@ -20,6 +20,7 @@ interface Variant {
   description: string;
   barcode: string | null;
   costPrice: number;
+  averageCost: number;
   salePrice: number;
   stockQty: number;
   batch: string | null;
@@ -45,14 +46,16 @@ export function ProductsPage() {
   const [brand, setBrand] = useState('');
   const [group, setGroup] = useState('');
   const [subgroup, setSubgroup] = useState('');
+  const [orderBy, setOrderBy] = useState<'name' | 'code' | 'sku' | 'price'>('name');
+  const [orderDir, setOrderDir] = useState<'asc' | 'desc'>('asc');
   const [showFilters, setShowFilters] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['products', search, brand, group, subgroup],
+    queryKey: ['products', search, brand, group, subgroup, orderBy, orderDir],
     queryFn: () => {
-      const qs = new URLSearchParams({ pageSize: '100' });
+      const qs = new URLSearchParams({ pageSize: '100', orderBy, orderDir });
       if (search.trim()) qs.set('search', search.trim());
       if (brand.trim()) qs.set('brand', brand.trim());
       if (group.trim()) qs.set('group', group.trim());
@@ -76,7 +79,7 @@ export function ProductsPage() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ['products'] });
 
   return (
-    <div className="space-y-5">
+    <div className="flex flex-col space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="page-title">Produtos</h1>
@@ -107,7 +110,7 @@ export function ProductsPage() {
       </div>
 
       {showFilters && (
-        <div className="card grid animate-fade-in gap-3 sm:grid-cols-3">
+        <div className="card grid animate-fade-in gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <label className="block">
             <span className="label">Marca</span>
             <input className="input" value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="Todas" />
@@ -119,6 +122,30 @@ export function ProductsPage() {
           <label className="block">
             <span className="label">Subgrupo</span>
             <input className="input" value={subgroup} onChange={(e) => setSubgroup(e.target.value)} placeholder="Todos" />
+          </label>
+          <label className="block">
+            <span className="label">Ordenar por</span>
+            <select
+              className="input"
+              value={orderBy}
+              onChange={(e) => setOrderBy(e.target.value as typeof orderBy)}
+            >
+              <option value="name">Descrição</option>
+              <option value="code">Código</option>
+              <option value="sku">SKU</option>
+              <option value="price">Preço de venda</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="label">Ordem</span>
+            <select
+              className="input"
+              value={orderDir}
+              onChange={(e) => setOrderDir(e.target.value as typeof orderDir)}
+            >
+              <option value="asc">Crescente</option>
+              <option value="desc">Decrescente</option>
+            </select>
           </label>
         </div>
       )}
@@ -215,6 +242,59 @@ export function ProductsPage() {
 }
 
 // ---------------------------------------------------------------------------
+// Schemas Zod dinâmicos — obrigatoriedade condicionada às configurações da loja
+// ---------------------------------------------------------------------------
+function buildProductFormSchema(
+  brandRequired: boolean,
+  groupRequired: boolean,
+  subgroupRequired: boolean,
+  barcodeRequired: boolean,
+  tracksLotValidity: boolean,
+  requireAverageCost: boolean,
+) {
+  return z.object({
+    name: z.string().min(1, 'Nome é obrigatório'),
+    brand: brandRequired ? z.string().min(1, 'Marca é obrigatória') : z.string(),
+    group: groupRequired ? z.string().min(1, 'Grupo é obrigatório') : z.string(),
+    subgroup: subgroupRequired ? z.string().min(1, 'Subgrupo é obrigatório') : z.string(),
+    sku: z.string().min(1, 'SKU é obrigatório'),
+    barcode: barcodeRequired ? z.string().min(1, 'Código de barras é obrigatório') : z.string(),
+    cost: z.number({ invalid_type_error: 'Custo inválido' }).min(0.01, 'Custo deve ser maior que zero'),
+    averageCost: z.coerce.number().refine(
+      (val) => !requireAverageCost || val > 0,
+      { message: 'Custo médio é obrigatório' },
+    ),
+    salePrice: z.number({ invalid_type_error: 'Preço inválido' }).min(0.01, 'Preço de venda deve ser maior que zero'),
+    batch: tracksLotValidity ? z.string().min(1, 'Lote é obrigatório') : z.string(),
+    validity: tracksLotValidity ? z.string().min(1, 'Validade é obrigatória') : z.string(),
+  });
+}
+
+function buildVariantSchema(barcodeRequired: boolean, tracksLotValidity: boolean, requireAverageCost: boolean) {
+  return z.object({
+    sku: z.string().min(1, 'SKU é obrigatório'),
+    barcode: barcodeRequired ? z.string().min(1, 'Código de barras é obrigatório') : z.string(),
+    costPrice: z.coerce.number().min(0).catch(0),
+    averageCost: z.coerce.number().refine(
+      (val) => !requireAverageCost || val > 0,
+      { message: 'Custo médio é obrigatório' },
+    ),
+    salePrice: z.coerce.number().min(0).catch(0),
+    batch: tracksLotValidity ? z.string().min(1, 'Lote é obrigatório') : z.string(),
+    validity: tracksLotValidity ? z.string().min(1, 'Validade é obrigatória') : z.string(),
+  });
+}
+
+function toFieldErrors(issues: z.ZodIssue[]): Record<string, string> {
+  const errs: Record<string, string> = {};
+  for (const issue of issues) {
+    const key = String(issue.path[0] ?? '_');
+    if (!errs[key]) errs[key] = issue.message;
+  }
+  return errs;
+}
+
+// ---------------------------------------------------------------------------
 // Cadastro de novo produto
 // ---------------------------------------------------------------------------
 function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
@@ -231,7 +311,7 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
     stockQty: '0',
   });
   const [tracksLotValidity, setTracksLotValidity] = useState(false);
-  const [localError, setLocalError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   // Config da loja: define quais campos são obrigatórios (Onda 2).
   const { data: settings } = useQuery({
@@ -242,45 +322,37 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
   const groupRequired = settings?.groupRequired ?? false;
   const subgroupRequired = settings?.subgroupRequired ?? false;
   const barcodeRequired = settings?.barcodeRequired ?? false;
+  const requireAverageCost = settings?.requireAverageCost ?? false;
   // Lote/validade é sempre opt-in: todo produto novo abre desmarcado e quem
   // decide é o usuário, por produto. Não bloqueia o cadastro por causa de lote.
 
-  // Precificação (Requisito 4.1). Fonte da verdade: custo + último percentual
-  // informado (margem OU markup) recalcula o preço de venda. Editar a venda
-  // diretamente recalcula ambos os percentuais.
+  // Precificação unificada: um único estado `pct` representa Margem OU Markup
+  // conforme `pricingMode` lido das configurações da loja.
+  const pricingMode = settings?.pricingMode ?? 'margin';
   const [cost, setCost] = useState(0);
+  const [averageCost, setAverageCost] = useState(0);
   const [salePrice, setSalePrice] = useState(0);
-  const [margin, setMargin] = useState(0);
-  const [markup, setMarkup] = useState(0);
-  const [lastPct, setLastPct] = useState<'margin' | 'markup' | null>(null);
+  const [pct, setPct] = useState(0);
 
   function applyCost(novoCusto: number) {
+    const safePct = pricingMode === 'margin' ? Math.min(pct, 99.99) : pct;
     setCost(novoCusto);
-    // Mantém o último percentual informado e recalcula a venda.
-    if (lastPct === 'margin') setSalePrice(priceFromMargin(novoCusto, margin));
-    else if (lastPct === 'markup') setSalePrice(priceFromMarkup(novoCusto, markup));
-    else {
-      setMargin(marginFromPrice(novoCusto, salePrice));
-      setMarkup(markupFromPrice(novoCusto, salePrice));
-    }
+    setSalePrice(pricingMode === 'margin'
+      ? priceFromMargin(novoCusto, safePct)
+      : priceFromMarkup(novoCusto, safePct));
   }
-  function applyMargin(v: number) {
-    setLastPct('margin');
-    setMargin(v);
-    setMarkup(marginToMarkup(v));
-    setSalePrice(priceFromMargin(cost, v));
-  }
-  function applyMarkup(v: number) {
-    setLastPct('markup');
-    setMarkup(v);
-    setMargin(markupToMargin(v));
-    setSalePrice(priceFromMarkup(cost, v));
+  function applyPct(v: number) {
+    const safe = pricingMode === 'margin' ? Math.min(v, 99.99) : v;
+    setPct(safe);
+    setSalePrice(pricingMode === 'margin'
+      ? priceFromMargin(cost, safe)
+      : priceFromMarkup(cost, safe));
   }
   function applySalePrice(v: number) {
-    setLastPct(null);
     setSalePrice(v);
-    setMargin(marginFromPrice(cost, v));
-    setMarkup(markupFromPrice(cost, v));
+    setPct(pricingMode === 'margin'
+      ? marginFromPrice(cost, v) || 0
+      : markupFromPrice(cost, v) || 0);
   }
 
   const create = useMutation({
@@ -298,6 +370,7 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
             barcode: form.barcode || undefined,
             description: form.description.trim() || undefined,
             costPrice: cost,
+            averageCost,
             salePrice,
             stockQty: Number(form.stockQty) || 0,
             batch: form.batch || undefined,
@@ -309,37 +382,41 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
   });
 
   function submit() {
-    setLocalError(null);
-    if (brandRequired && !form.brand.trim()) {
-      setLocalError('Marca é obrigatória (definido nas Configurações).');
+    const schema = buildProductFormSchema(
+      brandRequired, groupRequired, subgroupRequired, barcodeRequired, tracksLotValidity, requireAverageCost,
+    );
+    const result = schema.safeParse({
+      name: form.name,
+      brand: form.brand,
+      group: form.group,
+      subgroup: form.subgroup,
+      sku: form.sku,
+      barcode: form.barcode,
+      cost,
+      averageCost,
+      salePrice,
+      batch: form.batch,
+      validity: form.validity,
+    });
+    if (!result.success) {
+      setErrors(toFieldErrors(result.error.issues));
       return;
     }
-    if (groupRequired && !form.group.trim()) {
-      setLocalError('Grupo é obrigatório (definido nas Configurações).');
-      return;
-    }
-    if (subgroupRequired && !form.subgroup.trim()) {
-      setLocalError('Subgrupo é obrigatório (definido nas Configurações).');
-      return;
-    }
-    if (barcodeRequired && !form.barcode.trim()) {
-      setLocalError('Código de barras é obrigatório (definido nas Configurações).');
-      return;
-    }
-    if (tracksLotValidity && (!form.batch.trim() || !form.validity)) {
-      setLocalError('Lote e validade são obrigatórios quando o controle está ativado.');
-      return;
-    }
+    setErrors({});
     create.mutate();
   }
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  return (
+  return createPortal(
     <div className="modal-overlay">
-      <div className="modal-sheet sm:max-w-2xl">
-        <div className="mb-5 flex items-center gap-3">
+      <form
+        className="modal-sheet sm:max-w-2xl flex flex-col overflow-hidden !p-0"
+        onSubmit={(e) => { e.preventDefault(); submit(); }}
+      >
+        {/* Cabeçalho fixo */}
+        <div className="shrink-0 flex items-center gap-3 p-6 pb-4">
           <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-100 text-brand-600">
             <Package className="h-6 w-6" />
           </span>
@@ -349,71 +426,84 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Nome" required value={form.name} onChange={set('name')} />
-          <Field label="Marca" required={brandRequired} value={form.brand} onChange={set('brand')} />
-          <Field label="Grupo" required={groupRequired} value={form.group} onChange={set('group')} />
-          <Field label="Subgrupo" required={subgroupRequired} value={form.subgroup} onChange={set('subgroup')} />
-          <Field label="SKU" required value={form.sku} onChange={set('sku')} />
-          <Field
-            label="Código de barras"
-            required={barcodeRequired}
-            value={form.barcode}
-            onChange={set('barcode')}
-          />
-          <Field label="Descrição da variante" value={form.description} onChange={set('description')} />
-          <Field label="Estoque inicial" type="number" value={form.stockQty} onChange={set('stockQty')} />
-        </div>
+        {/* Corpo com scroll interno — min-h-0 é obrigatório para o flexbox não estourar o wrapper */}
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Nome" required error={errors.name} value={form.name} onChange={set('name')} />
+            <Field label="Marca" required={brandRequired} error={errors.brand} value={form.brand} onChange={set('brand')} />
+            <Field label="Grupo" required={groupRequired} error={errors.group} value={form.group} onChange={set('group')} />
+            <Field label="Subgrupo" required={subgroupRequired} error={errors.subgroup} value={form.subgroup} onChange={set('subgroup')} />
+            <Field label="SKU" required error={errors.sku} value={form.sku} onChange={set('sku')} />
+            <Field
+              label="Código de barras"
+              required={barcodeRequired}
+              error={errors.barcode}
+              value={form.barcode}
+              onChange={set('barcode')}
+            />
+            <Field label="Descrição da variante" value={form.description} onChange={set('description')} />
+            <Field label="Estoque inicial" type="number" value={form.stockQty} onChange={set('stockQty')} />
+          </div>
 
-        {/* Controle de lote e validade (Requisito 4.1 configurável) */}
-        <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <input
-            type="checkbox"
-            className="mt-0.5 h-5 w-5 accent-brand-600"
-            checked={tracksLotValidity}
-            onChange={(e) => setTracksLotValidity(e.target.checked)}
-          />
-          <span className="text-sm">
-            <span className="font-semibold text-slate-700">Controlar lote e validade</span>
-            <span className="block text-xs text-slate-500">
-              Quando ativado, lote e validade tornam-se obrigatórios para este produto.
+          {/* Controle de lote e validade (Requisito 4.1 configurável) */}
+          <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-5 w-5 accent-brand-600"
+              checked={tracksLotValidity}
+              onChange={(e) => setTracksLotValidity(e.target.checked)}
+            />
+            <span className="text-sm">
+              <span className="font-semibold text-slate-700">Controlar lote e validade</span>
+              <span className="block text-xs text-slate-500">
+                Quando ativado, lote e validade tornam-se obrigatórios para este produto.
+              </span>
             </span>
-          </span>
-        </label>
+          </label>
 
-        {tracksLotValidity && (
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            <Field label="Lote" required value={form.batch} onChange={set('batch')} />
-            <Field label="Validade" required type="date" value={form.validity} onChange={set('validity')} />
-          </div>
-        )}
+          {tracksLotValidity && (
+            <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="Lote" required error={errors.batch} value={form.batch} onChange={set('batch')} />
+              <Field label="Validade" required type="date" error={errors.validity} value={form.validity} onChange={set('validity')} />
+            </div>
+          )}
 
-        <div className="mt-4 rounded-xl border border-brand-100 bg-brand-50/60 p-4">
-          <div className="mb-2 text-sm font-semibold text-brand-700">Precificação (margem ⇄ markup)</div>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <NumField label="Custo (R$)" required value={cost} onChange={applyCost} />
-            <NumField label="Margem (%)" value={margin} onChange={applyMargin} />
-            <NumField label="Markup (%)" value={markup} onChange={applyMarkup} />
-            <NumField label="Venda (R$)" required value={salePrice} onChange={applySalePrice} />
+          <div className="mt-4 rounded-xl border border-brand-100 bg-brand-50/60 p-4">
+            <div className="mb-2 text-sm font-semibold text-brand-700">
+              Precificação — {pricingMode === 'margin' ? 'Margem sobre venda' : 'Markup sobre custo'}
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <NumField label="Último custo (R$)" required error={errors.cost} value={cost} onChange={applyCost} />
+              <NumField label="Custo médio (R$)" required={requireAverageCost} error={errors.averageCost} value={averageCost} onChange={setAverageCost} />
+              <NumField
+                label={pricingMode === 'margin' ? 'Margem (%)' : 'Markup (%)'}
+                value={pct}
+                max={pricingMode === 'margin' ? 99.99 : undefined}
+                onChange={applyPct}
+              />
+              <NumField label="Venda (R$)" required error={errors.salePrice} value={salePrice} onChange={applySalePrice} />
+            </div>
           </div>
+
+          {create.error instanceof ApiError && (
+            <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              {(create.error as ApiError).message}
+            </div>
+          )}
         </div>
 
-        {(localError || create.error instanceof ApiError) && (
-          <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
-            {localError ?? (create.error as ApiError).message}
-          </div>
-        )}
-
-        <div className="mt-5 flex justify-end gap-2">
-          <button className="btn-ghost" onClick={onClose}>
+        {/* Rodapé fixo */}
+        <div className="shrink-0 flex justify-end gap-2 border-t border-slate-100 p-6 pt-4">
+          <button type="button" className="btn-ghost" onClick={onClose}>
             Cancelar
           </button>
-          <button className="btn-primary" disabled={create.isPending} onClick={submit}>
+          <button type="submit" className="btn-primary" disabled={create.isPending}>
             {create.isPending ? 'Salvando...' : 'Salvar produto'}
           </button>
         </div>
-      </div>
-    </div>
+      </form>
+    </div>,
+    document.body,
   );
 }
 
@@ -437,9 +527,11 @@ function EditProductModal({
   const [variants, setVariants] = useState(
     product.variants.map((v) => ({
       id: v.id,
+      sku: v.sku,
       description: v.description,
       barcode: v.barcode ?? '',
       costPrice: v.costPrice,
+      averageCost: v.averageCost,
       salePrice: v.salePrice,
       batch: v.batch ?? '',
       validity: v.validity ? v.validity.slice(0, 10) : '',
@@ -449,30 +541,105 @@ function EditProductModal({
   const setVariant = (id: string, patch: Partial<(typeof variants)[number]>) =>
     setVariants((vs) => vs.map((v) => (v.id === id ? { ...v, ...patch } : v)));
 
-  // Configurações de obrigatoriedade (para marcar os campos com *).
+  // Configurações necessárias antes dos handlers de precificação.
   const { data: settings } = useQuery({
     queryKey: ['settings', 'product-form'],
     queryFn: () => api.get<ProductFormSettings>('/api/settings/product-form'),
   });
+  const pricingMode = settings?.pricingMode ?? 'margin';
+
+  // Precificação: o pct (margem ou markup) é derivado de costPrice/salePrice no render.
+  // Os handlers recalculam salePrice a partir do pct corrente, sem estado extra.
+  function applyVCost(id: string, newCost: number) {
+    setVariants((vs) => vs.map((v) => {
+      if (v.id !== id) return v;
+      const curPct = pricingMode === 'margin'
+        ? Math.min(marginFromPrice(v.costPrice, v.salePrice) || 0, 99.99)
+        : markupFromPrice(v.costPrice, v.salePrice) || 0;
+      const newSale = pricingMode === 'margin'
+        ? priceFromMargin(newCost, curPct)
+        : priceFromMarkup(newCost, curPct);
+      return { ...v, costPrice: newCost, salePrice: newSale };
+    }));
+  }
+  function applyVPct(id: string, newPct: number) {
+    setVariants((vs) => vs.map((v) => {
+      if (v.id !== id) return v;
+      const safe = pricingMode === 'margin' ? Math.min(newPct, 99.99) : newPct;
+      const newSale = pricingMode === 'margin'
+        ? priceFromMargin(v.costPrice, safe)
+        : priceFromMarkup(v.costPrice, safe);
+      return { ...v, salePrice: newSale };
+    }));
+  }
+  function applyVSalePrice(id: string, newSale: number) {
+    setVariants((vs) => vs.map((v) => (v.id !== id ? v : { ...v, salePrice: newSale })));
+  }
+
   const brandRequired = settings?.brandRequired ?? false;
   const groupRequired = settings?.groupRequired ?? false;
   const subgroupRequired = settings?.subgroupRequired ?? false;
   const barcodeRequired = settings?.barcodeRequired ?? false;
+  const requireAverageCost = settings?.requireAverageCost ?? false;
+
+  const [productErrors, setProductErrors] = useState<Record<string, string>>({});
+  const [variantErrors, setVariantErrors] = useState<Record<string, Record<string, string>>>({});
+
+  function handleSave() {
+    const productSchema = z.object({
+      name: z.string().min(1, 'Nome é obrigatório'),
+      brand: brandRequired ? z.string().min(1, 'Marca é obrigatória') : z.string(),
+      group: groupRequired ? z.string().min(1, 'Grupo é obrigatório') : z.string(),
+      subgroup: subgroupRequired ? z.string().min(1, 'Subgrupo é obrigatório') : z.string(),
+    });
+    const varSchema = buildVariantSchema(barcodeRequired, tracksLotValidity, requireAverageCost);
+
+    const productResult = productSchema.safeParse({ name, brand, group, subgroup });
+    let hasErrors = false;
+    if (!productResult.success) {
+      setProductErrors(toFieldErrors(productResult.error.issues));
+      hasErrors = true;
+    } else {
+      setProductErrors({});
+    }
+
+    const newVarErrors: Record<string, Record<string, string>> = {};
+    for (const v of variants) {
+      const vResult = varSchema.safeParse({
+        sku: v.sku,
+        barcode: v.barcode,
+        costPrice: v.costPrice,
+        averageCost: v.averageCost,
+        salePrice: v.salePrice,
+        batch: v.batch,
+        validity: v.validity,
+      });
+      if (!vResult.success) {
+        newVarErrors[v.id] = toFieldErrors(vResult.error.issues);
+        hasErrors = true;
+      }
+    }
+    setVariantErrors(newVarErrors);
+
+    if (!hasErrors) save.mutate();
+  }
 
   const save = useMutation({
     mutationFn: async () => {
       await api.put(`/api/products/${product.id}`, {
         name,
-        brand,
-        group,
+        brand: brand || undefined,
+        group: group || undefined,
         subgroup: subgroup || null,
         tracksLotValidity,
       });
       for (const v of variants) {
         await api.put(`/api/products/variants/${v.id}`, {
+          sku: v.sku,
           description: v.description.trim() || undefined,
           barcode: v.barcode || null,
           costPrice: v.costPrice,
+          averageCost: v.averageCost,
           salePrice: v.salePrice,
           batch: v.batch || undefined,
           validity: v.validity || undefined,
@@ -482,130 +649,171 @@ function EditProductModal({
     onSuccess: onSaved,
   });
 
-  return (
+  return createPortal(
     <div className="modal-overlay">
-      <div className="modal-sheet sm:max-w-2xl">
-        <div className="mb-5 flex items-center justify-between">
+      <form
+        className="modal-sheet sm:max-w-2xl flex flex-col overflow-hidden !p-0"
+        onSubmit={(e) => { e.preventDefault(); handleSave(); }}
+      >
+        {/* Cabeçalho fixo */}
+        <div className="shrink-0 flex items-center justify-between p-6 pb-4">
           <div className="flex items-center gap-3">
             <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-100 text-brand-600">
               <Pencil className="h-5 w-5" />
             </span>
             <div>
-              <h2 className="font-display text-lg font-bold">Editar produto</h2>
+              <h2 className="font-display text-lg font-bold">
+                Editar produto <span className="text-brand-500">#{product.code}</span>
+              </h2>
               <p className="text-sm text-slate-500">Altere os dados e os preços das variantes.</p>
             </div>
           </div>
-          <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
+          <button type="button" className="text-slate-400 hover:text-slate-700" onClick={onClose}>
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <label className="block">
-            <Lbl required>Nome</Lbl>
-            <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
-          </label>
-          <label className="block">
-            <Lbl required={brandRequired}>Marca</Lbl>
-            <input className="input" value={brand} onChange={(e) => setBrand(e.target.value)} />
-          </label>
-          <label className="block">
-            <Lbl required={groupRequired}>Grupo</Lbl>
-            <input className="input" value={group} onChange={(e) => setGroup(e.target.value)} />
-          </label>
-          <label className="block">
-            <Lbl required={subgroupRequired}>Subgrupo</Lbl>
-            <input className="input" value={subgroup} onChange={(e) => setSubgroup(e.target.value)} />
-          </label>
-        </div>
+        {/* Corpo com scroll interno — min-h-0 impede o flexbox de estourar o wrapper */}
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field
+              label="Nome"
+              required
+              error={productErrors.name}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+            <Field
+              label="Marca"
+              required={brandRequired}
+              error={productErrors.brand}
+              value={brand}
+              onChange={(e) => setBrand(e.target.value)}
+            />
+            <Field
+              label="Grupo"
+              required={groupRequired}
+              error={productErrors.group}
+              value={group}
+              onChange={(e) => setGroup(e.target.value)}
+            />
+            <Field
+              label="Subgrupo"
+              required={subgroupRequired}
+              error={productErrors.subgroup}
+              value={subgroup}
+              onChange={(e) => setSubgroup(e.target.value)}
+            />
+          </div>
 
-        <label className="mt-4 flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <input
-            type="checkbox"
-            className="h-5 w-5 accent-brand-600"
-            checked={tracksLotValidity}
-            onChange={(e) => setTracksLotValidity(e.target.checked)}
-          />
-          <span className="text-sm font-semibold text-slate-700">Controlar lote e validade</span>
-        </label>
+          <label className="mt-4 flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <input
+              type="checkbox"
+              className="h-5 w-5 accent-brand-600"
+              checked={tracksLotValidity}
+              onChange={(e) => setTracksLotValidity(e.target.checked)}
+            />
+            <span className="text-sm font-semibold text-slate-700">Controlar lote e validade</span>
+          </label>
 
-        <div className="mt-4 space-y-3">
-          {variants.map((v) => (
-            <div key={v.id} className="rounded-xl border border-slate-200 p-3">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                Variante
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block">
-                  <Lbl>Descrição</Lbl>
-                  <input
-                    className="input"
+          <div className="mt-4 space-y-3">
+            {variants.map((v) => (
+              <div key={v.id} className="rounded-xl border border-slate-200 p-3">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                  Variante
+                </div>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <Field
+                    label="SKU"
+                    required
+                    error={variantErrors[v.id]?.sku}
+                    value={v.sku}
+                    onChange={(e) => setVariants((vs) => vs.map((x) => x.id === v.id ? { ...x, sku: e.target.value } : x))}
+                  />
+                  <Field
+                    label="Descrição"
                     value={v.description}
                     onChange={(e) => setVariant(v.id, { description: e.target.value })}
                   />
-                </label>
-                <label className="block">
-                  <Lbl required={barcodeRequired}>Código de barras</Lbl>
-                  <input
-                    className="input"
+                  <Field
+                    label="Código de barras"
+                    required={barcodeRequired}
+                    error={variantErrors[v.id]?.barcode}
                     value={v.barcode}
                     onChange={(e) => setVariant(v.id, { barcode: e.target.value })}
                   />
-                </label>
-                <NumField
-                  label="Custo (R$)"
-                  required
-                  value={v.costPrice}
-                  onChange={(val) => setVariant(v.id, { costPrice: val })}
-                />
-                <NumField
-                  label="Venda (R$)"
-                  required
-                  value={v.salePrice}
-                  onChange={(val) => setVariant(v.id, { salePrice: val })}
-                />
-                {tracksLotValidity && (
-                  <>
-                    <label className="block">
-                      <Lbl required>Lote</Lbl>
-                      <input
-                        className="input"
+                  <NumField
+                    label="Último custo (R$)"
+                    required
+                    error={variantErrors[v.id]?.costPrice}
+                    value={v.costPrice}
+                    onChange={(val) => applyVCost(v.id, val)}
+                  />
+                  <NumField
+                    label="Custo médio (R$)"
+                    required={requireAverageCost}
+                    error={variantErrors[v.id]?.averageCost}
+                    value={v.averageCost}
+                    onChange={(val) => setVariant(v.id, { averageCost: val })}
+                  />
+                  <NumField
+                    label={pricingMode === 'margin' ? 'Margem (%)' : 'Markup (%)'}
+                    value={pricingMode === 'margin'
+                      ? marginFromPrice(v.costPrice, v.salePrice) || 0
+                      : markupFromPrice(v.costPrice, v.salePrice) || 0}
+                    max={pricingMode === 'margin' ? 99.99 : undefined}
+                    onChange={(val) => applyVPct(v.id, val)}
+                  />
+                  <NumField
+                    label="Venda (R$)"
+                    required
+                    error={variantErrors[v.id]?.salePrice}
+                    value={v.salePrice}
+                    onChange={(val) => applyVSalePrice(v.id, val)}
+                  />
+                  {tracksLotValidity && (
+                    <>
+                      <Field
+                        label="Lote"
+                        required
+                        error={variantErrors[v.id]?.batch}
                         value={v.batch}
                         onChange={(e) => setVariant(v.id, { batch: e.target.value })}
                       />
-                    </label>
-                    <label className="block">
-                      <Lbl required>Validade</Lbl>
-                      <input
-                        className="input"
+                      <Field
+                        label="Validade"
+                        required
                         type="date"
+                        error={variantErrors[v.id]?.validity}
                         value={v.validity}
                         onChange={(e) => setVariant(v.id, { validity: e.target.value })}
                       />
-                    </label>
-                  </>
-                )}
+                    </>
+                  )}
+                </div>
               </div>
+            ))}
+          </div>
+
+          {save.error instanceof ApiError && (
+            <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              {save.error.message}
             </div>
-          ))}
+          )}
         </div>
 
-        {save.error instanceof ApiError && (
-          <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
-            {save.error.message}
-          </div>
-        )}
-
-        <div className="mt-5 flex justify-end gap-2">
-          <button className="btn-ghost" onClick={onClose}>
+        {/* Rodapé fixo */}
+        <div className="shrink-0 flex justify-end gap-2 border-t border-slate-100 p-6 pt-4">
+          <button type="button" className="btn-ghost" onClick={onClose}>
             Cancelar
           </button>
-          <button className="btn-primary" disabled={save.isPending} onClick={() => save.mutate()}>
+          <button type="submit" className="btn-primary" disabled={save.isPending}>
             {save.isPending ? 'Salvando...' : 'Salvar alterações'}
           </button>
         </div>
-      </div>
-    </div>
+      </form>
+    </div>,
+    document.body,
   );
 }
 
@@ -623,12 +831,17 @@ function Lbl({ children, required }: { children: React.ReactNode; required?: boo
 function Field({
   label,
   required,
+  error,
   ...props
-}: { label: string; required?: boolean } & React.InputHTMLAttributes<HTMLInputElement>) {
+}: { label: string; required?: boolean; error?: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <label className="block">
       <Lbl required={required}>{label}</Lbl>
-      <input className="input" {...props} />
+      <input
+        className={`input${error ? ' border-rose-400 focus:border-rose-400 focus:ring-rose-200' : ''}`}
+        {...props}
+      />
+      {error && <span className="mt-1 block text-xs text-rose-500">{error}</span>}
     </label>
   );
 }
@@ -646,11 +859,15 @@ function NumField({
   label,
   value,
   required,
+  error,
+  max,
   onChange,
 }: {
   label: string;
   value: number;
   required?: boolean;
+  error?: string;
+  max?: number;
   onChange: (v: number) => void;
 }) {
   const toRaw = (n: number) => (n !== 0 ? String(n).replace('.', ',') : '');
@@ -669,18 +886,27 @@ function NumField({
         {required && <span className="text-rose-500"> *</span>}
       </span>
       <input
-        className="input"
+        className={`input${error ? ' border-rose-400 focus:border-rose-400 focus:ring-rose-200' : ''}`}
         type="text"
         inputMode="decimal"
         value={raw}
         onChange={(e) => {
           const cleaned = sanitizeBr(e.target.value);
+          let num = parseFloat(cleaned.replace(',', '.')) || 0;
+          if (max !== undefined && num > max) {
+            num = max;
+            skipSync.current = true;
+            setRaw(String(max).replace('.', ','));
+            onChange(max);
+            return;
+          }
           setRaw(cleaned);
           skipSync.current = true;
-          onChange(parseFloat(cleaned.replace(',', '.')) || 0);
+          onChange(num);
         }}
         onFocus={(e) => e.target.select()}
       />
+      {error && <span className="mt-1 block text-xs text-rose-500">{error}</span>}
     </label>
   );
 }
