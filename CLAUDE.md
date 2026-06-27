@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-06-25
+- **Última atualização:** 2026-06-26
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -23,7 +23,7 @@
   manualmente via PR no GitHub** (o merge dispara o auto-deploy no Railway). A IA
   trabalha sempre na branch ativa indicada — nunca commita direto na `main` sem
   instrução explícita. Branch ativa no momento: **`feature/tela-produtos-caio`**
-  (commits `c8ba129`→`a3e6b1c` — ainda não mesclada; ver §11).
+  (commits `c8ba129`→`092c60b` — ainda não mesclada; ver §11).
 - **Fase atual:** Sistema em **produção no Railway** (projeto `exodus-software`,
   conta helomramos40@gmail.com). Banco PostgreSQL gerenciado, seed do ADMIN executado,
   interface redesenhada (design system "beauty"). **Todo o backlog de funcionalidades
@@ -192,29 +192,39 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   (estorna estoque + remove financeiro); **excluir/gerar financeiro** (reversível —
   venda sai/entra no caixa e recebimentos); **imprimir** — cupom térmico aprimorado
   ou folha A4 estilizada com dados da empresa (escolha na hora).
-- ✅ **Produtos**: filtros (marca/grupo/subgrupo) + busca; editar produto e variantes
-  (asteriscos `*` também no modal Editar); excluir (com confirmação + bloqueio por
-  origem); toggle **"controlar lote e validade"** (lote/validade só obrigatórios
-  quando marcado); **descrição da variante opcional** (fallback = nome do produto);
-  **marca/grupo/subgrupo obrigatórios conforme a config da loja**.
+- ✅ **Produtos**: filtros (marca/grupo/subgrupo) + busca + **ordenação** (Descrição,
+  Código, SKU, Preço de venda — crescente/decrescente via selects no painel de filtros);
+  editar produto e variantes (asteriscos `*` também no modal Editar); excluir (com
+  confirmação + bloqueio por origem); toggle **"controlar lote e validade"** (lote/validade
+  só obrigatórios quando marcado); **descrição da variante opcional** (fallback = nome do
+  produto); **marca/grupo/subgrupo obrigatórios conforme a config da loja**.
   **Precificação com modo global** (`pricingMode`): ADMIN escolhe em Configurações
   se o campo de percentual exibe Margem ou Markup; formulário exibe exatamente
-  3 campos [Custo | Margem OU Markup | Venda]. Alterar o custo preserva o
-  percentual e recalcula o preço; alterar o preço recalcula o percentual.
-  **Modal de cadastro/edição via React Portal** (`feature/tela-produtos-caio`):
-  `createPortal(..., document.body)` em ambos os modais — imune ao containing block
-  gerado pelo `animate-fade-in` do `<main>`. Usa `.modal-overlay` + `.modal-sheet`
-  do design system (bottom-sheet no mobile, card centralizado no desktop); scroll
-  interno (`flex-1 min-h-0 overflow-y-auto`) com cabeçalho e rodapé `shrink-0` fixos.
-  **Cabeçalho do modal Editar** exibe o código sequencial `#N` do produto.
-  **Campo SKU** restaurado no card de variante (obrigatório, validado pelo
+  4 campos [Último custo | Custo médio | Margem OU Markup | Venda]. Alterar o custo
+  preserva o percentual e recalcula o preço; alterar o preço recalcula o percentual.
+  **Trava de margem 100%**: `NumField` recebeu prop `max?: number`; quando
+  `pricingMode === 'margin'` é injetado `max={99.99}`, impedindo fisicamente que o
+  usuário ultrapasse 99,99% (divisão por zero no cálculo do preço de venda).
+  **Custo Médio Ponderado (CMP)**: campo `averageCost` na variante (DB e UI); calculado
+  automaticamente a cada entrada de nota (XML ou manual) pela fórmula
+  `(stockAtual × avgAtual + qtdEntrada × custoUnitário) / (stockAtual + qtdEntrada)`;
+  pode ser corrigido manualmente na edição da variante. Obrigatoriedade configurável
+  via flag `requireAverageCost` nas Configurações de Produto.
+  **Modal de cadastro/edição via React Portal**: `createPortal(..., document.body)` em
+  ambos os modais — imune ao containing block gerado pelo `animate-fade-in` do `<main>`.
+  Usa `.modal-overlay` + `.modal-sheet` do design system (bottom-sheet no mobile, card
+  centralizado no desktop); scroll interno (`flex-1 min-h-0 overflow-y-auto`) com
+  cabeçalho e rodapé `shrink-0` fixos. **Cabeçalho do modal Editar** exibe `#N`.
+  **Campo SKU** restaurado no card de variante (obrigatório, validado por
   `buildVariantSchema`, enviado ao `PUT /api/products/variants/:id`).
-  **Validação Zod dinâmica**: `buildProductFormSchema` e `buildVariantSchema` geram
-  schemas em runtime conforme as flags de Configurações (`brandRequired`, `groupRequired`,
-  `subgroupRequired`, `barcodeRequired`, `tracksLotValidity`). `submit()` / `handleSave()`
-  usam `safeParse` — erros por campo em `Record<string, string>` exibidos inline sob
-  cada input (`Field` e `NumField` receberam prop `error?: string` com borda vermelha
-  + `<span>` de mensagem).
+  **Validação Zod dinâmica**: `buildProductFormSchema(brandReq, groupReq, subgroupReq,
+  barcodeReq, tracksLotValidity, requireAverageCost)` e `buildVariantSchema(barcodeReq,
+  tracksLotValidity, requireAverageCost)` geram schemas em runtime. `submit()` /
+  `handleSave()` usam `safeParse` — erros por campo exibidos inline. Campos numéricos
+  usam `z.coerce.number().min(0).catch(0)` para evitar "Dados inválidos" com campo vazio.
+  **Sanitização de payload**: `brand || undefined`, `group || undefined` ao salvar (strings
+  vazias seriam rejeitadas pelo Zod `.min(1)` do backend; `undefined` é descartado pelo
+  JSON.stringify e o Prisma ignora o campo).
 - ✅ **Caixa**: card gradiente com **saldo atual** (`expectedCash`); suprimento/sangria
   via **modal próprio com observação** (sem `window.prompt`); **timeline de
   movimentações** unindo vendas (leitura) + sangrias/suprimentos (editáveis/excluíveis
@@ -241,8 +251,9 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   **histórico de acertos** com editar (recalcula estoque) e apagar (reverte diff).
   Endpoints: `GET/PUT/DELETE /products/stock-adjustments(/:id)`.
 - ✅ **Configurações** (ADMIN) em abas: **Produto** (campos obrigatórios + lote/validade
-  padrão + **modelo de precificação** `pricingMode`: Margem ou Markup — radio group,
-  persistido em `Setting`, consumido dinamicamente pelo formulário de produto),
+  padrão + **modelo de precificação** `pricingMode`: Margem ou Markup — radio group;
+  + **`requireAverageCost`**: torna o custo médio obrigatório no cadastro/edição;
+  todos persistidos em `Setting`, consumidos dinamicamente pelo formulário de produto),
   **Recebimentos** (tipos de pagamento configuráveis: renomear/ativar/adicionar,
   consumidos dinamicamente pelo PDV), **Empresa** (dados cadastrais do contratante) e
   **Usuários** (CRUD completo: criar/editar/excluir; definir quais telas cada operador
@@ -288,6 +299,7 @@ O schema Prisma do briefing foi **mantido como base, porém corrigido e estendid
 | `User.passwordHash` | O model original não tinha campo de senha; necessário para JWT/bcrypt. |
 | `User.allowedPages Json?` | Controle granular de acesso por página para CASHIER (null = padrão do papel). |
 | `ProductVariant.batch` (nullable) | Lote agora **opcional** — obrigatório só quando `Product.tracksLotValidity = true` (configurável por produto). |
+| `ProductVariant.averageCost Decimal @default(0)` | Custo Médio Ponderado (CMP) — calculado automaticamente a cada entrada de nota; pode ser corrigido manualmente. |
 | `Product.tracksLotValidity` (booleano) | Liga/desliga exigência de lote/validade por produto (migração `add_lot_validity_control`). |
 | `Person.document` opcional (mantém `@unique`) | Clientes de balcão sem CPF; no Postgres, múltiplos `NULL` não colidem. |
 | Campos de endereço em `Person` | Autocompletar via BrasilAPI (§4.2). |
@@ -356,11 +368,12 @@ Outras decisões:
 da venda, **relaxado para string** (tipos de recebimento configuráveis). Detalhe
 completo: `apps/api/prisma/schema.prisma`.
 
-**Migrações (10, todas aditivas/seguras):** `0_init`, `add_lot_validity_control`,
+**Migrações (11, todas aditivas/seguras):** `0_init`, `add_lot_validity_control`,
 `add_settings`, `sale_discount_surcharge_notes`, `financial_account_sale_link`,
 `sale_payments`, `invoice_document_notes`, `financial_settlements_code`,
-`sale_code_financial_flag`, `product_person_code`. Aplicadas automaticamente no
-Railway a cada deploy (`prisma migrate deploy`).
+`sale_code_financial_flag`, `product_person_code`,
+`20260626000000_add_average_cost_to_variants` (pendente de merge para `main`).
+Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
 
 ---
 
@@ -722,6 +735,58 @@ Railway a cada deploy (`prisma migrate deploy`).
     load-bearing para o padrão header/body/footer com scroll interno).
   - **Import**: `createPortal` importado de `react-dom`.
   `npm run typecheck` + `npm run build` → **0 erros**.
+- ✅ **Onda 2026-06-26a — Custo Médio Ponderado (CMP) full-stack** (2026-06-26):
+  Branch `feature/tela-produtos-caio`. Commit `d5a947e`.
+  - **Schema Prisma**: `ProductVariant.averageCost Decimal @default(0)`.
+  - **Migração**: `20260626000000_add_average_cost_to_variants` (SQL manual; aplicada
+    via `prisma db push` localmente; `prisma migrate deploy` aplicará no Railway no merge).
+  - **Backend `invoices.ts`** (`/confirm` e `/manual`): antes de atualizar o estoque,
+    lê `stockQty` e `averageCost` atuais; fórmula CMP:
+    `stock≤0 → avg=custo; senão → (stock×avg + qtd×custo)/(stock+qtd)`; salva arredondado.
+  - **Shared**: `createVariantSchema` + `updateVariantSchema` aceitam `averageCost`.
+  - **Backend `products.ts`**: `POST /products` persiste `averageCost` (default = `costPrice`).
+  - **Frontend `ProductsPage.tsx`**: interface `Variant`, `buildVariantSchema`,
+    estado das variantes, `safeParse`, `api.put` e `NumField "Custo médio (R$)"`
+    adicionados em `ProductForm` (4 colunas) e `EditProductModal`.
+  `npm run typecheck` + `npm run build` → **0 erros**.
+- ✅ **Onda 2026-06-26b — Trava de margem 99,99% + coerção Zod** (2026-06-26):
+  Branch `feature/tela-produtos-caio`. Commit `e5d8bd2`.
+  - **`NumField`**: nova prop `max?: number`; se o valor parseado exceder `max`,
+    é travado em `max` (estado `raw` atualizado para string BR, `onChange(max)` chamado).
+  - **`ProductForm` e `EditProductModal`**: `max={pricingMode === 'margin' ? 99.99 : undefined}`
+    no campo de Margem/Markup — impede fisicamente margem ≥ 100% (divisão por zero).
+  - **`buildVariantSchema`**: `costPrice`, `averageCost` e `salePrice` mudados para
+    `z.coerce.number().min(0).catch(0)` — campos vazios/NaN viram 0 sem erro genérico.
+  `npm run typecheck` → **0 erros**.
+- ✅ **Onda 2026-06-26c — Config global `requireAverageCost`** (2026-06-26):
+  Branch `feature/tela-produtos-caio`. Commit `c8c3df6`.
+  - **Shared `settings.ts`**: `requireAverageCost: z.boolean().default(false)` no
+    `productFormSettingsSchema`.
+  - **`SettingsPage.tsx`**: `ToggleRow "Exigir Custo Médio"` na aba Produto.
+  - **`ProductsPage.tsx`**: `buildProductFormSchema` e `buildVariantSchema` recebem
+    `requireAverageCost`; regra `z.coerce.number().refine(val => !req || val > 0)`;
+    `NumField "Custo médio"` com `required={requireAverageCost}` (asterisco dinâmico)
+    e `error={errors.averageCost}`.
+  `npm run typecheck` → **0 erros**.
+- ✅ **Onda 2026-06-26d — Fix sanitização de payload (brand/group vazios)** (2026-06-26):
+  Branch `feature/tela-produtos-caio`. Commit `53167fa`.
+  - **`EditProductModal.save.mutate`**: `brand: brand || undefined` e
+    `group: group || undefined` (era enviado como `""`, reprovado pelo Zod `.min(1)` do
+    backend com 400 Bad Request). `undefined` é descartado pelo JSON.stringify; Prisma
+    não toca no campo. `subgroup || null` permanece correto (schema usa `.nullish()`).
+  `npm run typecheck` → **0 erros**.
+- ✅ **Onda 2026-06-26e — Ordenação de produtos (full-stack)** (2026-06-26):
+  Branch `feature/tela-produtos-caio`. Commit `092c60b`.
+  - **Shared `product.ts`**: `listProductsQuerySchema` (estende `paginationQuery` com
+    filtros + `orderBy: z.enum(['code','sku','name','price']).default('name')` e
+    `orderDir: z.enum(['asc','desc']).default('asc')`).
+  - **`routes/products.ts`**: substitui schema local pelo compartilhado; `name`/`code`
+    → `Prisma.ProductOrderByWithRelationInput` direta; `sku`/`price` → ordenação em
+    memória pós-fetch (`[...rawItems].sort()`), pois Prisma 5 não expõe `_min` no tipo
+    `ProductVariantOrderByRelationAggregateInput`.
+  - **`ProductsPage.tsx`**: estados `orderBy`/`orderDir` no `queryKey` e na URL;
+    dois `<select className="input">` no painel de filtros (grid `lg:grid-cols-5`).
+  `npm run typecheck` → **0 erros**.
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---
