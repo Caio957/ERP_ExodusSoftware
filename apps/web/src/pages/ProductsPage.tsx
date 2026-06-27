@@ -243,9 +243,9 @@ function buildVariantSchema(barcodeRequired: boolean, tracksLotValidity: boolean
   return z.object({
     sku: z.string().min(1, 'SKU é obrigatório'),
     barcode: barcodeRequired ? z.string().min(1, 'Código de barras é obrigatório') : z.string(),
-    costPrice: z.number({ invalid_type_error: 'Custo inválido' }).min(0.01, 'Custo deve ser maior que zero'),
-    averageCost: z.number().min(0).default(0),
-    salePrice: z.number({ invalid_type_error: 'Preço inválido' }).min(0.01, 'Preço de venda deve ser maior que zero'),
+    costPrice: z.coerce.number().min(0).catch(0),
+    averageCost: z.coerce.number().min(0).catch(0),
+    salePrice: z.coerce.number().min(0).catch(0),
     batch: tracksLotValidity ? z.string().min(1, 'Lote é obrigatório') : z.string(),
     validity: tracksLotValidity ? z.string().min(1, 'Validade é obrigatória') : z.string(),
   });
@@ -442,6 +442,7 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
               <NumField
                 label={pricingMode === 'margin' ? 'Margem (%)' : 'Markup (%)'}
                 value={pct}
+                max={pricingMode === 'margin' ? 99.99 : undefined}
                 onChange={applyPct}
               />
               <NumField label="Venda (R$)" required error={errors.salePrice} value={salePrice} onChange={applySalePrice} />
@@ -722,6 +723,7 @@ function EditProductModal({
                     value={pricingMode === 'margin'
                       ? marginFromPrice(v.costPrice, v.salePrice) || 0
                       : markupFromPrice(v.costPrice, v.salePrice) || 0}
+                    max={pricingMode === 'margin' ? 99.99 : undefined}
                     onChange={(val) => applyVPct(v.id, val)}
                   />
                   <NumField
@@ -820,12 +822,14 @@ function NumField({
   value,
   required,
   error,
+  max,
   onChange,
 }: {
   label: string;
   value: number;
   required?: boolean;
   error?: string;
+  max?: number;
   onChange: (v: number) => void;
 }) {
   const toRaw = (n: number) => (n !== 0 ? String(n).replace('.', ',') : '');
@@ -850,9 +854,17 @@ function NumField({
         value={raw}
         onChange={(e) => {
           const cleaned = sanitizeBr(e.target.value);
+          let num = parseFloat(cleaned.replace(',', '.')) || 0;
+          if (max !== undefined && num > max) {
+            num = max;
+            skipSync.current = true;
+            setRaw(String(max).replace('.', ','));
+            onChange(max);
+            return;
+          }
           setRaw(cleaned);
           skipSync.current = true;
-          onChange(parseFloat(cleaned.replace(',', '.')) || 0);
+          onChange(num);
         }}
         onFocus={(e) => e.target.select()}
       />
