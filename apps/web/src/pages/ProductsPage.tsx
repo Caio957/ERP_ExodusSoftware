@@ -46,14 +46,16 @@ export function ProductsPage() {
   const [brand, setBrand] = useState('');
   const [group, setGroup] = useState('');
   const [subgroup, setSubgroup] = useState('');
+  const [orderBy, setOrderBy] = useState<'name' | 'code' | 'sku' | 'price'>('name');
+  const [orderDir, setOrderDir] = useState<'asc' | 'desc'>('asc');
   const [showFilters, setShowFilters] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['products', search, brand, group, subgroup],
+    queryKey: ['products', search, brand, group, subgroup, orderBy, orderDir],
     queryFn: () => {
-      const qs = new URLSearchParams({ pageSize: '100' });
+      const qs = new URLSearchParams({ pageSize: '100', orderBy, orderDir });
       if (search.trim()) qs.set('search', search.trim());
       if (brand.trim()) qs.set('brand', brand.trim());
       if (group.trim()) qs.set('group', group.trim());
@@ -108,7 +110,7 @@ export function ProductsPage() {
       </div>
 
       {showFilters && (
-        <div className="card grid animate-fade-in gap-3 sm:grid-cols-3">
+        <div className="card grid animate-fade-in gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <label className="block">
             <span className="label">Marca</span>
             <input className="input" value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="Todas" />
@@ -120,6 +122,30 @@ export function ProductsPage() {
           <label className="block">
             <span className="label">Subgrupo</span>
             <input className="input" value={subgroup} onChange={(e) => setSubgroup(e.target.value)} placeholder="Todos" />
+          </label>
+          <label className="block">
+            <span className="label">Ordenar por</span>
+            <select
+              className="input"
+              value={orderBy}
+              onChange={(e) => setOrderBy(e.target.value as typeof orderBy)}
+            >
+              <option value="name">Descrição</option>
+              <option value="code">Código</option>
+              <option value="sku">SKU</option>
+              <option value="price">Preço de venda</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="label">Ordem</span>
+            <select
+              className="input"
+              value={orderDir}
+              onChange={(e) => setOrderDir(e.target.value as typeof orderDir)}
+            >
+              <option value="asc">Crescente</option>
+              <option value="desc">Decrescente</option>
+            </select>
           </label>
         </div>
       )}

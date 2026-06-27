@@ -1,5 +1,15 @@
 import { z } from 'zod';
-import { money } from './common.js';
+import { money, paginationQuery } from './common.js';
+
+/** Querystring da listagem de produtos: paginação + filtros + ordenação. */
+export const listProductsQuerySchema = paginationQuery.extend({
+  brand: z.string().trim().min(1).optional(),
+  group: z.string().trim().min(1).optional(),
+  subgroup: z.string().trim().min(1).optional(),
+  orderBy: z.enum(['code', 'sku', 'name', 'price']).default('name'),
+  orderDir: z.enum(['asc', 'desc']).default('asc'),
+});
+export type ListProductsQuery = z.infer<typeof listProductsQuerySchema>;
 
 /**
  * Variante de produto. Lote (batch) e validade são OPCIONAIS por padrão; a

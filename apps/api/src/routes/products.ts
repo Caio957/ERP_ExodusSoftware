@@ -7,27 +7,20 @@ import {
   updateProductSchema,
   updateVariantSchema,
   stockAdjustSchema,
-  paginationQuery,
+  listProductsQuerySchema,
   productFormSettingsSchema,
 } from '@exodus/shared';
 import { prisma } from '../lib/prisma.js';
 import { serializeDecimals } from '../lib/serialize.js';
 import { BusinessError, NotFoundError } from '../lib/errors.js';
 
-/** Querystring da listagem: paginação + busca livre + filtros dedicados. */
-const productListQuery = paginationQuery.extend({
-  brand: z.string().trim().min(1).optional(),
-  group: z.string().trim().min(1).optional(),
-  subgroup: z.string().trim().min(1).optional(),
-});
-
 export async function productRoutes(app: FastifyInstance) {
   const r = app.withTypeProvider<ZodTypeProvider>();
 
-  // Lista paginada com busca livre (nome/marca/SKU/código) + filtros dedicados.
+  // Lista paginada com busca livre (nome/marca/SKU/código) + filtros + ordenação.
   // Sem nenhum filtro, retorna TODOS os produtos cadastrados.
-  r.get('/', { schema: { querystring: productListQuery } }, async (req) => {
-    const { page, pageSize, search, brand, group, subgroup } = req.query;
+  r.get('/', { schema: { querystring: listProductsQuerySchema } }, async (req) => {
+    const { page, pageSize, search, brand, group, subgroup, orderBy, orderDir } = req.query;
     const and: Prisma.ProductWhereInput[] = [];
     if (search) {
       and.push({
@@ -44,16 +37,40 @@ export async function productRoutes(app: FastifyInstance) {
     if (subgroup) and.push({ subgroup: { contains: subgroup, mode: 'insensitive' } });
     const where: Prisma.ProductWhereInput = and.length ? { AND: and } : {};
 
-    const [total, items] = await Promise.all([
+    // name/code → ordenação direta no Prisma; sku/price → em memória após
+    // o fetch (Prisma não expõe _min em relações 1-N via TypeScript types).
+    const dir = orderDir;
+    const prismaOrderBy: Prisma.ProductOrderByWithRelationInput =
+      orderBy === 'code' ? { code: dir } :
+      orderBy === 'name' ? { name: dir } :
+      { name: 'asc' }; // fallback neutro para sku/price
+
+    const [total, rawItems] = await Promise.all([
       prisma.product.count({ where }),
       prisma.product.findMany({
         where,
         include: { variants: true },
-        orderBy: { name: 'asc' },
+        orderBy: prismaOrderBy,
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
     ]);
+
+    let items = rawItems;
+    if (orderBy === 'sku') {
+      items = [...rawItems].sort((a, b) => {
+        const av = a.variants[0]?.sku ?? '';
+        const bv = b.variants[0]?.sku ?? '';
+        const cmp = av.localeCompare(bv);
+        return dir === 'desc' ? -cmp : cmp;
+      });
+    } else if (orderBy === 'price') {
+      items = [...rawItems].sort((a, b) => {
+        const av = Number(a.variants[0]?.salePrice ?? 0);
+        const bv = Number(b.variants[0]?.salePrice ?? 0);
+        return dir === 'asc' ? av - bv : bv - av;
+      });
+    }
 
     return { total, page, pageSize, items: serializeDecimals(items) };
   });
