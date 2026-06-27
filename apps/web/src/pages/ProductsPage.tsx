@@ -602,8 +602,8 @@ function EditProductModal({
     mutationFn: async () => {
       await api.put(`/api/products/${product.id}`, {
         name,
-        brand,
-        group,
+        brand: brand || undefined,
+        group: group || undefined,
         subgroup: subgroup || null,
         tracksLotValidity,
       });
