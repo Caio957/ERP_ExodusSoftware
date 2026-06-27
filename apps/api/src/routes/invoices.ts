@@ -104,13 +104,20 @@ export async function invoiceRoutes(app: FastifyInstance) {
           include: { items: true },
         });
 
-        // Entrada de estoque + custo + (novo preço de venda, opcional)
+        // Entrada de estoque + custo + CMP + (novo preço de venda, opcional)
         for (const it of items) {
+          const current = await tx.productVariant.findUniqueOrThrow({ where: { id: it.variantId }, select: { stockQty: true, averageCost: true } });
+          const prevStock = current.stockQty;
+          const prevAvg = Number(current.averageCost);
+          const newAvg = prevStock <= 0
+            ? it.unitCost
+            : ((prevStock * prevAvg) + (it.quantity * it.unitCost)) / (prevStock + it.quantity);
           await tx.productVariant.update({
             where: { id: it.variantId },
             data: {
               stockQty: { increment: it.quantity },
               costPrice: it.unitCost,
+              averageCost: Math.round(newAvg * 100) / 100,
               ...(it.newSalePrice != null ? { salePrice: it.newSalePrice } : {}),
             },
           });
@@ -234,14 +241,20 @@ export async function invoiceRoutes(app: FastifyInstance) {
           },
         });
 
-        // Entrada de estoque + custo + (novo preço de venda) + lote/validade por item.
+        // Entrada de estoque + custo + CMP + (novo preço de venda) + lote/validade por item.
         for (const it of items) {
           const variant = variantById.get(it.variantId)!;
+          const prevStock = variant.stockQty;
+          const prevAvg = Number(variant.averageCost);
+          const newAvg = prevStock <= 0
+            ? it.unitCost
+            : ((prevStock * prevAvg) + (it.quantity * it.unitCost)) / (prevStock + it.quantity);
           await tx.productVariant.update({
             where: { id: it.variantId },
             data: {
               stockQty: { increment: it.quantity },
               costPrice: it.unitCost,
+              averageCost: Math.round(newAvg * 100) / 100,
               ...(it.newSalePrice != null ? { salePrice: it.newSalePrice } : {}),
               ...(it.tracksLotValidity ? { batch: it.batch ?? null, validity: it.validity ?? null } : {}),
             },

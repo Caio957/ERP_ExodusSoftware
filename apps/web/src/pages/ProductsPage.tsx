@@ -20,6 +20,7 @@ interface Variant {
   description: string;
   barcode: string | null;
   costPrice: number;
+  averageCost: number;
   salePrice: number;
   stockQty: number;
   batch: string | null;
@@ -243,6 +244,7 @@ function buildVariantSchema(barcodeRequired: boolean, tracksLotValidity: boolean
     sku: z.string().min(1, 'SKU é obrigatório'),
     barcode: barcodeRequired ? z.string().min(1, 'Código de barras é obrigatório') : z.string(),
     costPrice: z.number({ invalid_type_error: 'Custo inválido' }).min(0.01, 'Custo deve ser maior que zero'),
+    averageCost: z.number().min(0).default(0),
     salePrice: z.number({ invalid_type_error: 'Preço inválido' }).min(0.01, 'Preço de venda deve ser maior que zero'),
     batch: tracksLotValidity ? z.string().min(1, 'Lote é obrigatório') : z.string(),
     validity: tracksLotValidity ? z.string().min(1, 'Validade é obrigatória') : z.string(),
@@ -293,6 +295,7 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
   // conforme `pricingMode` lido das configurações da loja.
   const pricingMode = settings?.pricingMode ?? 'margin';
   const [cost, setCost] = useState(0);
+  const [averageCost, setAverageCost] = useState(0);
   const [salePrice, setSalePrice] = useState(0);
   const [pct, setPct] = useState(0);
 
@@ -332,6 +335,7 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
             barcode: form.barcode || undefined,
             description: form.description.trim() || undefined,
             costPrice: cost,
+            averageCost,
             salePrice,
             stockQty: Number(form.stockQty) || 0,
             batch: form.batch || undefined,
@@ -432,8 +436,9 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
             <div className="mb-2 text-sm font-semibold text-brand-700">
               Precificação — {pricingMode === 'margin' ? 'Margem sobre venda' : 'Markup sobre custo'}
             </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <NumField label="Custo (R$)" required error={errors.cost} value={cost} onChange={applyCost} />
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <NumField label="Último custo (R$)" required error={errors.cost} value={cost} onChange={applyCost} />
+              <NumField label="Custo médio (R$)" value={averageCost} onChange={setAverageCost} />
               <NumField
                 label={pricingMode === 'margin' ? 'Margem (%)' : 'Markup (%)'}
                 value={pct}
@@ -489,6 +494,7 @@ function EditProductModal({
       description: v.description,
       barcode: v.barcode ?? '',
       costPrice: v.costPrice,
+      averageCost: v.averageCost,
       salePrice: v.salePrice,
       batch: v.batch ?? '',
       validity: v.validity ? v.validity.slice(0, 10) : '',
@@ -565,6 +571,7 @@ function EditProductModal({
         sku: v.sku,
         barcode: v.barcode,
         costPrice: v.costPrice,
+        averageCost: v.averageCost,
         salePrice: v.salePrice,
         batch: v.batch,
         validity: v.validity,
@@ -594,6 +601,7 @@ function EditProductModal({
           description: v.description.trim() || undefined,
           barcode: v.barcode || null,
           costPrice: v.costPrice,
+          averageCost: v.averageCost,
           salePrice: v.salePrice,
           batch: v.batch || undefined,
           validity: v.validity || undefined,
@@ -697,11 +705,17 @@ function EditProductModal({
                     onChange={(e) => setVariant(v.id, { barcode: e.target.value })}
                   />
                   <NumField
-                    label="Custo (R$)"
+                    label="Último custo (R$)"
                     required
                     error={variantErrors[v.id]?.costPrice}
                     value={v.costPrice}
                     onChange={(val) => applyVCost(v.id, val)}
+                  />
+                  <NumField
+                    label="Custo médio (R$)"
+                    error={variantErrors[v.id]?.averageCost}
+                    value={v.averageCost}
+                    onChange={(val) => setVariant(v.id, { averageCost: val })}
                   />
                   <NumField
                     label={pricingMode === 'margin' ? 'Margem (%)' : 'Markup (%)'}

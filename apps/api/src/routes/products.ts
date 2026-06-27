@@ -117,6 +117,7 @@ export async function productRoutes(app: FastifyInstance) {
                 // Fallback: usa o nome do produto quando a descrição é omitida.
                 description: v.description?.trim() || productData.name,
                 costPrice: v.costPrice,
+                averageCost: v.averageCost ?? v.costPrice,
                 salePrice: v.salePrice,
                 stockQty: v.stockQty,
                 batch: v.batch,

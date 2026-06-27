@@ -14,6 +14,7 @@ export const createVariantSchema = z
     // fallback quando vazia).
     description: z.string().trim().min(1).optional(),
     costPrice: money,
+    averageCost: money.default(0),
     salePrice: money,
     stockQty: z.number().int().min(0).default(0),
     batch: z.string().trim().min(1).optional(),
@@ -80,9 +81,11 @@ export type StockAdjustInput = z.infer<typeof stockAdjustSchema>;
 
 /** Atualização avulsa de uma variante (preço, estoque manual, lote, validade). */
 export const updateVariantSchema = z.object({
+  sku: z.string().trim().min(1).optional(),
   description: z.string().trim().min(1).optional(),
   barcode: z.string().trim().min(1).nullish(),
   costPrice: money.optional(),
+  averageCost: money.optional(),
   salePrice: money.optional(),
   batch: z.string().trim().min(1).optional(),
   validity: z.coerce.date().optional(),
