@@ -224,6 +224,7 @@ function buildProductFormSchema(
   subgroupRequired: boolean,
   barcodeRequired: boolean,
   tracksLotValidity: boolean,
+  requireAverageCost: boolean,
 ) {
   return z.object({
     name: z.string().min(1, 'Nome é obrigatório'),
@@ -233,18 +234,25 @@ function buildProductFormSchema(
     sku: z.string().min(1, 'SKU é obrigatório'),
     barcode: barcodeRequired ? z.string().min(1, 'Código de barras é obrigatório') : z.string(),
     cost: z.number({ invalid_type_error: 'Custo inválido' }).min(0.01, 'Custo deve ser maior que zero'),
+    averageCost: z.coerce.number().refine(
+      (val) => !requireAverageCost || val > 0,
+      { message: 'Custo médio é obrigatório' },
+    ),
     salePrice: z.number({ invalid_type_error: 'Preço inválido' }).min(0.01, 'Preço de venda deve ser maior que zero'),
     batch: tracksLotValidity ? z.string().min(1, 'Lote é obrigatório') : z.string(),
     validity: tracksLotValidity ? z.string().min(1, 'Validade é obrigatória') : z.string(),
   });
 }
 
-function buildVariantSchema(barcodeRequired: boolean, tracksLotValidity: boolean) {
+function buildVariantSchema(barcodeRequired: boolean, tracksLotValidity: boolean, requireAverageCost: boolean) {
   return z.object({
     sku: z.string().min(1, 'SKU é obrigatório'),
     barcode: barcodeRequired ? z.string().min(1, 'Código de barras é obrigatório') : z.string(),
     costPrice: z.coerce.number().min(0).catch(0),
-    averageCost: z.coerce.number().min(0).catch(0),
+    averageCost: z.coerce.number().refine(
+      (val) => !requireAverageCost || val > 0,
+      { message: 'Custo médio é obrigatório' },
+    ),
     salePrice: z.coerce.number().min(0).catch(0),
     batch: tracksLotValidity ? z.string().min(1, 'Lote é obrigatório') : z.string(),
     validity: tracksLotValidity ? z.string().min(1, 'Validade é obrigatória') : z.string(),
@@ -288,6 +296,7 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
   const groupRequired = settings?.groupRequired ?? false;
   const subgroupRequired = settings?.subgroupRequired ?? false;
   const barcodeRequired = settings?.barcodeRequired ?? false;
+  const requireAverageCost = settings?.requireAverageCost ?? false;
   // Lote/validade é sempre opt-in: todo produto novo abre desmarcado e quem
   // decide é o usuário, por produto. Não bloqueia o cadastro por causa de lote.
 
@@ -348,7 +357,7 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
 
   function submit() {
     const schema = buildProductFormSchema(
-      brandRequired, groupRequired, subgroupRequired, barcodeRequired, tracksLotValidity,
+      brandRequired, groupRequired, subgroupRequired, barcodeRequired, tracksLotValidity, requireAverageCost,
     );
     const result = schema.safeParse({
       name: form.name,
@@ -358,6 +367,7 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
       sku: form.sku,
       barcode: form.barcode,
       cost,
+      averageCost,
       salePrice,
       batch: form.batch,
       validity: form.validity,
@@ -438,7 +448,7 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <NumField label="Último custo (R$)" required error={errors.cost} value={cost} onChange={applyCost} />
-              <NumField label="Custo médio (R$)" value={averageCost} onChange={setAverageCost} />
+              <NumField label="Custo médio (R$)" required={requireAverageCost} error={errors.averageCost} value={averageCost} onChange={setAverageCost} />
               <NumField
                 label={pricingMode === 'margin' ? 'Margem (%)' : 'Markup (%)'}
                 value={pct}
@@ -544,6 +554,7 @@ function EditProductModal({
   const groupRequired = settings?.groupRequired ?? false;
   const subgroupRequired = settings?.subgroupRequired ?? false;
   const barcodeRequired = settings?.barcodeRequired ?? false;
+  const requireAverageCost = settings?.requireAverageCost ?? false;
 
   const [productErrors, setProductErrors] = useState<Record<string, string>>({});
   const [variantErrors, setVariantErrors] = useState<Record<string, Record<string, string>>>({});
@@ -555,7 +566,7 @@ function EditProductModal({
       group: groupRequired ? z.string().min(1, 'Grupo é obrigatório') : z.string(),
       subgroup: subgroupRequired ? z.string().min(1, 'Subgrupo é obrigatório') : z.string(),
     });
-    const varSchema = buildVariantSchema(barcodeRequired, tracksLotValidity);
+    const varSchema = buildVariantSchema(barcodeRequired, tracksLotValidity, requireAverageCost);
 
     const productResult = productSchema.safeParse({ name, brand, group, subgroup });
     let hasErrors = false;
@@ -714,6 +725,7 @@ function EditProductModal({
                   />
                   <NumField
                     label="Custo médio (R$)"
+                    required={requireAverageCost}
                     error={variantErrors[v.id]?.averageCost}
                     value={v.averageCost}
                     onChange={(val) => setVariant(v.id, { averageCost: val })}

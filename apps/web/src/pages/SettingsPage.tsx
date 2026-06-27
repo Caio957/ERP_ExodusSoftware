@@ -58,6 +58,7 @@ const productDefaults: ProductFormSettings = {
   subgroupRequired: false,
   barcodeRequired: false,
   defaultTracksLotValidity: false,
+  requireAverageCost: false,
   pricingMode: 'margin',
 };
 
@@ -99,6 +100,7 @@ function ProductFormSettingsCard() {
           <ToggleRow label="Exigir subgrupo" desc="Torna o campo Subgrupo obrigatório." checked={form.subgroupRequired} onChange={() => toggle('subgroupRequired')} />
           <ToggleRow label="Exigir código de barras" desc="Torna o código de barras obrigatório." checked={form.barcodeRequired} onChange={() => toggle('barcodeRequired')} />
           <ToggleRow label="Controlar lote/validade por padrão" desc="Novos produtos já vêm com o controle ativado." checked={form.defaultTracksLotValidity} onChange={() => toggle('defaultTracksLotValidity')} />
+          <ToggleRow label="Exigir Custo Médio" desc="Torna o preenchimento do custo médio obrigatório no cadastro e edição de produtos." checked={form.requireAverageCost} onChange={() => toggle('requireAverageCost')} />
         </div>
       </div>
 
