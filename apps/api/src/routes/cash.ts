@@ -252,9 +252,17 @@ export async function cashRoutes(app: FastifyInstance) {
       // Fundo inicial de todos os caixas encontrados no período (aberturas).
       const totalInitialCash = registers.reduce((a, reg) => a + Number(reg.initialCash), 0);
 
-      // Movimentação física da gaveta = fundo inicial + vendas em dinheiro +
-      // suprimentos - sangrias.
-      const cashInDrawer = round2(totalInitialCash + cashSales + totalSupply - totalBleed);
+      // Total recolhido: valor físico declarado no fechamento (finalCash) dos
+      // caixas já fechados — sai da gaveta e vai para o cofre/banco.
+      const totalCollected = registers
+        .filter((r) => r.status === 'CLOSED')
+        .reduce((acc, r) => acc + Number(r.finalCash || 0), 0);
+
+      // Dinheiro em gaveta = fundo inicial + vendas em dinheiro + suprimentos
+      // - sangrias - fechamentos (recolhimentos).
+      const cashInDrawer = round2(
+        totalInitialCash + cashSales + totalSupply - totalBleed - totalCollected,
+      );
 
       return {
         period: { startDate, endDate },
@@ -267,6 +275,7 @@ export async function cashRoutes(app: FastifyInstance) {
           totalInitialCash: round2(totalInitialCash),
           totalSupply: round2(totalSupply),
           totalBleed: round2(totalBleed),
+          totalCollected: round2(totalCollected),
           cashInDrawer,
         },
       };

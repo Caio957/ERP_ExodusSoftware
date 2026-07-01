@@ -671,6 +671,7 @@ interface CashReport {
     totalInitialCash: number;
     totalSupply: number;
     totalBleed: number;
+    totalCollected: number;
     cashInDrawer: number;
   };
 }
@@ -720,9 +721,10 @@ function PeriodicReport() {
             </h3>
             <div className="grid grid-cols-2 gap-3">
               <SummaryCard label="Total de vendas" value={brl(data.summary.totalSales)} hint={`${data.summary.salesCount} venda(s)`} tone="brand" />
-              <SummaryCard label="Dinheiro em gaveta" value={brl(data.summary.cashInDrawer)} hint="Fundo inicial + Vendas em dinheiro + supr. - sangrias" tone="emerald" />
+              <SummaryCard label="Dinheiro em gaveta" value={brl(data.summary.cashInDrawer)} hint="Fundo inc. + Vendas (Dinh) + Supr. − Sangrias − Fechamentos" tone="emerald" />
               <SummaryCard label="Suprimentos" value={brl(data.summary.totalSupply)} tone="emerald" />
               <SummaryCard label="Sangrias" value={brl(data.summary.totalBleed)} tone="rose" />
+              <SummaryCard label="Fechamentos (Recolhido)" value={brl(data.summary.totalCollected)} hint="Valor físico recolhido nos fechamentos" tone="rose" />
             </div>
 
             {data.summary.byMethod.length > 0 && (
