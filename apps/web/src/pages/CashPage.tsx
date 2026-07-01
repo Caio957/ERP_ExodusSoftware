@@ -15,6 +15,7 @@ import {
   Receipt,
   PieChart,
   Printer,
+  FileBarChart,
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../store/auth';
@@ -43,23 +44,28 @@ interface CashRegister {
 }
 
 export function CashPage() {
-  const [tab, setTab] = useState<'atual' | 'historico'>('atual');
+  const [tab, setTab] = useState<'atual' | 'historico' | 'relatorio'>('atual');
 
   return (
     <div className="mx-auto max-w-2xl space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <h1 className="page-title">Caixa</h1>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
           <button className={tab === 'atual' ? 'btn-primary' : 'btn-ghost'} onClick={() => setTab('atual')}>
             <Wallet className="h-5 w-5" /> Atual
           </button>
           <button className={tab === 'historico' ? 'btn-primary' : 'btn-ghost'} onClick={() => setTab('historico')}>
             <History className="h-5 w-5" /> Histórico
           </button>
+          <button className={tab === 'relatorio' ? 'btn-primary' : 'btn-ghost'} onClick={() => setTab('relatorio')}>
+            <FileBarChart className="h-5 w-5" /> Relatório
+          </button>
         </div>
       </div>
 
-      {tab === 'atual' ? <CurrentCash /> : <CashHistory />}
+      {tab === 'atual' && <CurrentCash />}
+      {tab === 'historico' && <CashHistory />}
+      {tab === 'relatorio' && <PeriodicReport />}
     </div>
   );
 }
@@ -633,6 +639,195 @@ function CloseModal({
         </button>
       </div>
     </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Relatório periódico (extrato consolidado): o gestor escolhe um período e vê
+// o resumo financeiro por forma de pagamento + a timeline unificada de todos
+// os caixas (RBAC aplicado no backend: ADMIN vê a loja, operador vê os seus).
+interface ReportMovement {
+  kind: 'TRANSACTION' | 'SALE';
+  id: string;
+  type?: string;
+  code?: number;
+  paymentMethod?: string;
+  amount: number;
+  description?: string;
+  client?: string | null;
+  operator?: string | null;
+  financialGenerated?: boolean;
+  at: string;
+}
+
+interface CashReport {
+  period: { startDate: string; endDate: string };
+  registersCount: number;
+  movements: ReportMovement[];
+  summary: {
+    totalSales: number;
+    salesCount: number;
+    byMethod: { method: string; count: number; total: number }[];
+    totalSupply: number;
+    totalBleed: number;
+    cashInDrawer: number;
+  };
+}
+
+const pad2 = (n: number) => String(n).padStart(2, '0');
+// yyyy-mm-dd em horário LOCAL (evita o shift de 1 dia do toISOString em UTC).
+const localISODate = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+
+function PeriodicReport() {
+  const now = new Date();
+  const [startDate, setStartDate] = useState(localISODate(new Date(now.getFullYear(), now.getMonth(), 1)));
+  const [endDate, setEndDate] = useState(localISODate(now));
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['cash-report', startDate, endDate],
+    queryFn: () => api.get<CashReport>(`/api/cash/report?startDate=${startDate}&endDate=${endDate}`),
+    enabled: !!startDate && !!endDate,
+  });
+
+  return (
+    <div className="space-y-4">
+      {/* Seletor de período */}
+      <div className="card grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label className="block">
+          <span className="label">Data inicial</span>
+          <input type="date" className="input" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+        </label>
+        <label className="block">
+          <span className="label">Data final</span>
+          <input type="date" className="input" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+        </label>
+      </div>
+
+      {isLoading && <div className="grid h-40 place-items-center text-slate-500">Carregando...</div>}
+      {isError && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          Falha ao carregar o relatório.
+        </div>
+      )}
+
+      {data && (
+        <>
+          {/* Resumo financeiro do período */}
+          <div className="card">
+            <h3 className="mb-3 flex items-center gap-2 font-semibold">
+              <FileBarChart className="h-5 w-5 text-brand-600" /> Resumo financeiro do período
+            </h3>
+            <div className="grid grid-cols-2 gap-3">
+              <SummaryCard label="Total de vendas" value={brl(data.summary.totalSales)} hint={`${data.summary.salesCount} venda(s)`} tone="brand" />
+              <SummaryCard label="Dinheiro em gaveta" value={brl(data.summary.cashInDrawer)} hint="Vendas em dinheiro + supr. − sangrias" tone="emerald" />
+              <SummaryCard label="Suprimentos" value={brl(data.summary.totalSupply)} tone="emerald" />
+              <SummaryCard label="Sangrias" value={brl(data.summary.totalBleed)} tone="rose" />
+            </div>
+
+            {data.summary.byMethod.length > 0 && (
+              <div className="mt-4">
+                <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-600">
+                  <PieChart className="h-4 w-4 text-brand-600" /> Recebimentos por forma
+                </div>
+                <ul className="space-y-1">
+                  {data.summary.byMethod.map((m) => (
+                    <li key={m.method} className="flex items-center justify-between py-1 text-sm">
+                      <span className="text-slate-600">
+                        {methodLabel[m.method] ?? m.method}
+                        <span className="ml-1 text-xs text-slate-400">({m.count})</span>
+                      </span>
+                      <span className="font-semibold">{brl(m.total)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+
+          {/* Timeline consolidada */}
+          <div className="card">
+            <h3 className="mb-3 font-semibold">
+              Timeline consolidada
+              <span className="ml-2 text-xs font-normal text-slate-400">
+                {data.registersCount} caixa(s) · {data.movements.length} movimento(s)
+              </span>
+            </h3>
+            {data.movements.length === 0 ? (
+              <p className="py-6 text-center text-sm text-slate-400">Nenhum movimento no período.</p>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {data.movements.map((m) => (
+                  <li key={`${m.kind}-${m.id}`} className="flex items-center justify-between gap-2 py-2 text-sm">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        {m.kind === 'SALE' ? (
+                          <Receipt className="h-4 w-4 shrink-0 text-brand-500" />
+                        ) : m.type === 'SUPPLY' ? (
+                          <PlusCircle className="h-4 w-4 shrink-0 text-emerald-600" />
+                        ) : (
+                          <MinusCircle className="h-4 w-4 shrink-0 text-rose-600" />
+                        )}
+                        <span className="truncate font-medium text-slate-700">
+                          {m.kind === 'SALE'
+                            ? `Venda #${m.code} · ${methodLabel[m.paymentMethod ?? ''] ?? m.paymentMethod}`
+                            : m.type === 'SUPPLY'
+                              ? 'Suprimento'
+                              : 'Sangria'}
+                          {m.kind === 'SALE' && m.client && (
+                            <span className="text-slate-400"> · {m.client}</span>
+                          )}
+                          {m.kind === 'TRANSACTION' && m.description && (
+                            <span className="text-slate-400"> · {m.description}</span>
+                          )}
+                        </span>
+                      </div>
+                      <div className="pl-6 text-xs text-slate-400">
+                        {new Date(m.at).toLocaleString('pt-BR')}
+                        {m.operator && ` · ${m.operator}`}
+                      </div>
+                    </div>
+                    <span
+                      className={`shrink-0 font-semibold ${
+                        m.kind === 'TRANSACTION' && m.type === 'BLEED' ? 'text-rose-600' : 'text-emerald-600'
+                      }`}
+                    >
+                      {m.kind === 'TRANSACTION' && m.type === 'BLEED' ? '−' : '+'}
+                      {brl(m.amount)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+  hint,
+  tone,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  tone: 'brand' | 'emerald' | 'rose';
+}) {
+  const toneClasses =
+    tone === 'emerald'
+      ? 'text-emerald-600'
+      : tone === 'rose'
+        ? 'text-rose-600'
+        : 'text-brand-600';
+  return (
+    <div className="rounded-xl border border-slate-200 p-3">
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className={`font-display text-lg font-bold ${toneClasses}`}>{value}</div>
+      {hint && <div className="text-[11px] text-slate-400">{hint}</div>}
+    </div>
   );
 }
 

@@ -13,6 +13,8 @@ import { BusinessError, ForbiddenError, NotFoundError } from '../lib/errors.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 
+const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
 /** Caixa esperado = inicial + suprimentos - sangrias + vendas em dinheiro. */
 async function computeExpectedCash(cashRegisterId: string) {
   const [register, supplies, bleeds, cashSales] = await Promise.all([
@@ -145,6 +147,117 @@ export async function cashRoutes(app: FastifyInstance) {
     });
     return serializeDecimals(registers);
   });
+
+  // Relatório periódico (extrato consolidado): unifica os movimentos de todos
+  // os caixas do período (vendas + sangrias/suprimentos) e resume por forma de
+  // pagamento + movimentação física da gaveta. RBAC igual ao /registers:
+  // ADMIN vê a loja toda; operador vê só os próprios caixas.
+  r.get(
+    '/report',
+    {
+      preHandler: app.authenticate,
+      schema: { querystring: z.object({ startDate: z.coerce.date(), endDate: z.coerce.date() }) },
+    },
+    async (req) => {
+      const { startDate, endDate } = req.query;
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      const rbac = req.user.role === 'ADMIN' ? {} : { userId: req.user.sub };
+
+      const registers = await prisma.cashRegister.findMany({
+        where: { openedAt: { gte: startDate, lte: end }, ...rbac },
+        include: {
+          user: { select: { name: true } },
+          transactions: true,
+          sales: { include: { client: { select: { name: true } }, payments: true } },
+        },
+      });
+
+      // 1) Timeline consolidada (vendas + transações manuais), mais recente 1º.
+      const movements = registers
+        .flatMap((reg) => [
+          ...reg.transactions.map((t) => ({
+            kind: 'TRANSACTION' as const,
+            id: t.id,
+            type: t.type, // SUPPLY | BLEED
+            amount: toMoney(t.amount) ?? 0,
+            description: t.description,
+            operator: reg.user?.name ?? null,
+            at: t.createdAt,
+          })),
+          ...reg.sales.map((s) => ({
+            kind: 'SALE' as const,
+            id: s.id,
+            code: s.code,
+            paymentMethod: s.paymentMethod,
+            amount: toMoney(s.totalAmount) ?? 0,
+            client: s.client?.name ?? null,
+            operator: reg.user?.name ?? null,
+            financialGenerated: s.financialGenerated,
+            payments: s.payments.map((p) => ({ method: p.method, amount: toMoney(p.amount) ?? 0 })),
+            at: s.soldAt,
+          })),
+        ])
+        .sort((a, b) => +new Date(b.at) - +new Date(a.at));
+
+      // 2) Resumo financeiro. Suprimentos/sangrias das transações manuais.
+      let totalSupply = 0;
+      let totalBleed = 0;
+      for (const reg of registers) {
+        for (const t of reg.transactions) {
+          if (t.type === 'SUPPLY') totalSupply += Number(t.amount);
+          else if (t.type === 'BLEED') totalBleed += Number(t.amount);
+        }
+      }
+
+      // Vendas e recebimentos por forma (só as com financeiro gerado). Vendas
+      // legadas sem SalePayment usam paymentMethod + totalAmount como fallback.
+      let totalSales = 0;
+      let salesCount = 0;
+      let cashSales = 0;
+      const methodMap = new Map<string, { count: number; total: number }>();
+      const addMethod = (method: string, amount: number) => {
+        const cur = methodMap.get(method) ?? { count: 0, total: 0 };
+        cur.count += 1;
+        cur.total += amount;
+        methodMap.set(method, cur);
+        if (method === 'CASH') cashSales += amount;
+      };
+      for (const reg of registers) {
+        for (const s of reg.sales) {
+          if (!s.financialGenerated) continue;
+          totalSales += Number(s.totalAmount);
+          salesCount += 1;
+          if (s.payments.length > 0) {
+            for (const p of s.payments) addMethod(p.method, Number(p.amount));
+          } else {
+            addMethod(s.paymentMethod, Number(s.totalAmount));
+          }
+        }
+      }
+
+      const byMethod = [...methodMap.entries()]
+        .map(([method, v]) => ({ method, count: v.count, total: round2(v.total) }))
+        .sort((a, b) => b.total - a.total);
+
+      // Movimentação física da gaveta = vendas em dinheiro + suprimentos - sangrias.
+      const cashInDrawer = round2(cashSales + totalSupply - totalBleed);
+
+      return {
+        period: { startDate, endDate },
+        registersCount: registers.length,
+        movements,
+        summary: {
+          totalSales: round2(totalSales),
+          salesCount,
+          byMethod,
+          totalSupply: round2(totalSupply),
+          totalBleed: round2(totalBleed),
+          cashInDrawer,
+        },
+      };
+    },
+  );
 
   // Timeline unificada: sangrias/suprimentos (manuais) + vendas (origem). As
   // vendas vêm como leitura — só podem ser alteradas pela tela de Vendas (C5).
