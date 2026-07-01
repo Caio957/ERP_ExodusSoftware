@@ -275,10 +275,17 @@
   .thermal-receipt * {
     visibility: visible;
   }
+  /* position:absolute é obrigatório aqui: os ancestrais ficam com
+     visibility:hidden (que esconde mas MANTÉM o espaço ocupado no fluxo),
+     então sem isso o recibo é empurrado milhares de pixels para baixo pelo
+     layout normal do DOM, o que trava o preview de impressão do Chrome ao
+     tentar encaixar isso dentro de um @page de altura restrita. Como o
+     papel e a div têm exatamente 80mm, left:0/top:0 encaixam perfeitamente
+     no topo da bobina, ignorando o "lixo" invisível abaixo. */
   .print-area,
   .thermal-receipt {
-    position: absolute;
-    left: 0;
-    top: 0;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
   }
 }

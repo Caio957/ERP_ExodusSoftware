@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { type PaymentType, DEFAULT_PAYMENT_TYPES } from '@exodus/shared';
 import {
@@ -203,7 +204,10 @@ export function PdvPage() {
     // Timeout 1: aguarda o React renderizar o DOM fora da tela para medir
     window.setTimeout(() => {
       if (mode === 'thermal' && receiptRef.current) {
-        setReceiptHeight(receiptRef.current.offsetHeight + 30);
+        // scrollHeight captura a altura total real (mesmo com collapsing
+        // margins); +15px de sobra cirúrgica para a guilhotina não cortar
+        // a última linha.
+        setReceiptHeight(receiptRef.current.scrollHeight + 15);
       }
       // Timeout 2: aguarda o estado de altura atualizar o <style> antes de imprimir
       window.setTimeout(() => window.print(), 50);
@@ -636,9 +640,11 @@ export function PdvPage() {
         </div>
       )}
 
-      {/* Modal de recibo pós-venda */}
+      {/* Modal de recibo pós-venda — print:hidden evita duplicar o recibo
+          on-screen junto com a instância off-screen medida pelo Dynamic
+          Measurement Engine (ambos carregam a classe .thermal-receipt). */}
       {lastSale && (
-        <div className="modal-overlay">
+        <div className="modal-overlay print:hidden">
           <div className="modal-sheet sm:max-w-sm">
             <div className="mb-3 flex flex-col items-center text-center">
               <div className="mb-2 grid h-14 w-14 place-items-center rounded-full bg-emerald-100 text-emerald-600">
@@ -677,43 +683,61 @@ export function PdvPage() {
 
     {printMode && (
       <style>{printMode === 'thermal'
-        ? `@page { margin: 0; size: 80mm ${receiptHeight > 0 ? receiptHeight + 'px' : 'auto'}; } @media print { body { margin: 0; padding: 0; background: white; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }`
-        : `@page { margin: 10mm; size: A4 portrait; } @media print { body { margin: 0; padding: 0; background: white; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }`
+        ? `
+    @page { margin: 0; size: 80mm ${receiptHeight > 0 ? receiptHeight + 'px' : 'auto'}; }
+    @media print {
+      body > *:not(#thermal-print-root) { display: none !important; }
+      #thermal-print-root { position: absolute !important; left: 0 !important; top: 0 !important; display: block !important; }
+      body { margin: 0; padding: 0; background: white; }
+      * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    }
+  `
+        : `
+    @page { margin: 10mm; size: A4 portrait; }
+    @media print {
+      body > *:not(#a4-print-root) { display: none !important; }
+      #a4-print-root { position: absolute !important; left: 0 !important; top: 0 !important; display: block !important; }
+      body { margin: 0; padding: 0; background: white; }
+      * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    }
+  `
       }</style>
     )}
 
-    {lastSale && (
-      <div className="fixed top-[-9999px] left-[-9999px] print:static print:top-auto print:left-auto w-full bg-white text-black">
-        {printMode === 'thermal' && (
-          <div ref={receiptRef} className="w-full max-w-[80mm] mx-auto flex justify-center overflow-hidden font-mono text-[11px] leading-tight">
-            <ThermalReceipt
-              items={lastSale.items}
-              total={lastSale.total}
-              paymentMethod={lastSale.method}
-              width="80mm"
-            />
-          </div>
-        )}
-        {printMode === 'a4' && (
-          <div className="w-full max-w-[210mm] mx-auto bg-white">
-            <SaleReceipt
-              company={company ?? {}}
-              sale={{
-                code: lastSale.code,
-                soldAt: lastSale.soldAt,
-                clientName: lastSale.clientName,
-                items: lastSale.items,
-                subtotal: lastSale.subtotal,
-                discount: lastSale.discount,
-                surcharge: lastSale.surcharge,
-                total: lastSale.total,
-                payments: lastSale.payments,
-              }}
-              format="a4"
-            />
-          </div>
-        )}
-      </div>
+    {lastSale && printMode === 'thermal' && createPortal(
+      <div id="thermal-print-root" className="fixed top-[-9999px] left-[-9999px] w-full bg-white text-black">
+        <div ref={receiptRef} className="w-full max-w-[80mm] mx-auto flex justify-center font-mono text-[11px] leading-tight">
+          <ThermalReceipt
+            items={lastSale.items}
+            total={lastSale.total}
+            paymentMethod={lastSale.method}
+          />
+        </div>
+      </div>,
+      document.body,
+    )}
+
+    {lastSale && printMode === 'a4' && createPortal(
+      <div id="a4-print-root" className="fixed top-[-9999px] left-[-9999px] w-full bg-white text-black">
+        <div className="w-full max-w-[210mm] mx-auto bg-white">
+          <SaleReceipt
+            company={company ?? {}}
+            sale={{
+              code: lastSale.code,
+              soldAt: lastSale.soldAt,
+              clientName: lastSale.clientName,
+              items: lastSale.items,
+              subtotal: lastSale.subtotal,
+              discount: lastSale.discount,
+              surcharge: lastSale.surcharge,
+              total: lastSale.total,
+              payments: lastSale.payments,
+            }}
+            format="a4"
+          />
+        </div>
+      </div>,
+      document.body,
     )}
     </>
   );

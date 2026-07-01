@@ -13,6 +13,8 @@ import { BusinessError, ForbiddenError, NotFoundError } from '../lib/errors.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 
+const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
 /** Caixa esperado = inicial + suprimentos - sangrias + vendas em dinheiro. */
 async function computeExpectedCash(cashRegisterId: string) {
   const [register, supplies, bleeds, cashSales] = await Promise.all([
@@ -145,6 +147,140 @@ export async function cashRoutes(app: FastifyInstance) {
     });
     return serializeDecimals(registers);
   });
+
+  // Relatório periódico (extrato consolidado): unifica os movimentos de todos
+  // os caixas do período (vendas + sangrias/suprimentos) e resume por forma de
+  // pagamento + movimentação física da gaveta. RBAC igual ao /registers:
+  // ADMIN vê a loja toda; operador vê só os próprios caixas.
+  r.get(
+    '/report',
+    {
+      preHandler: app.authenticate,
+      schema: { querystring: z.object({ startDate: z.coerce.date(), endDate: z.coerce.date() }) },
+    },
+    async (req) => {
+      const { startDate, endDate } = req.query;
+      // Força o timezone UTC-3 (Horário de Brasília) nas fronteiras do relatório.
+      // O servidor roda em UTC: uma venda às 23:50 locais de 30/06 é gravada como
+      // 02:50 UTC de 01/07. Ancorar as fronteiras com o offset -03:00 explícito
+      // (em vez de setUTCHours, que fecharia o dia às 20:59 locais) garante que
+      // esses lançamentos noturnos entrem no relatório do dia local correto.
+      const startStr = req.query.startDate.toISOString().split('T')[0];
+      const endStr = req.query.endDate.toISOString().split('T')[0];
+
+      const start = new Date(`${startStr}T00:00:00.000-03:00`);
+      const end = new Date(`${endStr}T23:59:59.999-03:00`);
+      const rbac = req.user.role === 'ADMIN' ? {} : { userId: req.user.sub };
+
+      // Sem filtro de status: traz caixas OPEN e CLOSED dentro do período.
+      const registers = await prisma.cashRegister.findMany({
+        where: { openedAt: { gte: start, lte: end }, ...rbac },
+        include: {
+          user: { select: { name: true } },
+          transactions: true,
+          sales: { include: { client: { select: { name: true } }, payments: true } },
+        },
+      });
+
+      // 1) Timeline consolidada (vendas + transações manuais), mais recente 1º.
+      const movements = registers
+        .flatMap((reg) => [
+          ...reg.transactions.map((t) => ({
+            kind: 'TRANSACTION' as const,
+            id: t.id,
+            type: t.type, // SUPPLY | BLEED
+            amount: toMoney(t.amount) ?? 0,
+            description: t.description,
+            operator: reg.user?.name ?? null,
+            at: t.createdAt,
+          })),
+          ...reg.sales.map((s) => ({
+            kind: 'SALE' as const,
+            id: s.id,
+            code: s.code,
+            paymentMethod: s.paymentMethod,
+            amount: toMoney(s.totalAmount) ?? 0,
+            client: s.client?.name ?? null,
+            operator: reg.user?.name ?? null,
+            financialGenerated: s.financialGenerated,
+            payments: s.payments.map((p) => ({ method: p.method, amount: toMoney(p.amount) ?? 0 })),
+            at: s.soldAt,
+          })),
+        ])
+        .sort((a, b) => +new Date(b.at) - +new Date(a.at));
+
+      // 2) Resumo financeiro. Suprimentos/sangrias das transações manuais.
+      let totalSupply = 0;
+      let totalBleed = 0;
+      for (const reg of registers) {
+        for (const t of reg.transactions) {
+          if (t.type === 'SUPPLY') totalSupply += Number(t.amount);
+          else if (t.type === 'BLEED') totalBleed += Number(t.amount);
+        }
+      }
+
+      // Vendas e recebimentos por forma (só as com financeiro gerado). Vendas
+      // legadas sem SalePayment usam paymentMethod + totalAmount como fallback.
+      let totalSales = 0;
+      let salesCount = 0;
+      let cashSales = 0;
+      const methodMap = new Map<string, { count: number; total: number }>();
+      const addMethod = (method: string, amount: number) => {
+        const cur = methodMap.get(method) ?? { count: 0, total: 0 };
+        cur.count += 1;
+        cur.total += amount;
+        methodMap.set(method, cur);
+        if (method === 'CASH') cashSales += amount;
+      };
+      for (const reg of registers) {
+        for (const s of reg.sales) {
+          if (!s.financialGenerated) continue;
+          totalSales += Number(s.totalAmount);
+          salesCount += 1;
+          if (s.payments.length > 0) {
+            for (const p of s.payments) addMethod(p.method, Number(p.amount));
+          } else {
+            addMethod(s.paymentMethod, Number(s.totalAmount));
+          }
+        }
+      }
+
+      const byMethod = [...methodMap.entries()]
+        .map(([method, v]) => ({ method, count: v.count, total: round2(v.total) }))
+        .sort((a, b) => b.total - a.total);
+
+      // Fundo inicial de todos os caixas encontrados no período (aberturas).
+      const totalInitialCash = registers.reduce((a, reg) => a + Number(reg.initialCash), 0);
+
+      // Total recolhido: valor físico declarado no fechamento (finalCash) dos
+      // caixas já fechados — sai da gaveta e vai para o cofre/banco.
+      const totalCollected = registers
+        .filter((r) => r.status === 'CLOSED')
+        .reduce((acc, r) => acc + Number(r.finalCash || 0), 0);
+
+      // Dinheiro em gaveta = fundo inicial + vendas em dinheiro + suprimentos
+      // - sangrias - fechamentos (recolhimentos).
+      const cashInDrawer = round2(
+        totalInitialCash + cashSales + totalSupply - totalBleed - totalCollected,
+      );
+
+      return {
+        period: { startDate, endDate },
+        registersCount: registers.length,
+        movements,
+        summary: {
+          totalSales: round2(totalSales),
+          salesCount,
+          byMethod,
+          totalInitialCash: round2(totalInitialCash),
+          totalSupply: round2(totalSupply),
+          totalBleed: round2(totalBleed),
+          totalCollected: round2(totalCollected),
+          cashInDrawer,
+        },
+      };
+    },
+  );
 
   // Timeline unificada: sangrias/suprimentos (manuais) + vendas (origem). As
   // vendas vêm como leitura — só podem ser alteradas pela tela de Vendas (C5).
