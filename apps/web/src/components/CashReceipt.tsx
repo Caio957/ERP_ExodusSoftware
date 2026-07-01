@@ -14,7 +14,6 @@ export interface CashReceiptData {
   expectedCash: number;
   finalCash?: number | null;
   difference?: number | null;
-  width?: string;
 }
 
 /**
@@ -35,7 +34,6 @@ export function CashReceipt({
   expectedCash,
   finalCash,
   difference,
-  width = '80mm',
 }: CashReceiptData) {
   const opened = new Date(openedAt);
   const closed = closedAt ? new Date(closedAt) : null;
@@ -43,10 +41,7 @@ export function CashReceipt({
   const isShort = (difference ?? 0) < 0;
 
   return (
-    <div
-      className="thermal-receipt w-full bg-white font-mono text-[12px] leading-tight text-black text-center whitespace-pre-wrap"
-      style={{ width }}
-    >
+    <div className="thermal-receipt w-[80mm] max-w-[80mm] mx-auto bg-white font-mono text-[12px] leading-none text-black">
       <div className="px-2 py-2">
         <div className="text-center">
           <div className="text-sm font-bold uppercase">{storeName}</div>
@@ -93,7 +88,8 @@ export function CashReceipt({
         )}
 
         <div className="my-1 border-t border-dashed border-black" />
-        <div className="text-center text-[10px]">Impresso em {new Date().toLocaleString('pt-BR')}</div>
+        <div className="text-center text-[10px] pb-4">Impresso em {new Date().toLocaleString('pt-BR')}</div>
+        <div id="print-end-anchor" className="h-[1px] w-full" />
       </div>
     </div>
   );

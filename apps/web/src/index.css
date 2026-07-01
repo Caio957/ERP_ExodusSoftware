@@ -275,8 +275,11 @@
   .thermal-receipt * {
     visibility: visible;
   }
-  .print-area,
-  .thermal-receipt {
+  /* .thermal-receipt fica de fora deste position:absolute propositalmente —
+     ele precisa fluir normalmente para que o `body { display: flex;
+     justify-content: center }` injetado pelo Dynamic Measurement Engine
+     (PdvPage/CashPage) consiga centralizá-lo na bobina de 80mm. */
+  .print-area {
     position: absolute;
     left: 0;
     top: 0;

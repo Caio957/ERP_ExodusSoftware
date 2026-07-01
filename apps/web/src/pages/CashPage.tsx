@@ -409,7 +409,10 @@ function CashPrintButton({ register }: { register: CashRegister }) {
 
     // Timeout 1: aguarda o React renderizar o DOM fora da tela para medir
     window.setTimeout(() => {
-      if (receiptRef.current) setReceiptHeight(receiptRef.current.offsetHeight + 30);
+      // scrollHeight captura a altura total real (mesmo com collapsing
+      // margins); +15px de sobra cirúrgica para a guilhotina não cortar
+      // a última linha.
+      if (receiptRef.current) setReceiptHeight(receiptRef.current.scrollHeight + 15);
       // Timeout 2: aguarda o estado de altura atualizar o <style> antes de imprimir
       window.setTimeout(() => window.print(), 50);
     }, 50);
@@ -422,14 +425,14 @@ function CashPrintButton({ register }: { register: CashRegister }) {
       </button>
 
       {printing && (
-        <style>{`@page { margin: 0; size: 80mm ${receiptHeight > 0 ? receiptHeight + 'px' : 'auto'}; } @media print { body { margin: 0; padding: 0; background: white; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }`}</style>
+        <style>{`@page { margin: 0; size: 80mm ${receiptHeight}px; } @media print { html, body { width: 80mm !important; height: ${receiptHeight}px !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; } body { display: flex; justify-content: center; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }`}</style>
       )}
 
       {printing && (
-        <div className="fixed top-[-9999px] left-[-9999px] print:static print:top-auto print:left-auto w-full overflow-hidden bg-white text-black">
+        <div className="fixed top-[-9999px] left-[-9999px] print:static print:transform-none w-full bg-white text-black">
           <div
             ref={receiptRef}
-            className="mx-auto flex w-full max-w-[80mm] justify-center overflow-hidden font-mono text-[11px] leading-tight"
+            className="mx-auto flex w-full max-w-[80mm] justify-center font-mono text-[11px] leading-tight"
           >
             <CashReceipt
               storeName={company?.name}
@@ -445,7 +448,6 @@ function CashPrintButton({ register }: { register: CashRegister }) {
               expectedCash={expectedCash}
               finalCash={register.finalCash}
               difference={difference}
-              width="80mm"
             />
           </div>
         </div>
