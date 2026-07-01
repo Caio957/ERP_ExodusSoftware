@@ -160,10 +160,17 @@ export async function cashRoutes(app: FastifyInstance) {
     },
     async (req) => {
       const { startDate, endDate } = req.query;
+      // z.coerce.date() interpreta "yyyy-mm-dd" como meia-noite UTC. setHours()
+      // opera em horário LOCAL do processo — em timezones atrás de UTC (ex.:
+      // America/Sao_Paulo, UTC-3) isso ancora no dia local anterior e desloca
+      // o fim do período para ~03h UTC, cortando fora toda a noite do dia
+      // "de hoje" (inclusive o caixa aberto agora). setUTCHours é imune ao
+      // timezone do servidor e sempre fecha o dia em 23:59:59.999 UTC.
       const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
+      end.setUTCHours(23, 59, 59, 999);
       const rbac = req.user.role === 'ADMIN' ? {} : { userId: req.user.sub };
 
+      // Sem filtro de status: traz caixas OPEN e CLOSED dentro do período.
       const registers = await prisma.cashRegister.findMany({
         where: { openedAt: { gte: startDate, lte: end }, ...rbac },
         include: {
@@ -240,8 +247,12 @@ export async function cashRoutes(app: FastifyInstance) {
         .map(([method, v]) => ({ method, count: v.count, total: round2(v.total) }))
         .sort((a, b) => b.total - a.total);
 
-      // Movimentação física da gaveta = vendas em dinheiro + suprimentos - sangrias.
-      const cashInDrawer = round2(cashSales + totalSupply - totalBleed);
+      // Fundo inicial de todos os caixas encontrados no período (aberturas).
+      const totalInitialCash = registers.reduce((a, reg) => a + Number(reg.initialCash), 0);
+
+      // Movimentação física da gaveta = fundo inicial + vendas em dinheiro +
+      // suprimentos - sangrias.
+      const cashInDrawer = round2(totalInitialCash + cashSales + totalSupply - totalBleed);
 
       return {
         period: { startDate, endDate },
@@ -251,6 +262,7 @@ export async function cashRoutes(app: FastifyInstance) {
           totalSales: round2(totalSales),
           salesCount,
           byMethod,
+          totalInitialCash: round2(totalInitialCash),
           totalSupply: round2(totalSupply),
           totalBleed: round2(totalBleed),
           cashInDrawer,
