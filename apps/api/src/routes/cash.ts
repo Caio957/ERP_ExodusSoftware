@@ -160,19 +160,21 @@ export async function cashRoutes(app: FastifyInstance) {
     },
     async (req) => {
       const { startDate, endDate } = req.query;
-      // z.coerce.date() interpreta "yyyy-mm-dd" como meia-noite UTC. setHours()
-      // opera em horário LOCAL do processo — em timezones atrás de UTC (ex.:
-      // America/Sao_Paulo, UTC-3) isso ancora no dia local anterior e desloca
-      // o fim do período para ~03h UTC, cortando fora toda a noite do dia
-      // "de hoje" (inclusive o caixa aberto agora). setUTCHours é imune ao
-      // timezone do servidor e sempre fecha o dia em 23:59:59.999 UTC.
-      const end = new Date(endDate);
-      end.setUTCHours(23, 59, 59, 999);
+      // Força o timezone UTC-3 (Horário de Brasília) nas fronteiras do relatório.
+      // O servidor roda em UTC: uma venda às 23:50 locais de 30/06 é gravada como
+      // 02:50 UTC de 01/07. Ancorar as fronteiras com o offset -03:00 explícito
+      // (em vez de setUTCHours, que fecharia o dia às 20:59 locais) garante que
+      // esses lançamentos noturnos entrem no relatório do dia local correto.
+      const startStr = req.query.startDate.toISOString().split('T')[0];
+      const endStr = req.query.endDate.toISOString().split('T')[0];
+
+      const start = new Date(`${startStr}T00:00:00.000-03:00`);
+      const end = new Date(`${endStr}T23:59:59.999-03:00`);
       const rbac = req.user.role === 'ADMIN' ? {} : { userId: req.user.sub };
 
       // Sem filtro de status: traz caixas OPEN e CLOSED dentro do período.
       const registers = await prisma.cashRegister.findMany({
-        where: { openedAt: { gte: startDate, lte: end }, ...rbac },
+        where: { openedAt: { gte: start, lte: end }, ...rbac },
         include: {
           user: { select: { name: true } },
           transactions: true,
