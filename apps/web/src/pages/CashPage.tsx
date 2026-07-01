@@ -425,11 +425,19 @@ function CashPrintButton({ register }: { register: CashRegister }) {
       </button>
 
       {printing && (
-        <style>{`@page { margin: 0; size: 80mm ${receiptHeight}px; } @media print { body { margin: 0; padding: 0; background: white; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }`}</style>
+        <style>{`
+    @page { margin: 0; size: 80mm ${receiptHeight > 0 ? receiptHeight + 'px' : 'auto'}; }
+    @media print {
+      body > *:not(#thermal-print-root) { display: none !important; }
+      #thermal-print-root { position: absolute !important; left: 0 !important; top: 0 !important; display: block !important; }
+      body { margin: 0; padding: 0; background: white; }
+      * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    }
+  `}</style>
       )}
 
-      {printing && (
-        <div className="fixed top-[-9999px] left-[-9999px] print:static print:transform-none w-full bg-white text-black">
+      {printing && createPortal(
+        <div id="thermal-print-root" className="fixed top-[-9999px] left-[-9999px] w-full bg-white text-black">
           <div
             ref={receiptRef}
             className="mx-auto flex w-full max-w-[80mm] justify-center font-mono text-[11px] leading-tight"
@@ -450,7 +458,8 @@ function CashPrintButton({ register }: { register: CashRegister }) {
               difference={difference}
             />
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
