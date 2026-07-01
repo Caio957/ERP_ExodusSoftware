@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -14,9 +14,11 @@ import {
   X,
   Receipt,
   PieChart,
+  Printer,
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../store/auth';
+import { CashReceipt } from '../components/CashReceipt';
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -161,6 +163,7 @@ function CurrentCash() {
       </button>
 
       <RegisterSummary registerId={register.id} />
+      <CashPrintButton register={register} />
       <RegisterMovements registerId={register.id} canEdit onChanged={refresh} />
 
       {txModal && (
@@ -215,6 +218,8 @@ interface Movement {
   description?: string;
   client?: string | null;
   at: string;
+  payments?: { method: string; amount: number }[];
+  financialGenerated?: boolean;
 }
 
 function RegisterMovements({
@@ -361,6 +366,95 @@ function RegisterSummary({ registerId }: { registerId: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// Impressão do relatório de fechamento/resumo de caixa — reaproveita o mesmo
+// Dynamic Measurement Engine do PDV (mede a altura do recibo fora da tela e
+// injeta @page com o tamanho exato antes de chamar window.print()).
+function CashPrintButton({ register }: { register: CashRegister }) {
+  const { data: company } = useQuery({
+    queryKey: ['settings', 'company'],
+    queryFn: () => api.get<{ name?: string; address?: string; phone?: string }>('/api/settings/company'),
+  });
+  const { data } = useQuery({
+    queryKey: ['cash-movements', register.id],
+    queryFn: () => api.get<{ movements: Movement[] }>(`/api/cash/${register.id}/movements`),
+  });
+
+  const [printing, setPrinting] = useState(false);
+  const [receiptHeight, setReceiptHeight] = useState(0);
+  const receiptRef = useRef<HTMLDivElement>(null);
+
+  const movements = data?.movements ?? [];
+  const totalSupply = movements
+    .filter((m) => m.kind === 'TRANSACTION' && m.type === 'SUPPLY')
+    .reduce((a, m) => a + m.amount, 0);
+  const totalBleed = movements
+    .filter((m) => m.kind === 'TRANSACTION' && m.type === 'BLEED')
+    .reduce((a, m) => a + m.amount, 0);
+  const totalSales = movements.filter((m) => m.kind === 'SALE').reduce((a, m) => a + m.amount, 0);
+  // Só entra no saldo esperado o que foi recebido em dinheiro (mesma regra do backend).
+  const totalCash = movements
+    .filter((m) => m.kind === 'SALE' && m.financialGenerated !== false)
+    .reduce((a, m) => a + (m.payments ?? []).filter((p) => p.method === 'CASH').reduce((s, p) => s + p.amount, 0), 0);
+  const expectedCash = register.expectedCash ?? register.initialCash + totalSupply - totalBleed + totalCash;
+  const difference = register.finalCash != null ? register.finalCash - expectedCash : undefined;
+
+  function handlePrint() {
+    setPrinting(true);
+    const afterPrint = () => {
+      setPrinting(false);
+      setReceiptHeight(0);
+      window.removeEventListener('afterprint', afterPrint);
+    };
+    window.addEventListener('afterprint', afterPrint);
+
+    // Timeout 1: aguarda o React renderizar o DOM fora da tela para medir
+    window.setTimeout(() => {
+      if (receiptRef.current) setReceiptHeight(receiptRef.current.offsetHeight + 30);
+      // Timeout 2: aguarda o estado de altura atualizar o <style> antes de imprimir
+      window.setTimeout(() => window.print(), 50);
+    }, 50);
+  }
+
+  return (
+    <>
+      <button className="btn-ghost w-full" onClick={handlePrint}>
+        <Printer className="h-5 w-5" /> Imprimir Resumo
+      </button>
+
+      {printing && (
+        <style>{`@page { margin: 0; size: 80mm ${receiptHeight > 0 ? receiptHeight + 'px' : 'auto'}; } @media print { body { margin: 0; padding: 0; background: white; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }`}</style>
+      )}
+
+      {printing && (
+        <div className="fixed top-[-9999px] left-[-9999px] print:static print:top-auto print:left-auto w-full overflow-hidden bg-white text-black">
+          <div
+            ref={receiptRef}
+            className="mx-auto flex w-full max-w-[80mm] justify-center overflow-hidden font-mono text-[11px] leading-tight"
+          >
+            <CashReceipt
+              storeName={company?.name}
+              storeAddress={company?.address}
+              storePhone={company?.phone}
+              userName={register.user?.name}
+              openedAt={register.openedAt}
+              closedAt={register.closedAt}
+              initialCash={register.initialCash}
+              totalSupply={totalSupply}
+              totalBleed={totalBleed}
+              totalSales={totalSales}
+              expectedCash={expectedCash}
+              finalCash={register.finalCash}
+              difference={difference}
+              width="80mm"
+            />
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
 function CashHistory() {
   const [selected, setSelected] = useState<CashRegister | null>(null);
   const { data, isLoading } = useQuery({
@@ -394,6 +488,7 @@ function CashHistory() {
           </div>
         </div>
         <RegisterSummary registerId={selected.id} />
+        <CashPrintButton register={selected} />
         <RegisterMovements registerId={selected.id} />
       </div>
     );
