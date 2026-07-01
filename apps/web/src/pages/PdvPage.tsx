@@ -682,7 +682,7 @@ export function PdvPage() {
 
     {printMode && (
       <style>{printMode === 'thermal'
-        ? `@page { margin: 0; size: 80mm ${receiptHeight}px; } @media print { html, body { width: 80mm !important; height: ${receiptHeight}px !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; } body { display: flex; justify-content: center; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }`
+        ? `@page { margin: 0; size: 80mm ${receiptHeight}px; } @media print { body { margin: 0; padding: 0; background: white; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }`
         : `@page { margin: 10mm; size: A4 portrait; } @media print { body { margin: 0; padding: 0; background: white; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }`
       }</style>
     )}
