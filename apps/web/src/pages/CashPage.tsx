@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Wallet,
@@ -531,7 +532,7 @@ function CloseModal({
 
 // ---------------------------------------------------------------------------
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
-  return (
+  return createPortal(
     <div className="modal-overlay">
       <div className="modal-sheet sm:max-w-sm">
         <div className="mb-4 flex items-center justify-between">
@@ -542,7 +543,8 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
