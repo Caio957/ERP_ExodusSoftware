@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { PersonType } from '@exodus/shared';
-import { Users, Truck, Plus, Pencil, Trash2, X, Search, Phone, MapPin } from 'lucide-react';
+import { Users, Truck, Plus, Pencil, Trash2, X, Search, Phone, MapPin, ArrowUp } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { maskCpfCnpj, maskPhone, maskCep } from '../lib/masks';
 
@@ -42,13 +42,41 @@ export function RegistrationsPage() {
       </div>
 
       <PeopleManager type={tab} />
+      <ScrollToTopButton />
     </div>
   );
 }
 
+// ---------------------------------------------------------------------------
+// Botão flutuante "Voltar ao topo" — aparece só depois de rolar a página.
+function ScrollToTopButton() {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setVisible(window.scrollY > 300);
+    window.addEventListener('scroll', onScroll);
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  if (!visible) return null;
+
+  return (
+    <button
+      className="fixed bottom-6 left-6 z-50 grid h-12 w-12 place-items-center rounded-full bg-brand-600 text-white shadow-lg transition hover:bg-brand-700"
+      onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+      title="Voltar ao topo"
+    >
+      <ArrowUp className="h-5 w-5" />
+    </button>
+  );
+}
+
+type SortOption = 'name_asc' | 'name_desc' | 'code_asc' | 'code_desc' | 'city_asc';
+
 function PeopleManager({ type }: { type: PersonType }) {
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState<SortOption>('name_asc');
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Person | null>(null);
 
@@ -61,6 +89,27 @@ function PeopleManager({ type }: { type: PersonType }) {
     },
   });
 
+  // Ordenação aplicada no front sobre o resultado já filtrado pela busca.
+  const sortedItems = useMemo(() => {
+    const items = data?.items ?? [];
+    const byName = (a: Person, b: Person) => a.name.localeCompare(b.name, 'pt-BR');
+    const byCity = (a: Person, b: Person) => (a.city ?? '').localeCompare(b.city ?? '', 'pt-BR');
+    switch (sortBy) {
+      case 'name_asc':
+        return [...items].sort(byName);
+      case 'name_desc':
+        return [...items].sort((a, b) => byName(b, a));
+      case 'code_asc':
+        return [...items].sort((a, b) => a.code - b.code);
+      case 'code_desc':
+        return [...items].sort((a, b) => b.code - a.code);
+      case 'city_asc':
+        return [...items].sort(byCity);
+      default:
+        return items;
+    }
+  }, [data, sortBy]);
+
   const remove = useMutation({
     mutationFn: (id: string) => api.del(`/api/persons/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['persons'] }),
@@ -71,7 +120,7 @@ function PeopleManager({ type }: { type: PersonType }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row">
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
           <input
@@ -81,6 +130,17 @@ function PeopleManager({ type }: { type: PersonType }) {
             placeholder={`Buscar ${label} por nome ou documento...`}
           />
         </div>
+        <select
+          className="input sm:w-56"
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as SortOption)}
+        >
+          <option value="name_asc">Nome (A-Z)</option>
+          <option value="name_desc">Nome (Z-A)</option>
+          <option value="code_asc">Código (Menor-Maior)</option>
+          <option value="code_desc">Código (Maior-Menor)</option>
+          <option value="city_asc">Cidade</option>
+        </select>
         <button className="btn-primary" onClick={() => setCreating(true)}>
           <Plus className="h-5 w-5" /> Novo {label}
         </button>
@@ -90,7 +150,7 @@ function PeopleManager({ type }: { type: PersonType }) {
         <div className="grid h-32 place-items-center text-slate-500">Carregando...</div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {data?.items.map((p) => (
+          {sortedItems.map((p) => (
             <div key={p.id} className="card-hover flex flex-col">
               <div className="mb-1 flex items-start justify-between gap-2">
                 <div>
@@ -116,10 +176,10 @@ function PeopleManager({ type }: { type: PersonType }) {
                   </button>
                 </div>
               </div>
-              {p.document && <div className="text-xs text-slate-400">{p.document}</div>}
+              {p.document && <div className="text-xs text-slate-400">{maskCpfCnpj(p.document)}</div>}
               {p.phone && (
                 <div className="mt-1 flex items-center gap-1 text-sm text-slate-500">
-                  <Phone className="h-3.5 w-3.5" /> {p.phone}
+                  <Phone className="h-3.5 w-3.5" /> {maskPhone(p.phone)}
                 </div>
               )}
               {(p.city || p.street) && (
@@ -130,7 +190,7 @@ function PeopleManager({ type }: { type: PersonType }) {
               )}
             </div>
           ))}
-          {data?.items.length === 0 && (
+          {sortedItems.length === 0 && (
             <p className="col-span-full py-10 text-center text-slate-400">
               Nenhum {label} cadastrado.
             </p>
