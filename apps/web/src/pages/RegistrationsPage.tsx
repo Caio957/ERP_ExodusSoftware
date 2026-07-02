@@ -229,8 +229,11 @@ function PersonForm({
         ...f,
         name: f.name || data.razao_social || '',
         email: f.email || data.email || '',
-        phone: f.phone || data.ddd_telefone_1 || '',
-        zipCode: data.cep || f.zipCode,
+        // BrasilAPI retorna telefone/CEP crus (sem máscara) — o onChange não
+        // dispara em preenchimento programático, então aplicamos as mesmas
+        // funções de máscara aqui para o dado "pular" para a tela já formatado.
+        phone: f.phone || (data.ddd_telefone_1 ? maskPhone(data.ddd_telefone_1) : ''),
+        zipCode: data.cep ? maskCep(data.cep) : f.zipCode,
         street: data.logradouro || f.street,
         number: data.numero || f.number,
         district: data.bairro || f.district,
