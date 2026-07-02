@@ -3,10 +3,31 @@ import { z } from 'zod';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { createPersonSchema, updatePersonSchema, paginationQuery, PersonType } from '@exodus/shared';
 import { prisma } from '../lib/prisma.js';
-import { BusinessError, NotFoundError } from '../lib/errors.js';
+import { AppError, BusinessError, NotFoundError } from '../lib/errors.js';
 
 export async function personRoutes(app: FastifyInstance) {
   const r = app.withTypeProvider<ZodTypeProvider>();
+
+  // Proxy da consulta de CNPJ (ReceitaWS): o browser é bloqueado por CORS ao
+  // chamar a ReceitaWS diretamente (sem Access-Control-Allow-Origin); um
+  // servidor Node não sofre essa restrição, então o front consulta esta rota
+  // interna em vez da ReceitaWS direto.
+  r.get(
+    '/cnpj/:cnpj',
+    { preHandler: app.authenticate, schema: { params: z.object({ cnpj: z.string().min(1) }) } },
+    async (req) => {
+      const res = await fetch(`https://receitaws.com.br/v1/cnpj/${req.params.cnpj}`);
+      // Payload externo e livre (não controlamos o contrato da ReceitaWS).
+      const data = (await res.json()) as Record<string, unknown>;
+      // A ReceitaWS responde 200 mesmo em erro (CNPJ inválido, rate limit
+      // etc.), sinalizando a falha só pelo campo status.
+      if (data.status === 'ERROR') {
+        const message = typeof data.message === 'string' ? data.message : 'Erro na consulta do CNPJ';
+        throw new AppError(400, message, 'CNPJ_LOOKUP_ERROR');
+      }
+      return data;
+    },
+  );
 
   // GET /api/persons?type=SUPPLIER&search=...
   r.get(

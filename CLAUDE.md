@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-06-26
+- **Última atualização:** 2026-07-01
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -23,7 +23,7 @@
   manualmente via PR no GitHub** (o merge dispara o auto-deploy no Railway). A IA
   trabalha sempre na branch ativa indicada — nunca commita direto na `main` sem
   instrução explícita. Branch ativa no momento: **`feature/tela-produtos-caio`**
-  (commits `c8ba129`→`092c60b` — ainda não mesclada; ver §11).
+  (commits `c8ba129`→`052b010` — ainda não mesclada; ver §11).
 - **Fase atual:** Sistema em **produção no Railway** (projeto `exodus-software`,
   conta helomramos40@gmail.com). Banco PostgreSQL gerenciado, seed do ADMIN executado,
   interface redesenhada (design system "beauty"). **Todo o backlog de funcionalidades
@@ -154,6 +154,15 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   (somado por `SalePayment` em dinheiro); **`/cash/registers`** (histórico),
   **`/cash/:id/movements`** (timeline vendas+manuais), **`PUT/DELETE /cash/transactions/:id`**
   (só com caixa aberto); **`/summary`** por forma — **só ADMIN**.
+  **`GET /cash/report`** (Relatório Periódico/Extrato Consolidado): recebe
+  `startDate`/`endDate`, RBAC igual ao `/registers` (ADMIN vê a loja toda,
+  operador só os próprios caixas); fronteiras de data ancoradas em **UTC-3
+  explícito** (`T00:00:00.000-03:00` / `T23:59:59.999-03:00` — servidor roda em
+  UTC, então `setUTCHours`/`setHours` puros cortavam movimentos noturnos locais);
+  inclui caixas `OPEN` e `CLOSED` (sem filtro de status); `summary.cashInDrawer`
+  = `totalInitialCash + vendas em dinheiro + totalSupply - totalBleed -
+  totalCollected` (`totalCollected` = soma do `finalCash` dos caixas já
+  fechados — dinheiro recolhido sai da gaveta).
 - ✅ **Financeiro**: listar com **filtros** (tipo, status, pessoa, período, busca);
   `/installments` (N parcelas, fornecedor/cliente obrigatório); **`/:id/settle`** (baixa
   parcial/total, grava em `AccountSettlement`) e **`/:id/reverse`** (estorno da última
@@ -229,7 +238,22 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   via **modal próprio com observação** (sem `window.prompt`); **timeline de
   movimentações** unindo vendas (leitura) + sangrias/suprimentos (editáveis/excluíveis
   só com o caixa aberto); **resumo de recebimentos por forma** (ADMIN); **histórico de
-  caixas de outros dias** com detalhe e resumo; fechamento por modal.
+  caixas de outros dias** com detalhe e resumo; fechamento por modal. Todos os
+  modais (Sangria/Suprimento/Fechamento) via **React Portal**
+  (`createPortal(..., document.body)`) — mesmo padrão da tela de Produtos, imune
+  ao containing block do `animate-fade-in`. **Impressão de resumo/fechamento**
+  (`CashPrintButton` + `CashReceipt.tsx`): motor térmico dual reaproveitado do
+  PDV — mede a altura real do recibo (`scrollHeight + 15px` de sobra para a
+  guilhotina) e injeta `@page` dinâmico; usa `createPortal` com `id`s dedicados
+  (`thermal-print-root`/`a4-print-root`) e `body > *:not(#id) { display:none }`
+  no CSS de impressão para eliminar páginas fantasma (o app shell some
+  fisicamente do DOM impresso em vez de só ficar `visibility:hidden` ocupando
+  espaço); `.thermal-receipt` mantém `position:absolute` no `index.css` (raiz
+  do papel 80mm ancorada no topo, ignorando o "lixo" invisível abaixo).
+  **Terceira aba "Relatório"** (`PeriodicReport`): seletor de período (padrão =
+  mês corrente), cards de resumo (Total de vendas, Dinheiro em gaveta,
+  Suprimentos, Sangrias, Fechamentos/Recolhido) e timeline consolidada de
+  todos os caixas do período (ícone + operador + valor com sinal).
 - ✅ **Compras**: sugestão de compra; importação de XML por **upload de arquivo .xml**;
   **compra manual multi-produto** (vários itens, observação, **nº de documento
   sequencial**, **novo preço de venda por item** mostrando o atual, **lote/validade por
@@ -787,6 +811,70 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
   - **`ProductsPage.tsx`**: estados `orderBy`/`orderDir` no `queryKey` e na URL;
     dois `<select className="input">` no painel de filtros (grid `lg:grid-cols-5`).
   `npm run typecheck` → **0 erros**.
+- ✅ **Onda 2026-06-30a — Fix modais de Caixa (React Portal)** (2026-06-30):
+  Branch `feature/tela-produtos-caio`. Commit `e05e95c`.
+  - **`CashPage.tsx`**: componente `Modal` compartilhado (usado por `TransactionModal`
+    e `CloseModal` — Sangria/Suprimento/Fechamento) envolvido em
+    `createPortal(..., document.body)`. Mesma causa raiz da tela de Produtos: o
+    `animate-fade-in` do `Layout.tsx` cria um containing block que capturava o
+    `position: fixed` do backdrop, cortando-o pelo container da lista. Um único
+    ponto de correção resolveu os três modais de uma vez.
+  `npm run typecheck` → **0 erros**.
+- ✅ **Onda 2026-06-30b — Impressão do Relatório de Fechamento de Caixa** (2026-06-30):
+  Branch `feature/tela-produtos-caio`. 4 commits (`e8cfa35`→`1c3d25a`), ciclo
+  iterativo de correção guiado por testes reais de impressão do Comandante.
+  - **`e8cfa35`**: componente `CashReceipt.tsx` (mesma estética do `ThermalReceipt`)
+    + `CashPrintButton` em `CashPage.tsx` (reutilizado no caixa aberto e no
+    histórico), reaproveitando o Dynamic Measurement Engine do PDV
+    (`scrollHeight`/`offsetHeight` + `@page` dinâmico).
+  - **`ca5ebde`**: refinamento de centralização/corte — `w-[80mm] max-w-[80mm]`
+    fixo nos componentes de recibo, `scrollHeight + 15px` de sobra para a
+    guilhotina, `#print-end-anchor`; tentativa de centralizar via
+    `body { display:flex; justify-content:center }` — **quebrou** por conflitar
+    com `.thermal-receipt { position:absolute }` do `index.css`.
+  - **`0cb8f1b`**: **revertido** — Chrome travava (crash no print preview) ao
+    combinar `overflow:hidden` forçado em `html,body` com `@page` de tamanho
+    customizado; `.thermal-receipt` restaurado a `position:absolute !important`
+    (papel e div têm exatamente 80mm — o absolute ancora no topo ignorando o
+    "lixo" invisível de ancestrais com `visibility:hidden`, que escondem mas
+    mantêm o espaço ocupado).
+  - **`1c3d25a`** (**solução definitiva**): causa raiz do "3 páginas em branco"
+    identificada — o app shell (`#root`) ficava com `visibility:hidden` mas
+    **mantinha a altura física**, forçando o Chrome a criar folhas extras para
+    cobrir essa altura fantasma. Fix: `createPortal(..., document.body)` com
+    `id="thermal-print-root"`/`id="a4-print-root"` dedicados + CSS de impressão
+    `body > *:not(#id) { display: none !important }` — remove fisicamente o
+    resto do app do DOM impresso (não só esconde), eliminando a altura fantasma.
+  `npm run typecheck` + `npm run build` → **0 erros** em todos os commits.
+- ✅ **Onda 2026-06-30c/07-01 — Relatório Periódico de Caixa (Extrato Consolidado)**
+  (2026-06-30 a 2026-07-01): Branch `feature/tela-produtos-caio`. 4 commits
+  (`231db1d`→`052b010`), incluindo 3 correções de regra de negócio pós-validação.
+  - **`231db1d`** (implementação inicial): `GET /api/cash/report` (RBAC igual ao
+    `/registers`); `movements` (timeline unificada vendas+manuais de todos os
+    caixas do período) e `summary` (totais por forma via `SalePayment`,
+    suprimentos, sangrias, `cashInDrawer`). Frontend: terceira aba "Relatório"
+    (`PeriodicReport`), seletor de período (padrão = mês corrente, datas em
+    horário local via `localISODate`), cards de resumo + timeline consolidada.
+  - **`2c28231`** (fix data + fundo inicial): `endDate` cortava à meia-noite
+    (`setHours` em horário **local** sobre um `Date` de meia-noite **UTC**
+    zerava o relatório do dia corrente e "escondia" o caixa aberto — não era
+    filtro de status, a query nunca filtrou por `status`); trocado para
+    `setUTCHours` (correção **incompleta**, ver próximo commit); adicionado
+    `totalInitialCash` (soma do fundo inicial de todos os caixas do período) à
+    equação da gaveta.
+  - **`4a986f0`** (fix definitivo de timezone): `setUTCHours` ainda fechava o
+    período às 23:59:59 **UTC** = 20:59:59 **local** (servidor roda em UTC,
+    loja em UTC-3/Brasília) — uma venda às 23:50 local (gravada como 02:50 UTC
+    do dia seguinte) sumia do relatório. Fix: fronteiras reconstruídas com
+    offset **`-03:00` explícito** (`` `${dateStr}T00:00:00.000-03:00` `` /
+    `` `${dateStr}T23:59:59.999-03:00` ``), imune ao timezone do processo.
+  - **`052b010`** (fix contábil): `cashInDrawer` não debitava o fechamento de
+    caixa — fechar significa recolher o dinheiro físico para o cofre/banco.
+    Adicionado `totalCollected` (soma do `finalCash` dos caixas `CLOSED`);
+    equação final: `totalInitialCash + vendas em dinheiro + totalSupply -
+    totalBleed - totalCollected`. Novo card "Fechamentos (Recolhido)" no
+    frontend para transparência total.
+  `npm run typecheck` + `npm run build` → **0 erros** em todos os commits.
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---

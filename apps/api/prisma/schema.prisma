@@ -84,10 +84,11 @@ model Person {
   id       String  @id @default(uuid())
   code     Int     @unique @default(autoincrement()) // código sequencial único (clientes e fornecedores)
   type     String // 'CLIENT' | 'SUPPLIER'
-  name     String
-  document String? @unique // CPF/CNPJ - opcional p/ balcão
-  email    String?
-  phone    String?
+  name      String
+  tradeName String? // Nome fantasia (PJ) ou apelido (PF)
+  document  String? @unique // CPF/CNPJ - opcional p/ balcão
+  email     String?
+  phone     String?
 
   // Endereço (autocompletado via BrasilAPI no cadastro de fornecedor)
   zipCode  String?

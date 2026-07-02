@@ -1,14 +1,17 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { PersonType } from '@exodus/shared';
-import { Users, Truck, Plus, Pencil, Trash2, X, Search, Phone, MapPin } from 'lucide-react';
+import { Users, Truck, Plus, Pencil, Trash2, X, Search, Phone, MapPin, ArrowUp } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
+import { maskCpfCnpj, maskPhone, maskCep } from '../lib/masks';
 
 interface Person {
   id: string;
   code: number;
   type: string;
   name: string;
+  tradeName: string | null;
   document: string | null;
   email: string | null;
   phone: string | null;
@@ -39,24 +42,92 @@ export function RegistrationsPage() {
       </div>
 
       <PeopleManager type={tab} />
+      <ScrollToTopButton />
     </div>
   );
 }
 
+// ---------------------------------------------------------------------------
+// Botão flutuante "Voltar ao topo" — aparece só depois de rolar a página.
+function ScrollToTopButton() {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setVisible(window.scrollY > 300);
+    window.addEventListener('scroll', onScroll);
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  if (!visible) return null;
+
+  return (
+    <button
+      className="fixed bottom-6 left-6 z-50 grid h-12 w-12 place-items-center rounded-full bg-brand-600 text-white shadow-lg transition hover:bg-brand-700"
+      onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+      title="Voltar ao topo"
+    >
+      <ArrowUp className="h-5 w-5" />
+    </button>
+  );
+}
+
+type SortOption = 'name_asc' | 'name_desc' | 'code_asc' | 'code_desc' | 'city_asc';
+
 function PeopleManager({ type }: { type: PersonType }) {
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState<SortOption>('name_asc');
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Person | null>(null);
 
+  // Busca é filtrada no front (ver filteredItems) para varrer campos que o
+  // backend não indexa na querystring (cidade, telefone) — por isso a lista
+  // completa é buscada uma única vez por tipo, sem depender do termo digitado.
   const { data, isLoading } = useQuery({
-    queryKey: ['persons', type, search],
-    queryFn: () => {
-      const qs = new URLSearchParams({ type, pageSize: '100' });
-      if (search.trim()) qs.set('search', search.trim());
-      return api.get<{ items: Person[] }>(`/api/persons?${qs.toString()}`);
-    },
+    queryKey: ['persons', type],
+    queryFn: () => api.get<{ items: Person[] }>(`/api/persons?type=${type}&pageSize=100`),
   });
+
+  // Motor de busca "onisciente": varre nome, nome fantasia/apelido,
+  // documento (com e sem máscara), cidade e telefone.
+  const filteredItems = useMemo(() => {
+    const items = data?.items ?? [];
+    const term = search.trim().toLowerCase();
+    if (!term) return items;
+    const termDigits = term.replace(/\D/g, '');
+    return items.filter((p) => {
+      if (p.name.toLowerCase().includes(term)) return true;
+      if (p.tradeName && p.tradeName.toLowerCase().includes(term)) return true;
+      if (p.document) {
+        if (p.document.toLowerCase().includes(term)) return true;
+        if (termDigits && p.document.replace(/\D/g, '').includes(termDigits)) return true;
+      }
+      if (p.city && p.city.toLowerCase().includes(term)) return true;
+      if (p.phone && p.phone.toLowerCase().includes(term)) return true;
+      return false;
+    });
+  }, [data, search]);
+
+  // Ordenação aplicada no front sobre o resultado já filtrado pela busca.
+  const sortedItems = useMemo(() => {
+    const items = filteredItems;
+    const byName = (a: Person, b: Person) => a.name.localeCompare(b.name, 'pt-BR');
+    const byCity = (a: Person, b: Person) => (a.city ?? '').localeCompare(b.city ?? '', 'pt-BR');
+    switch (sortBy) {
+      case 'name_asc':
+        return [...items].sort(byName);
+      case 'name_desc':
+        return [...items].sort((a, b) => byName(b, a));
+      case 'code_asc':
+        return [...items].sort((a, b) => a.code - b.code);
+      case 'code_desc':
+        return [...items].sort((a, b) => b.code - a.code);
+      case 'city_asc':
+        return [...items].sort(byCity);
+      default:
+        return items;
+    }
+  }, [filteredItems, sortBy]);
 
   const remove = useMutation({
     mutationFn: (id: string) => api.del(`/api/persons/${id}`),
@@ -68,16 +139,27 @@ function PeopleManager({ type }: { type: PersonType }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row">
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
           <input
             className="input pl-12"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={`Buscar ${label} por nome ou documento...`}
+            placeholder="Buscar por nome, fantasia, documento, cidade ou telefone..."
           />
         </div>
+        <select
+          className="input sm:w-56"
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as SortOption)}
+        >
+          <option value="name_asc">Nome (A-Z)</option>
+          <option value="name_desc">Nome (Z-A)</option>
+          <option value="code_asc">Código (Menor-Maior)</option>
+          <option value="code_desc">Código (Maior-Menor)</option>
+          <option value="city_asc">Cidade</option>
+        </select>
         <button className="btn-primary" onClick={() => setCreating(true)}>
           <Plus className="h-5 w-5" /> Novo {label}
         </button>
@@ -87,7 +169,7 @@ function PeopleManager({ type }: { type: PersonType }) {
         <div className="grid h-32 place-items-center text-slate-500">Carregando...</div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {data?.items.map((p) => (
+          {sortedItems.map((p) => (
             <div key={p.id} className="card-hover flex flex-col">
               <div className="mb-1 flex items-start justify-between gap-2">
                 <div>
@@ -113,10 +195,10 @@ function PeopleManager({ type }: { type: PersonType }) {
                   </button>
                 </div>
               </div>
-              {p.document && <div className="text-xs text-slate-400">{p.document}</div>}
+              {p.document && <div className="text-xs text-slate-400">{maskCpfCnpj(p.document)}</div>}
               {p.phone && (
                 <div className="mt-1 flex items-center gap-1 text-sm text-slate-500">
-                  <Phone className="h-3.5 w-3.5" /> {p.phone}
+                  <Phone className="h-3.5 w-3.5" /> {maskPhone(p.phone)}
                 </div>
               )}
               {(p.city || p.street) && (
@@ -127,7 +209,7 @@ function PeopleManager({ type }: { type: PersonType }) {
               )}
             </div>
           ))}
-          {data?.items.length === 0 && (
+          {sortedItems.length === 0 && (
             <p className="col-span-full py-10 text-center text-slate-400">
               Nenhum {label} cadastrado.
             </p>
@@ -167,6 +249,7 @@ function PersonForm({
 }) {
   const [form, setForm] = useState({
     name: person?.name ?? '',
+    tradeName: person?.tradeName ?? '',
     document: person?.document ?? '',
     phone: person?.phone ?? '',
     email: person?.email ?? '',
@@ -179,13 +262,20 @@ function PersonForm({
   });
   const label = type === 'CLIENT' ? 'cliente' : 'fornecedor';
   const [lookingUp, setLookingUp] = useState(false);
+  // PJ (CNPJ, >11 dígitos) usa Razão Social/Nome Fantasia; PF (CPF, ≤11) usa
+  // Nome Completo/Apelido. Recalculado a cada tecla no campo de documento.
+  const isPJ = form.document.replace(/\D/g, '').length > 11;
 
   const save = useMutation({
     mutationFn: () => {
       const payload = {
         type,
         name: form.name.trim(),
-        document: form.document.trim() || undefined,
+        tradeName: form.tradeName.trim() || undefined,
+        // Documento sempre limpo antes de enviar (o schema compartilhado já
+        // transforma via onlyDigits, mas a limpeza explícita aqui é defesa em
+        // profundidade — CPF/CNPJ é o único campo com validação de formato).
+        document: form.document.replace(/\D/g, '') || undefined,
         phone: form.phone.trim() || undefined,
         email: form.email.trim() || undefined,
         zipCode: form.zipCode.trim() || undefined,
@@ -198,11 +288,14 @@ function PersonForm({
       return person ? api.put(`/api/persons/${person.id}`, payload) : api.post('/api/persons', payload);
     },
     onSuccess: onSaved,
-    onError: (e) => window.alert(e instanceof ApiError ? e.message : 'Falha ao salvar'),
   });
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  // Máscaras em tempo real (CPF/CNPJ, telefone, CEP) — sem dependências externas.
+  const setMasked = (k: 'document' | 'phone' | 'zipCode', mask: (v: string) => string) =>
+    (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: mask(e.target.value) }));
 
   const handleCnpjLookup = async () => {
     const cleanDoc = form.document.replace(/\D/g, '');
@@ -213,16 +306,23 @@ function PersonForm({
     
     setLookingUp(true);
     try {
-      const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cleanDoc}`);
-      if (!res.ok) throw new Error('CNPJ não encontrado na BrasilAPI.');
-      const data = await res.json();
-      
+      // A ReceitaWS bloqueia chamadas via fetch do browser por CORS (sem
+      // Access-Control-Allow-Origin); a consulta agora passa pelo nosso
+      // backend (GET /api/persons/cnpj/:cnpj), que faz o proxy server-side
+      // (sem essa restrição) e já retorna o erro pronto quando a ReceitaWS
+      // reporta status "ERROR" (CNPJ inválido, rate limit etc.).
+      const data = await api.get<any>(`/api/persons/cnpj/${cleanDoc}`);
+
       setForm(f => ({
         ...f,
-        name: f.name || data.razao_social || '',
-        email: f.email || data.email || '',
-        phone: f.phone || data.ddd_telefone_1 || '',
-        zipCode: data.cep || f.zipCode,
+        name: f.name || data.nome || '',
+        tradeName: data.fantasia || f.tradeName,
+        email: data.email || f.email,
+        // ReceitaWS retorna telefone/CEP crus (sem máscara) — o onChange não
+        // dispara em preenchimento programático, então aplicamos as mesmas
+        // funções de máscara aqui para o dado "pular" para a tela já formatado.
+        phone: f.phone || (data.telefone ? maskPhone(data.telefone) : ''),
+        zipCode: data.cep ? maskCep(data.cep) : f.zipCode,
         street: data.logradouro || f.street,
         number: data.numero || f.number,
         district: data.bairro || f.district,
@@ -263,59 +363,98 @@ function PersonForm({
     }
   };
 
-  return (
+  const Icon = type === 'CLIENT' ? Users : Truck;
+  const subtitle =
+    type === 'CLIENT'
+      ? 'Cadastre os dados pessoais e endereço.'
+      : 'Cadastre os dados da empresa parceira.';
+
+  return createPortal(
     <div className="modal-overlay">
-      <div className="modal-sheet sm:max-w-xl">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-display text-lg font-bold">
-            {person ? `Editar ${label}` : `Novo ${label}`}
-          </h2>
-          <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
+      <form
+        className="modal-sheet sm:max-w-2xl flex flex-col overflow-hidden !p-0"
+        onSubmit={(e) => { e.preventDefault(); save.mutate(); }}
+      >
+        {/* Cabeçalho fixo */}
+        <div className="shrink-0 flex items-center justify-between p-6 pb-4">
+          <div className="flex items-center gap-3">
+            <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-100 text-brand-600">
+              <Icon className="h-6 w-6" />
+            </span>
+            <div>
+              <h2 className="font-display text-lg font-bold">
+                {person ? `Editar ${label}` : `Novo ${label}`}
+              </h2>
+              <p className="text-sm text-slate-500">{subtitle}</p>
+            </div>
+          </div>
+          <button type="button" className="text-slate-400 hover:text-slate-700" onClick={onClose}>
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Nome" required className="col-span-2" value={form.name} onChange={set('name')} />
-          <Field 
-            label="CPF / CNPJ" 
-            value={form.document} 
-            onChange={set('document')} 
-            actionIcon={<Search className="h-4 w-4" />}
-            onAction={handleCnpjLookup}
-            actionLoading={lookingUp}
-          />
-          <Field label="Telefone" value={form.phone} onChange={set('phone')} />
-          <Field label="E-mail" className="col-span-2" value={form.email} onChange={set('email')} />
-          <Field 
-            label="CEP" 
-            value={form.zipCode} 
-            onChange={set('zipCode')} 
-            actionIcon={<Search className="h-4 w-4" />}
-            onAction={handleCepLookup}
-            actionLoading={lookingUp}
-          />
-          <Field label="Cidade" value={form.city} onChange={set('city')} />
-          <Field label="Rua" className="col-span-2" value={form.street} onChange={set('street')} />
-          <Field label="Número" value={form.number} onChange={set('number')} />
-          <Field label="Bairro" value={form.district} onChange={set('district')} />
-          <Field label="UF" value={form.state} onChange={set('state')} maxLength={2} />
+        {/* Corpo com scroll interno — min-h-0 é obrigatório para o flexbox não estourar o wrapper */}
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field
+              label={isPJ ? 'Razão Social' : 'Nome Completo'}
+              required
+              value={form.name}
+              onChange={set('name')}
+            />
+            <Field
+              label={isPJ ? 'Nome Fantasia' : 'Apelido'}
+              value={form.tradeName}
+              onChange={set('tradeName')}
+            />
+            <Field
+              label="CPF / CNPJ"
+              value={form.document}
+              onChange={setMasked('document', maskCpfCnpj)}
+              actionIcon={<Search className="h-4 w-4" />}
+              onAction={handleCnpjLookup}
+              actionLoading={lookingUp}
+            />
+            <Field label="Telefone" value={form.phone} onChange={setMasked('phone', maskPhone)} />
+            <Field label="E-mail" className="sm:col-span-2" value={form.email} onChange={set('email')} />
+            <Field
+              label="CEP"
+              value={form.zipCode}
+              onChange={setMasked('zipCode', maskCep)}
+              actionIcon={<Search className="h-4 w-4" />}
+              onAction={handleCepLookup}
+              actionLoading={lookingUp}
+            />
+            <Field label="Cidade" value={form.city} onChange={set('city')} />
+            <Field label="Rua" className="sm:col-span-2" value={form.street} onChange={set('street')} />
+            <Field label="Número" value={form.number} onChange={set('number')} />
+            <Field label="Bairro" value={form.district} onChange={set('district')} />
+            <Field label="UF" value={form.state} onChange={set('state')} maxLength={2} />
+          </div>
+
+          {save.error instanceof ApiError && (
+            <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              {save.error.message}
+            </div>
+          )}
         </div>
 
-        <div className="mt-5 flex justify-end gap-2">
-          <button className="btn-ghost" onClick={onClose}>
+        {/* Rodapé fixo */}
+        <div className="shrink-0 flex justify-end gap-2 border-t border-slate-100 p-6 pt-4">
+          <button type="button" className="btn-ghost" onClick={onClose}>
             Cancelar
           </button>
           <button
+            type="submit"
             className="btn-primary"
             disabled={save.isPending || form.name.trim().length < 2}
-            onClick={() => save.mutate()}
           >
             {save.isPending ? 'Salvando...' : 'Salvar'}
           </button>
         </div>
-      </div>
-    </div>
+      </form>
+    </div>,
+    document.body,
   );
 }
 
