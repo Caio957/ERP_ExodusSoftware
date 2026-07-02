@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { PersonType } from '@exodus/shared';
 import { Users, Truck, Plus, Pencil, Trash2, X, Search, Phone, MapPin } from 'lucide-react';
@@ -198,7 +199,6 @@ function PersonForm({
       return person ? api.put(`/api/persons/${person.id}`, payload) : api.post('/api/persons', payload);
     },
     onSuccess: onSaved,
-    onError: (e) => window.alert(e instanceof ApiError ? e.message : 'Falha ao salvar'),
   });
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -263,59 +263,88 @@ function PersonForm({
     }
   };
 
-  return (
+  const Icon = type === 'CLIENT' ? Users : Truck;
+  const subtitle =
+    type === 'CLIENT'
+      ? 'Cadastre os dados pessoais e endereço.'
+      : 'Cadastre os dados da empresa parceira.';
+
+  return createPortal(
     <div className="modal-overlay">
-      <div className="modal-sheet sm:max-w-xl">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-display text-lg font-bold">
-            {person ? `Editar ${label}` : `Novo ${label}`}
-          </h2>
-          <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
+      <form
+        className="modal-sheet sm:max-w-2xl flex flex-col overflow-hidden !p-0"
+        onSubmit={(e) => { e.preventDefault(); save.mutate(); }}
+      >
+        {/* Cabeçalho fixo */}
+        <div className="shrink-0 flex items-center justify-between p-6 pb-4">
+          <div className="flex items-center gap-3">
+            <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-100 text-brand-600">
+              <Icon className="h-6 w-6" />
+            </span>
+            <div>
+              <h2 className="font-display text-lg font-bold">
+                {person ? `Editar ${label}` : `Novo ${label}`}
+              </h2>
+              <p className="text-sm text-slate-500">{subtitle}</p>
+            </div>
+          </div>
+          <button type="button" className="text-slate-400 hover:text-slate-700" onClick={onClose}>
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Nome" required className="col-span-2" value={form.name} onChange={set('name')} />
-          <Field 
-            label="CPF / CNPJ" 
-            value={form.document} 
-            onChange={set('document')} 
-            actionIcon={<Search className="h-4 w-4" />}
-            onAction={handleCnpjLookup}
-            actionLoading={lookingUp}
-          />
-          <Field label="Telefone" value={form.phone} onChange={set('phone')} />
-          <Field label="E-mail" className="col-span-2" value={form.email} onChange={set('email')} />
-          <Field 
-            label="CEP" 
-            value={form.zipCode} 
-            onChange={set('zipCode')} 
-            actionIcon={<Search className="h-4 w-4" />}
-            onAction={handleCepLookup}
-            actionLoading={lookingUp}
-          />
-          <Field label="Cidade" value={form.city} onChange={set('city')} />
-          <Field label="Rua" className="col-span-2" value={form.street} onChange={set('street')} />
-          <Field label="Número" value={form.number} onChange={set('number')} />
-          <Field label="Bairro" value={form.district} onChange={set('district')} />
-          <Field label="UF" value={form.state} onChange={set('state')} maxLength={2} />
+        {/* Corpo com scroll interno — min-h-0 é obrigatório para o flexbox não estourar o wrapper */}
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Nome" required className="sm:col-span-2" value={form.name} onChange={set('name')} />
+            <Field
+              label="CPF / CNPJ"
+              value={form.document}
+              onChange={set('document')}
+              actionIcon={<Search className="h-4 w-4" />}
+              onAction={handleCnpjLookup}
+              actionLoading={lookingUp}
+            />
+            <Field label="Telefone" value={form.phone} onChange={set('phone')} />
+            <Field label="E-mail" className="sm:col-span-2" value={form.email} onChange={set('email')} />
+            <Field
+              label="CEP"
+              value={form.zipCode}
+              onChange={set('zipCode')}
+              actionIcon={<Search className="h-4 w-4" />}
+              onAction={handleCepLookup}
+              actionLoading={lookingUp}
+            />
+            <Field label="Cidade" value={form.city} onChange={set('city')} />
+            <Field label="Rua" className="sm:col-span-2" value={form.street} onChange={set('street')} />
+            <Field label="Número" value={form.number} onChange={set('number')} />
+            <Field label="Bairro" value={form.district} onChange={set('district')} />
+            <Field label="UF" value={form.state} onChange={set('state')} maxLength={2} />
+          </div>
+
+          {save.error instanceof ApiError && (
+            <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              {save.error.message}
+            </div>
+          )}
         </div>
 
-        <div className="mt-5 flex justify-end gap-2">
-          <button className="btn-ghost" onClick={onClose}>
+        {/* Rodapé fixo */}
+        <div className="shrink-0 flex justify-end gap-2 border-t border-slate-100 p-6 pt-4">
+          <button type="button" className="btn-ghost" onClick={onClose}>
             Cancelar
           </button>
           <button
+            type="submit"
             className="btn-primary"
             disabled={save.isPending || form.name.trim().length < 2}
-            onClick={() => save.mutate()}
           >
             {save.isPending ? 'Salvando...' : 'Salvar'}
           </button>
         </div>
-      </div>
-    </div>
+      </form>
+    </div>,
+    document.body,
   );
 }
 
