@@ -227,15 +227,12 @@ function PersonForm({
     
     setLookingUp(true);
     try {
-      // BrasilAPI sanitiza/bloqueia o campo email por proteção anti-spam
-      // (sempre retorna null) — trocado para a ReceitaWS, que traz o payload
-      // completo incluindo e-mail.
-      const res = await fetch(`https://receitaws.com.br/v1/cnpj/${cleanDoc}`);
-      if (!res.ok) throw new Error('CNPJ não encontrado na ReceitaWS.');
-      const data = await res.json();
-      // A ReceitaWS responde 200 mesmo em erro (CNPJ inválido, rate limit
-      // etc.), sinalizando a falha só pelo campo status.
-      if (data.status === 'ERROR') throw new Error(data.message || 'Erro na consulta do CNPJ');
+      // A ReceitaWS bloqueia chamadas via fetch do browser por CORS (sem
+      // Access-Control-Allow-Origin); a consulta agora passa pelo nosso
+      // backend (GET /api/persons/cnpj/:cnpj), que faz o proxy server-side
+      // (sem essa restrição) e já retorna o erro pronto quando a ReceitaWS
+      // reporta status "ERROR" (CNPJ inválido, rate limit etc.).
+      const data = await api.get<any>(`/api/persons/cnpj/${cleanDoc}`);
 
       setForm(f => ({
         ...f,
