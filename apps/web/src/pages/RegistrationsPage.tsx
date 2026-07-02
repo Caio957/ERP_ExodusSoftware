@@ -80,18 +80,37 @@ function PeopleManager({ type }: { type: PersonType }) {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Person | null>(null);
 
+  // Busca é filtrada no front (ver filteredItems) para varrer campos que o
+  // backend não indexa na querystring (cidade, telefone) — por isso a lista
+  // completa é buscada uma única vez por tipo, sem depender do termo digitado.
   const { data, isLoading } = useQuery({
-    queryKey: ['persons', type, search],
-    queryFn: () => {
-      const qs = new URLSearchParams({ type, pageSize: '100' });
-      if (search.trim()) qs.set('search', search.trim());
-      return api.get<{ items: Person[] }>(`/api/persons?${qs.toString()}`);
-    },
+    queryKey: ['persons', type],
+    queryFn: () => api.get<{ items: Person[] }>(`/api/persons?type=${type}&pageSize=100`),
   });
+
+  // Motor de busca "onisciente": varre nome, nome fantasia/apelido,
+  // documento (com e sem máscara), cidade e telefone.
+  const filteredItems = useMemo(() => {
+    const items = data?.items ?? [];
+    const term = search.trim().toLowerCase();
+    if (!term) return items;
+    const termDigits = term.replace(/\D/g, '');
+    return items.filter((p) => {
+      if (p.name.toLowerCase().includes(term)) return true;
+      if (p.tradeName && p.tradeName.toLowerCase().includes(term)) return true;
+      if (p.document) {
+        if (p.document.toLowerCase().includes(term)) return true;
+        if (termDigits && p.document.replace(/\D/g, '').includes(termDigits)) return true;
+      }
+      if (p.city && p.city.toLowerCase().includes(term)) return true;
+      if (p.phone && p.phone.toLowerCase().includes(term)) return true;
+      return false;
+    });
+  }, [data, search]);
 
   // Ordenação aplicada no front sobre o resultado já filtrado pela busca.
   const sortedItems = useMemo(() => {
-    const items = data?.items ?? [];
+    const items = filteredItems;
     const byName = (a: Person, b: Person) => a.name.localeCompare(b.name, 'pt-BR');
     const byCity = (a: Person, b: Person) => (a.city ?? '').localeCompare(b.city ?? '', 'pt-BR');
     switch (sortBy) {
@@ -108,7 +127,7 @@ function PeopleManager({ type }: { type: PersonType }) {
       default:
         return items;
     }
-  }, [data, sortBy]);
+  }, [filteredItems, sortBy]);
 
   const remove = useMutation({
     mutationFn: (id: string) => api.del(`/api/persons/${id}`),
@@ -127,7 +146,7 @@ function PeopleManager({ type }: { type: PersonType }) {
             className="input pl-12"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={`Buscar ${label} por nome ou documento...`}
+            placeholder="Buscar por nome, fantasia, documento, cidade ou telefone..."
           />
         </div>
         <select
