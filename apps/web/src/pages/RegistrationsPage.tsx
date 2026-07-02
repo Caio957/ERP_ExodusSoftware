@@ -11,6 +11,7 @@ interface Person {
   code: number;
   type: string;
   name: string;
+  tradeName: string | null;
   document: string | null;
   email: string | null;
   phone: string | null;
@@ -169,6 +170,7 @@ function PersonForm({
 }) {
   const [form, setForm] = useState({
     name: person?.name ?? '',
+    tradeName: person?.tradeName ?? '',
     document: person?.document ?? '',
     phone: person?.phone ?? '',
     email: person?.email ?? '',
@@ -181,12 +183,16 @@ function PersonForm({
   });
   const label = type === 'CLIENT' ? 'cliente' : 'fornecedor';
   const [lookingUp, setLookingUp] = useState(false);
+  // PJ (CNPJ, >11 dígitos) usa Razão Social/Nome Fantasia; PF (CPF, ≤11) usa
+  // Nome Completo/Apelido. Recalculado a cada tecla no campo de documento.
+  const isPJ = form.document.replace(/\D/g, '').length > 11;
 
   const save = useMutation({
     mutationFn: () => {
       const payload = {
         type,
         name: form.name.trim(),
+        tradeName: form.tradeName.trim() || undefined,
         // Documento sempre limpo antes de enviar (o schema compartilhado já
         // transforma via onlyDigits, mas a limpeza explícita aqui é defesa em
         // profundidade — CPF/CNPJ é o único campo com validação de formato).
@@ -228,7 +234,13 @@ function PersonForm({
       setForm(f => ({
         ...f,
         name: f.name || data.razao_social || '',
-        email: f.email || data.email || '',
+        tradeName: data.nome_fantasia || f.tradeName,
+        // Sobrescreve com o e-mail da API quando presente — antes ficava
+        // preso em '' porque `f.email || data.email` nunca reavalia o lado
+        // direito quando o estado local já é uma string vazia truthy-falsy
+        // (string vazia é falsy, então na prática funcionava só quando
+        // f.email era vazio; a ordem correta prioriza o dado fresco da API).
+        email: data.email || f.email,
         // BrasilAPI retorna telefone/CEP crus (sem máscara) — o onChange não
         // dispara em preenchimento programático, então aplicamos as mesmas
         // funções de máscara aqui para o dado "pular" para a tela já formatado.
@@ -307,7 +319,17 @@ function PersonForm({
         {/* Corpo com scroll interno — min-h-0 é obrigatório para o flexbox não estourar o wrapper */}
         <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Nome" required className="sm:col-span-2" value={form.name} onChange={set('name')} />
+            <Field
+              label={isPJ ? 'Razão Social' : 'Nome Completo'}
+              required
+              value={form.name}
+              onChange={set('name')}
+            />
+            <Field
+              label={isPJ ? 'Nome Fantasia' : 'Apelido'}
+              value={form.tradeName}
+              onChange={set('tradeName')}
+            />
             <Field
               label="CPF / CNPJ"
               value={form.document}

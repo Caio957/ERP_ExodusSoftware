@@ -5,6 +5,8 @@ import { document } from './common.js';
 export const createPersonSchema = z.object({
   type: PersonType,
   name: z.string().trim().min(2, 'Razão social / nome obrigatório'),
+  /** Nome fantasia (PJ) ou apelido (PF) — opcional. */
+  tradeName: z.string().trim().optional(),
   /**
    * Documento é opcional: clientes de balcão (walk-in) frequentemente não
    * informam CPF. Quando presente, deve ser CPF/CNPJ válido. A unicidade é
