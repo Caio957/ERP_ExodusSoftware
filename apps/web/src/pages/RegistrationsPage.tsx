@@ -227,24 +227,25 @@ function PersonForm({
     
     setLookingUp(true);
     try {
-      const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cleanDoc}`);
-      if (!res.ok) throw new Error('CNPJ não encontrado na BrasilAPI.');
+      // BrasilAPI sanitiza/bloqueia o campo email por proteção anti-spam
+      // (sempre retorna null) — trocado para a ReceitaWS, que traz o payload
+      // completo incluindo e-mail.
+      const res = await fetch(`https://receitaws.com.br/v1/cnpj/${cleanDoc}`);
+      if (!res.ok) throw new Error('CNPJ não encontrado na ReceitaWS.');
       const data = await res.json();
-      
+      // A ReceitaWS responde 200 mesmo em erro (CNPJ inválido, rate limit
+      // etc.), sinalizando a falha só pelo campo status.
+      if (data.status === 'ERROR') throw new Error(data.message || 'Erro na consulta do CNPJ');
+
       setForm(f => ({
         ...f,
-        name: f.name || data.razao_social || '',
-        tradeName: data.nome_fantasia || f.tradeName,
-        // Sobrescreve com o e-mail da API quando presente — antes ficava
-        // preso em '' porque `f.email || data.email` nunca reavalia o lado
-        // direito quando o estado local já é uma string vazia truthy-falsy
-        // (string vazia é falsy, então na prática funcionava só quando
-        // f.email era vazio; a ordem correta prioriza o dado fresco da API).
+        name: f.name || data.nome || '',
+        tradeName: data.fantasia || f.tradeName,
         email: data.email || f.email,
-        // BrasilAPI retorna telefone/CEP crus (sem máscara) — o onChange não
+        // ReceitaWS retorna telefone/CEP crus (sem máscara) — o onChange não
         // dispara em preenchimento programático, então aplicamos as mesmas
         // funções de máscara aqui para o dado "pular" para a tela já formatado.
-        phone: f.phone || (data.ddd_telefone_1 ? maskPhone(data.ddd_telefone_1) : ''),
+        phone: f.phone || (data.telefone ? maskPhone(data.telefone) : ''),
         zipCode: data.cep ? maskCep(data.cep) : f.zipCode,
         street: data.logradouro || f.street,
         number: data.numero || f.number,
