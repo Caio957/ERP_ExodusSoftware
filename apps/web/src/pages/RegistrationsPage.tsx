@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { PersonType } from '@exodus/shared';
 import { Users, Truck, Plus, Pencil, Trash2, X, Search, Phone, MapPin } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
+import { maskCpfCnpj, maskPhone, maskCep } from '../lib/masks';
 
 interface Person {
   id: string;
@@ -186,7 +187,10 @@ function PersonForm({
       const payload = {
         type,
         name: form.name.trim(),
-        document: form.document.trim() || undefined,
+        // Documento sempre limpo antes de enviar (o schema compartilhado já
+        // transforma via onlyDigits, mas a limpeza explícita aqui é defesa em
+        // profundidade — CPF/CNPJ é o único campo com validação de formato).
+        document: form.document.replace(/\D/g, '') || undefined,
         phone: form.phone.trim() || undefined,
         email: form.email.trim() || undefined,
         zipCode: form.zipCode.trim() || undefined,
@@ -203,6 +207,10 @@ function PersonForm({
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  // Máscaras em tempo real (CPF/CNPJ, telefone, CEP) — sem dependências externas.
+  const setMasked = (k: 'document' | 'phone' | 'zipCode', mask: (v: string) => string) =>
+    (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: mask(e.target.value) }));
 
   const handleCnpjLookup = async () => {
     const cleanDoc = form.document.replace(/\D/g, '');
@@ -300,17 +308,17 @@ function PersonForm({
             <Field
               label="CPF / CNPJ"
               value={form.document}
-              onChange={set('document')}
+              onChange={setMasked('document', maskCpfCnpj)}
               actionIcon={<Search className="h-4 w-4" />}
               onAction={handleCnpjLookup}
               actionLoading={lookingUp}
             />
-            <Field label="Telefone" value={form.phone} onChange={set('phone')} />
+            <Field label="Telefone" value={form.phone} onChange={setMasked('phone', maskPhone)} />
             <Field label="E-mail" className="sm:col-span-2" value={form.email} onChange={set('email')} />
             <Field
               label="CEP"
               value={form.zipCode}
-              onChange={set('zipCode')}
+              onChange={setMasked('zipCode', maskCep)}
               actionIcon={<Search className="h-4 w-4" />}
               onAction={handleCepLookup}
               actionLoading={lookingUp}
