@@ -1,9 +1,9 @@
-# CLAUDE.md — Painel de Progresso do Projeto Exodus Software
+# AGENTS.md — Painel de Progresso do Projeto Exodus Software
 
-> **Para a IA (Claude):** este é o documento-fonte do estado do projeto. **Leia-o
+> **Para a IA (Codex):** este é o documento-fonte do estado do projeto. **Leia-o
 > integralmente antes de qualquer implementação** e **atualize-o ao final de cada
 > entrega** (seções "Estado atual", "Validações" e "Pendências"). Arquivos
-> `CLAUDE.md` são carregados automaticamente como contexto pelo Claude Code.
+> `AGENTS.md` são carregados automaticamente como contexto pelo Codex.
 >
 > **Para o avaliador externo (Gemini):** este documento descreve o que já foi
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
@@ -12,7 +12,7 @@
 - **Última atualização:** 2026-07-03
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
-  o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
+  o código em suas máquinas, então **este AGENTS.md é o registro de onde paramos** —
   mantê-lo fiel a cada entrega é essencial.
 - **Repositório:** https://github.com/Caio957/ERP_ExodusSoftware (branch `main`).
 - **URL de produção:** https://exodus-web-production.up.railway.app
@@ -22,14 +22,27 @@
   commits são empurrados para o GitHub nessas branches; o **merge para `main` é feito
   manualmente via PR no GitHub** (o merge dispara o auto-deploy no Railway). A IA
   trabalha sempre na branch ativa indicada — nunca commita direto na `main` sem
-  instrução explícita. Branch ativa no momento: **`feature/refinamento-vendas`**
-  (commits `82c98f7`→`6508dbf` — ainda não mesclada; ver §11).
-  ✅ **Divergência anterior resolvida (2026-07-03)**: as três branches em
-  paralelo (`feature/tela-produtos-caio`, `feature/estoque-tipo-movimentacao`
-  e `feature/refinamento-cadastros`), incluindo os marcadores de conflito
-  Git não resolvidos que haviam ficado no `CLAUDE.md` da `main`, foram todas
-  reconciliadas e mescladas via PR #5. `main` e `origin/main` estão em
-  sincronia em `2992176`.
+  instrução explícita. Branch ativa no momento: **`feature/refinamento-cadastros`**.
+  ⚠️ **Estado divergente (2026-07-03) — três branches em paralelo**:
+  - `feature/tela-produtos-caio`: **já mesclada na `main`** via PR #3 (`19930a4`)
+    e PR #4 (`a0fe10b`) — módulos Produtos/Caixa/Relatório de Caixa/Cadastros
+    (onda 2026-07-02) inteiros já estão em produção após o próximo deploy.
+  - `feature/estoque-tipo-movimentacao` (Helom): commit `2b42d4b` (busca por
+    Enter + seletor de tipo de movimentação no Acerto de Estoque) — **ainda
+    não mesclada**.
+  - `feature/refinamento-cadastros` (Caio, branch ativa): refinamentos do
+    botão "voltar ao topo" (Dark Glassmorphism, animação drop-down, fix de
+    ancoragem via Portal — ver §11, onda 2026-07-03) — **ainda não mesclada**.
+  - **Conflito pendente**: uma tentativa de merge da branch do Helom direto na
+    `main` (commit `c70ebc6`, "resolve conflito de merge com feature do
+    estoque") **deixou marcadores de conflito Git não resolvidos** no
+    `AGENTS.md` remoto (`<<<<<<<`/`=======`/`>>>>>>>`) na §11. Este documento
+    (nesta branch) já contém a resolução manual correta (ambos os blocos
+    preservados); ao abrir o próximo PR, usar esta versão como referência
+    para resolver o `AGENTS.md` na `main`.
+  - Todas as três branches precisam ser reconciliadas e mescladas via Pull
+    Request para a `main` (as duas ainda não mescladas, mais a correção do
+    `AGENTS.md` da `main`) antes do próximo deploy.
 - **Fase atual:** Sistema em **produção no Railway** (projeto `exodus-software`,
   conta helomramos40@gmail.com). Banco PostgreSQL gerenciado, seed do ADMIN executado,
   interface redesenhada (design system "beauty"). **Todo o backlog de funcionalidades
@@ -73,7 +86,7 @@ ERP_ExodusSoftware/
 ├── railway.json                # config Railway (builder Dockerfile, healthcheck)
 ├── .dockerignore
 ├── tsconfig.base.json          # config TS estrita compartilhada
-├── CLAUDE.md                   # ESTE documento
+├── AGENTS.md                   # ESTE documento
 ├── packages/
 │   └── shared/                 # contratos compartilhados back ↔ front
 │       └── src/
@@ -231,30 +244,11 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   ainda não detalhadas/implementadas — ver §12.12.
 - ✅ **Vendas** (ADMIN, `/vendas`): **NºDOC sequencial** em todas as vendas; consulta
   com coluna de status do financeiro; **botão Visualizar** (ver itens, pagamentos,
-  contas a receber) antes de decidir; **excluir** (estorna estoque + remove
-  financeiro); **excluir/gerar financeiro** (reversível — venda sai/entra no caixa
-  e recebimentos); **imprimir** — cupom térmico aprimorado ou folha A4 estilizada
-  com dados da empresa (escolha na hora). Todos os modais (Visualizar/Imprimir/
-  Editar) via **React Portal** — mesmo padrão ouro de Produtos/Caixa/Cadastros
-  (header com ícone/título+código/subtítulo, corpo com scroll interno, rodapé
-  fixo); os três precisaram ser ejetados individualmente para não haver
-  sobreposição de stacking context entre eles.
-  **Editar venda = Mini-PDV**: modal alargado (`sm:max-w-5xl h-[90dvh]`) em duas
-  colunas — carrinho (cliente + busca de produto + itens com +/−, preço editável,
-  remover) à esquerda, "Resumo da venda" (`sticky`) à direita (desconto,
-  acréscimo, forma de pagamento, parcelas "a prazo", observação, total).
-  **Bloqueada se a venda já tiver financeiro gerado** (`sale.financialGenerated`):
-  botão Editar desabilitado no Visualizar + guarda de segurança dentro do próprio
-  modal de edição — o operador precisa excluir o financeiro manualmente primeiro
-  para ter consciência do impacto no caixa. **Fluxo de finalização maduro**: ao
-  salvar, se a forma de pagamento for Dinheiro, abre a calculadora de troco
-  (`ChangeCalculatorModal`, extraído para `components/` e reaproveitado do PDV);
-  senão, pede confirmação simples antes de disparar a API.
-  **Cliente padrão configurável** (Configurações → Vendas, `GET/PUT
-  /api/settings/sales`): substitui o fallback hardcoded "Balcão" por um
-  `Person` real escolhido pelo ADMIN — pré-selecionado automaticamente no PDV
-  (removível pelo operador) e usado como fallback do `clientId` ao salvar uma
-  edição sem cliente selecionado.
+  contas a receber) antes de decidir; **editar** (itens/qtd/preço/desconto/acréscimo/
+  observação/cliente/pagamento — incluindo **"A prazo" com parcelas**); **excluir**
+  (estorna estoque + remove financeiro); **excluir/gerar financeiro** (reversível —
+  venda sai/entra no caixa e recebimentos); **imprimir** — cupom térmico aprimorado
+  ou folha A4 estilizada com dados da empresa (escolha na hora).
 - ✅ **Produtos**: filtros (marca/grupo/subgrupo) + busca + **ordenação** (Descrição,
   Código, SKU, Preço de venda — crescente/decrescente via selects no painel de filtros);
   editar produto e variantes (asteriscos `*` também no modal Editar); excluir (com
@@ -933,8 +927,7 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
     frontend para transparência total.
   `npm run typecheck` + `npm run build` → **0 erros** em todos os commits.
 - ✅ **Onda 2026-07-02 — Acerto de estoque: busca com Enter + tipo de movimentação** (2026-07-02):
-  Branch `feature/estoque-tipo-movimentacao` (Helom) — **mesclada na `main` via PR #5**
-  (2026-07-03).
+  Branch `feature/estoque-tipo-movimentacao` — **ainda não mesclada na `main`**.
   - **Busca por Enter** (`StockAdjustPage.tsx` — `ProductSearch`): a busca de produto
     deixa de disparar a cada tecla; novo estado `searchTerm` só é setado no `onKeyDown`
     (Enter). Campo vazio + Enter lista todos os produtos (busca vazia já suportada
@@ -950,7 +943,7 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
   `npm run typecheck` → **0 erros**.
 - ✅ **Onda 2026-07-02 — Cadastros: modal padrão ouro, máscaras, campos PF/PJ e
   busca onisciente** (2026-07-02): Branch `feature/tela-produtos-caio`.
-  8 commits (`f4bf849`→`72479ac`) — **mesclados na `main`** via PR #3/#4.
+  8 commits (`f4bf849`→`72479ac`), **ainda não publicados** (ver ⚠️ no topo).
   - **`f4bf849`** (padronização visual): `PersonForm` (`RegistrationsPage.tsx`)
     refeito para reusar a casca exata do modal de Produtos/Caixa —
     `createPortal(..., document.body)`, `<form>` com `modal-sheet ... !p-0`,
@@ -1001,60 +994,24 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
   (ancoragem `absolute` indevida causada pelo `animate-fade-in`) resolvida
   ejetando o botão via `createPortal(..., document.body)`, garantindo
   ancoragem `fixed` perfeita ao viewport. Branch `feature/refinamento-cadastros`
-  (commits `670e9a1`→`a7ac204`) — **mesclada na `main` via PR #5** (2026-07-03).
-  `npm run typecheck` + `npm run build` → **0 erros**.
-- ✅ **Onda 2026-07-03 — Refinamento de Vendas (Padrão Ouro + Mini-PDV + Cliente
-  Padrão)** (2026-07-03): Branch `feature/refinamento-vendas` — **ainda não
-  mesclada na `main`**. 7 commits (`82c98f7`→`6508dbf`).
-  - **`82c98f7`** (padrão ouro): `ViewSaleModal` reestruturado com a casca
-    header/body/footer (`createPortal`, `modal-sheet ... !p-0`) idêntica a
-    Produtos/Caixa/Cadastros; título+data+`FinancialBadge` no header, itens/
-    pagamento/contas a receber no body com scroll interno, ações no footer.
-  - **`e1e7033`** (fix stacking context): `PrintSaleModal` e `EditSaleModal`
-    também ejetados via `createPortal(..., document.body)` — só o
-    `ViewSaleModal` tinha sido corrigido antes, então Imprimir/Editar abertos
-    a partir da Visualização apareciam **atrás** dela (o portal do
-    `ViewSaleModal`, ao final do DOM, sempre vencia o stacking dos modais
-    ainda presos no containing block do `animate-fade-in`).
-  - **`4293438`** (Cliente Padrão full-stack): `salesSettingsSchema`
-    (`defaultPersonId`) no shared; `GET/PUT /api/settings/sales` (o GET já
-    resolve o `Person` — `{id,name,tradeName}` — para o front não precisar
-    de round-trip extra); nova aba "Vendas" em Configurações com seletor de
-    cliente; PDV pré-seleciona o cliente padrão (`useEffect` + ref-guard,
-    aplica uma vez) e `resetSale()` volta a ele em vez de `null`;
-    `EditSaleModal` usa `salesSettings.defaultPersonId` como fallback do
-    `clientId` no submit e mostra o padrão no placeholder da busca.
-  - **`16378c7`** (Mini-PDV): `EditSaleModal` alargado para `sm:max-w-5xl
-    h-[90dvh]`, body em grid de duas colunas (`lg:grid-cols-3`) — carrinho
-    (cliente + busca de produto + itens com +/−/preço/remover) à esquerda,
-    card "Resumo da venda" (`sticky`) à direita. Nenhuma lógica de itens
-    mudou (já existia); só o layout. `productId` **não** é enviado no
-    payload — o `saleItemSchema` do backend só aceita `{variantId, quantity,
-    unitPrice}` e o `SaleDetail` não expõe id de produto; `variantId` já
-    determina o produto univocamente.
-  - **`7d8d6b0`** (fix sincronização): a query `['sale', saleId]` destruturava
-    só `{ isLoading }`, descartando `data` — o carrinho era populado via
-    efeito colateral **dentro do `queryFn`**, com uma variável `sale` local
-    invisível ao resto do componente (daí o título sem código e o risco de
-    o carrinho abrir vazio em cache-hit, já que essa `queryKey` é
-    compartilhada com o `ViewSaleModal`, que usa um `queryFn` sem efeitos).
-    Corrigido com `useEffect` reagindo a `sale` (guardado por
-    `items.length === 0`, inicializa uma única vez) e queryFn puro.
-  - **`68194d0`** (regra de negócio): venda com `financialGenerated: true`
-    não pode mais ser editada — botão "Editar" do `ViewSaleModal` desabilitado
-    (`title` explicando o motivo) e guarda de segurança dentro do
-    `EditSaleModal` (`if (sale?.financialGenerated)`) que troca o corpo do
-    modal por um aviso de acesso negado (`ShieldAlert`) com só um botão
-    "Fechar". *Não há botão de editar na tabela principal de vendas* — só
-    Visualizar/Excluir; o único ponto de entrada para editar é o footer do
-    `ViewSaleModal`, já coberto.
-  - **`6508dbf`** (fluxo de finalização maduro): `ChangeCalculatorModal`
-    extraído de `PdvPage.tsx` para `components/ChangeCalculatorModal.tsx`
-    (exportado, com `brl`/`round2`/`sanitizeBr` próprios) e reaproveitado no
-    `EditSaleModal` — `handleSaveClick()` abre a calculadora de troco quando
-    `paymentMethod === 'CASH'`, senão pede `window.confirm`, só então chama
-    `executeSave()` (antigo `submit()`).
-  `npm run typecheck` + `npm run build` → **0 erros** em todos os commits.
+  (commits `670e9a1`→`a7ac204`). `npm run typecheck` + `npm run build` → **0 erros**.
+
+- ✅ **Onda 2026-07-02 — Acerto de estoque: busca com Enter + tipo de movimentação** (2026-07-02):
+  Branch `feature/estoque-tipo-movimentacao` — **ainda não mesclada na `main`**.
+  - **Busca por Enter** (`StockAdjustPage.tsx` — `ProductSearch`): a busca de produto
+    deixa de disparar a cada tecla; novo estado `searchTerm` só é setado no `onKeyDown`
+    (Enter). Campo vazio + Enter lista todos os produtos (busca vazia já suportada
+    pela API).
+  - **Seletor "Tipo de movimentação"** (`Balanço/Inventário` [padrão] · `Entrada` ·
+    `Saída`) adicionado antes do campo de quantidade, com visual do design system
+    (azul/dourado). Label do campo de quantidade muda conforme o tipo.
+  - **Regra de cálculo**: `computedNewQuantity` — Balanço usa o valor digitado como
+    contagem final (comportamento antigo); Entrada soma `+quantidade` ao estoque
+    atual; Saída subtrai `-quantidade`. O resultado é enviado como `newQuantity` para
+    `POST /api/products/adjust-stock` (endpoint inalterado).
+  - Validado na tela pelo usuário.
+  `npm run typecheck` → **0 erros**.
+
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---

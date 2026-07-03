@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Receipt,
@@ -9,11 +10,13 @@ import {
   Minus,
   Search,
   AlertTriangle,
+  ShieldAlert,
   Eye,
   Printer,
   Ban,
   CircleDollarSign,
 } from 'lucide-react';
+import type { SalesSettings } from '@exodus/shared';
 import { api, ApiError } from '../lib/api';
 import {
   SaleReceipt,
@@ -22,6 +25,7 @@ import {
   type CompanyInfo,
   type SaleReceiptData,
 } from '../components/SaleReceipt';
+import { ChangeCalculatorModal } from '../components/ChangeCalculatorModal';
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -248,111 +252,125 @@ function ViewSaleModal({
     onError: (e) => window.alert(e instanceof ApiError ? e.message : 'Falha ao alterar o financeiro'),
   });
 
-  return (
+  return createPortal(
     <div className="modal-overlay">
-      <div className="modal-sheet sm:max-w-lg">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-display text-lg font-bold">Venda {sale ? `#${sale.code}` : ''}</h2>
+      <div className="modal-sheet w-full max-w-2xl flex flex-col overflow-hidden !p-0">
+        <header className="shrink-0 p-4 border-b border-slate-200 flex justify-between items-start bg-slate-50/50">
+          <div>
+            <h2 className="font-display text-lg font-bold">Venda {sale ? `#${sale.code}` : ''}</h2>
+            {sale && (
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
+                <span>{new Date(sale.soldAt).toLocaleString('pt-BR')}</span>
+                <FinancialBadge generated={sale.financialGenerated} />
+              </div>
+            )}
+          </div>
           <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
             <X className="h-5 w-5" />
           </button>
+        </header>
+
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-6">
+          {isLoading || !sale ? (
+            <div className="grid h-32 place-items-center text-slate-500">Carregando...</div>
+          ) : (
+            <>
+              <div className="text-sm">
+                <span className="text-slate-400">Cliente:</span> {sale.client?.name ?? 'Balcão'}
+              </div>
+
+              <ul className="divide-y divide-slate-100 text-sm">
+                {sale.items.map((it, i) => (
+                  <li key={i} className="flex justify-between py-1.5">
+                    <span>
+                      {it.variant.product.name} — {it.variant.description}
+                    </span>
+                    <span className="text-slate-500">
+                      {it.quantity} × {brl(it.unitPrice)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="space-y-1 border-t border-slate-100 pt-2 text-sm">
+                <Row label="Subtotal" value={brl(sale.subtotal)} />
+                {sale.discount > 0 && <Row label="Desconto" value={`- ${brl(sale.discount)}`} tone="rose" />}
+                {sale.surcharge > 0 && <Row label="Acréscimo" value={`+ ${brl(sale.surcharge)}`} tone="emerald" />}
+                <div className="flex justify-between pt-1 text-base font-bold">
+                  <span>Total</span>
+                  <span>{brl(sale.totalAmount)}</span>
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-slate-50 p-3 text-sm">
+                <div className="mb-1 font-semibold">Pagamento</div>
+                {(sale.payments.length ? sale.payments : [{ method: sale.paymentMethod, amount: sale.totalAmount }]).map(
+                  (p, i) => (
+                    <div key={i} className="flex justify-between text-slate-600">
+                      <span>{methodLabel[p.method] ?? p.method}</span>
+                      <span>{brl(p.amount)}</span>
+                    </div>
+                  ),
+                )}
+              </div>
+
+              {sale.financialAccounts.length > 0 && (
+                <div className="rounded-xl bg-slate-50 p-3 text-sm">
+                  <div className="mb-1 font-semibold">Contas a receber (a prazo)</div>
+                  {sale.financialAccounts.map((a) => (
+                    <div key={a.id} className="flex justify-between text-slate-600">
+                      <span>
+                        {new Date(a.dueDate).toLocaleDateString('pt-BR')} · {a.status}
+                      </span>
+                      <span>{brl(a.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {sale.notes && <p className="text-sm text-slate-500">Obs.: {sale.notes}</p>}
+            </>
+          )}
         </div>
 
-        {isLoading || !sale ? (
-          <div className="grid h-32 place-items-center text-slate-500">Carregando...</div>
-        ) : (
-          <>
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
-              <span>{new Date(sale.soldAt).toLocaleString('pt-BR')}</span>
-              <FinancialBadge generated={sale.financialGenerated} />
-            </div>
-            <div className="mb-3 text-sm">
-              <span className="text-slate-400">Cliente:</span> {sale.client?.name ?? 'Balcão'}
-            </div>
-
-            <ul className="mb-3 divide-y divide-slate-100 text-sm">
-              {sale.items.map((it, i) => (
-                <li key={i} className="flex justify-between py-1.5">
-                  <span>
-                    {it.variant.product.name} — {it.variant.description}
-                  </span>
-                  <span className="text-slate-500">
-                    {it.quantity} × {brl(it.unitPrice)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-
-            <div className="space-y-1 border-t border-slate-100 pt-2 text-sm">
-              <Row label="Subtotal" value={brl(sale.subtotal)} />
-              {sale.discount > 0 && <Row label="Desconto" value={`- ${brl(sale.discount)}`} tone="rose" />}
-              {sale.surcharge > 0 && <Row label="Acréscimo" value={`+ ${brl(sale.surcharge)}`} tone="emerald" />}
-              <div className="flex justify-between pt-1 text-base font-bold">
-                <span>Total</span>
-                <span>{brl(sale.totalAmount)}</span>
-              </div>
-            </div>
-
-            <div className="mt-3 rounded-xl bg-slate-50 p-3 text-sm">
-              <div className="mb-1 font-semibold">Pagamento</div>
-              {(sale.payments.length ? sale.payments : [{ method: sale.paymentMethod, amount: sale.totalAmount }]).map(
-                (p, i) => (
-                  <div key={i} className="flex justify-between text-slate-600">
-                    <span>{methodLabel[p.method] ?? p.method}</span>
-                    <span>{brl(p.amount)}</span>
-                  </div>
-                ),
-              )}
-            </div>
-
-            {sale.financialAccounts.length > 0 && (
-              <div className="mt-3 rounded-xl bg-slate-50 p-3 text-sm">
-                <div className="mb-1 font-semibold">Contas a receber (a prazo)</div>
-                {sale.financialAccounts.map((a) => (
-                  <div key={a.id} className="flex justify-between text-slate-600">
-                    <span>
-                      {new Date(a.dueDate).toLocaleDateString('pt-BR')} · {a.status}
-                    </span>
-                    <span>{brl(a.amount)}</span>
-                  </div>
-                ))}
-              </div>
+        {sale && (
+          <footer className="shrink-0 p-4 border-t border-slate-200 bg-slate-50 flex flex-wrap justify-end gap-3">
+            <button className="btn-ghost" onClick={() => onPrint(sale.id)}>
+              <Printer className="h-4 w-4" /> Imprimir
+            </button>
+            {sale.financialGenerated ? (
+              <button
+                className="inline-flex items-center gap-1 rounded-xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700 transition hover:bg-amber-100 disabled:opacity-50"
+                disabled={toggleFinancial.isPending}
+                onClick={() => {
+                  if (window.confirm('Excluir o financeiro desta venda? Ela deixará de contar no caixa/recebimentos.'))
+                    toggleFinancial.mutate(false);
+                }}
+              >
+                <Ban className="h-4 w-4" /> Excluir financeiro
+              </button>
+            ) : (
+              <button
+                className="inline-flex items-center gap-1 rounded-xl bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
+                disabled={toggleFinancial.isPending}
+                onClick={() => toggleFinancial.mutate(true)}
+              >
+                <CircleDollarSign className="h-4 w-4" /> Gerar financeiro
+              </button>
             )}
-
-            {sale.notes && <p className="mt-3 text-sm text-slate-500">Obs.: {sale.notes}</p>}
-
-            <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
-              <button className="btn-ghost" onClick={() => onPrint(sale.id)}>
-                <Printer className="h-4 w-4" /> Imprimir
-              </button>
-              {sale.financialGenerated ? (
-                <button
-                  className="inline-flex items-center gap-1 rounded-xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700 transition hover:bg-amber-100 disabled:opacity-50"
-                  disabled={toggleFinancial.isPending}
-                  onClick={() => {
-                    if (window.confirm('Excluir o financeiro desta venda? Ela deixará de contar no caixa/recebimentos.'))
-                      toggleFinancial.mutate(false);
-                  }}
-                >
-                  <Ban className="h-4 w-4" /> Excluir financeiro
-                </button>
-              ) : (
-                <button
-                  className="inline-flex items-center gap-1 rounded-xl bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
-                  disabled={toggleFinancial.isPending}
-                  onClick={() => toggleFinancial.mutate(true)}
-                >
-                  <CircleDollarSign className="h-4 w-4" /> Gerar financeiro
-                </button>
-              )}
-              <button className="btn-primary" onClick={() => onEdit(sale.id)}>
-                <Pencil className="h-4 w-4" /> Editar
-              </button>
-            </div>
-          </>
+            <button
+              className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={sale.financialGenerated}
+              title={sale.financialGenerated ? 'Exclua o financeiro antes de editar' : 'Editar venda'}
+              onClick={() => onEdit(sale.id)}
+            >
+              <Pencil className="h-4 w-4" /> Editar
+            </button>
+          </footer>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -398,7 +416,7 @@ function PrintSaleModal({ saleId, onClose }: { saleId: string; onClose: () => vo
     payments: sale.payments.length ? sale.payments : [{ method: sale.paymentMethod, amount: sale.totalAmount }],
   };
 
-  return (
+  return createPortal(
     <div className="modal-overlay print:bg-white print:p-0">
       <div className="flex max-h-[92dvh] w-full animate-slide-up flex-col overflow-hidden rounded-t-3xl bg-white shadow-elevated sm:max-h-[90vh] sm:max-w-3xl sm:animate-scale-in sm:rounded-2xl print:max-h-none print:shadow-none">
         <div className="border-b border-slate-100 p-4 print:hidden">
@@ -432,7 +450,8 @@ function PrintSaleModal({ saleId, onClose }: { saleId: string; onClose: () => vo
           <SaleReceipt company={company ?? {}} sale={receipt} format={format} />
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -485,34 +504,51 @@ function EditSaleModal({
   const [notes, setNotes] = useState('');
   const [client, setClient] = useState<{ id: string; name: string } | null>(null);
   const [search, setSearch] = useState('');
+  const [changeConfig, setChangeConfig] = useState<{ amount: number; onConfirm: () => void } | null>(null);
   // Parcelas (quando a prazo).
   const [parcels, setParcels] = useState(1);
   const [firstDue, setFirstDue] = useState(() => new Date().toISOString().slice(0, 10));
   const [intervalDays, setIntervalDays] = useState(30);
   const [localError, setLocalError] = useState<string | null>(null);
 
-  const { isLoading } = useQuery({
-    queryKey: ['sale', saleId],
-    queryFn: async () => {
-      const sale = await api.get<SaleDetail>(`/api/sales/${saleId}`);
-      setItems(
-        sale.items.map((it) => ({
-          variantId: it.variantId,
-          description: `${it.variant.product.name} - ${it.variant.description}`,
-          unitPrice: it.unitPrice,
-          quantity: it.quantity,
-        })),
-      );
-      // Mantém a prazo se a venda era a prazo; senão normaliza para forma única.
-      const isAprazo = sale.paymentMethod === 'A_PRAZO' || sale.payments.some((p) => p.method === 'A_PRAZO');
-      setPaymentMethod(isAprazo ? 'A_PRAZO' : (SINGLE_METHODS as readonly string[]).includes(sale.paymentMethod) ? sale.paymentMethod : 'CASH');
-      setDiscount(sale.discount);
-      setSurcharge(sale.surcharge);
-      setNotes(sale.notes ?? '');
-      setClient(sale.client ? { id: sale.client.id, name: sale.client.name } : null);
-      return sale;
-    },
+  // Cliente padrão configurado em Configurações → Vendas — usado como
+  // fallback no lugar do antigo "Balcão" quando nenhum cliente é selecionado.
+  const { data: salesSettings } = useQuery({
+    queryKey: ['settings', 'sales'],
+    queryFn: () =>
+      api.get<SalesSettings & { defaultPerson: { id: string; name: string; tradeName: string | null } | null }>(
+        '/api/settings/sales',
+      ),
   });
+
+  const { data: sale, isLoading } = useQuery({
+    queryKey: ['sale', saleId],
+    queryFn: () => api.get<SaleDetail>(`/api/sales/${saleId}`),
+  });
+
+  // Sincroniza o estado local do "mini-PDV" com os dados da venda assim que
+  // chegam. Guardado por items.length === 0 para inicializar só uma vez —
+  // evita sobrescrever edições do usuário caso a query seja invalidada/
+  // refeita (ex.: cache compartilhado com o ViewSaleModal, que usa a mesma
+  // queryKey com um queryFn diferente, sem efeitos colaterais).
+  useEffect(() => {
+    if (!sale || items.length > 0) return;
+    setItems(
+      sale.items.map((it) => ({
+        variantId: it.variantId,
+        description: `${it.variant.product.name} - ${it.variant.description}`,
+        unitPrice: it.unitPrice,
+        quantity: it.quantity,
+      })),
+    );
+    // Mantém a prazo se a venda era a prazo; senão normaliza para forma única.
+    const isAprazo = sale.paymentMethod === 'A_PRAZO' || sale.payments.some((p) => p.method === 'A_PRAZO');
+    setPaymentMethod(isAprazo ? 'A_PRAZO' : (SINGLE_METHODS as readonly string[]).includes(sale.paymentMethod) ? sale.paymentMethod : 'CASH');
+    setDiscount(sale.discount);
+    setSurcharge(sale.surcharge);
+    setNotes(sale.notes ?? '');
+    setClient(sale.client ? { id: sale.client.id, name: sale.client.name } : null);
+  }, [sale]);
 
   const { data: results } = useQuery({
     queryKey: ['sale-product-search', search],
@@ -553,7 +589,9 @@ function EditSaleModal({
     mutationFn: () =>
       api.put(`/api/sales/${saleId}`, {
         paymentMethod,
-        clientId: client?.id ?? undefined,
+        // Sem cliente selecionado: usa o cliente padrão configurado em vez
+        // de deixar a venda sem pessoa vinculada ("Balcão" hardcoded).
+        clientId: client?.id ?? salesSettings?.defaultPersonId ?? undefined,
         items: items.map((it) => ({ variantId: it.variantId, quantity: it.quantity, unitPrice: it.unitPrice })),
         discount: round2(discount),
         surcharge: round2(surcharge),
@@ -569,223 +607,313 @@ function EditSaleModal({
     onError: (e) => window.alert(e instanceof ApiError ? e.message : 'Falha ao salvar'),
   });
 
-  function submit() {
+  function executeSave() {
     setLocalError(null);
     if (items.length === 0) return setLocalError('A venda precisa de ao menos um item.');
     if (isAprazo && !client) return setLocalError('Venda a prazo exige um cliente.');
     save.mutate();
   }
 
-  return (
+  // Intercepta o clique em "Salvar alterações": se o pagamento for em
+  // dinheiro, abre a calculadora de troco (mesmo fluxo maduro do PDV) antes
+  // de disparar a API; caso contrário, pede confirmação padrão.
+  function handleSaveClick() {
+    if (items.length === 0) {
+      setLocalError('A venda precisa de ao menos um item.');
+      return;
+    }
+    if (paymentMethod === 'CASH') {
+      setChangeConfig({ amount: total, onConfirm: executeSave });
+      return;
+    }
+    if (window.confirm('Deseja realmente salvar as alterações desta venda?')) {
+      executeSave();
+    }
+  }
+
+  // Guarda de segurança: bloqueia a edição se a venda ainda tiver financeiro
+  // gerado (o operador deve excluir o financeiro manualmente primeiro, para
+  // ter consciência do impacto no caixa/recebimentos).
+  if (sale?.financialGenerated) {
+    return createPortal(
+      <div className="modal-overlay">
+        <div className="modal-sheet w-full sm:max-w-md flex flex-col overflow-hidden !p-0">
+          <header className="shrink-0 p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50/50">
+            <h2 className="font-display text-lg font-bold">Editar venda #{sale.code}</h2>
+            <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
+              <X className="h-5 w-5" />
+            </button>
+          </header>
+          <div className="flex-1 min-h-0 overflow-y-auto p-6">
+            <div className="flex flex-col items-center gap-3 py-6 text-center">
+              <ShieldAlert className="h-12 w-12 text-rose-500" />
+              <p className="text-sm font-medium text-slate-700">
+                Acesso Negado: Esta venda possui financeiro gerado. Feche, exclua o financeiro e
+                tente novamente.
+              </p>
+            </div>
+          </div>
+          <footer className="shrink-0 p-4 border-t border-slate-200 bg-slate-50 flex justify-end">
+            <button className="btn-ghost" onClick={onClose}>
+              Fechar
+            </button>
+          </footer>
+        </div>
+      </div>,
+      document.body,
+    );
+  }
+
+  return createPortal(
+    <>
     <div className="modal-overlay">
-      <div className="modal-sheet sm:max-w-2xl">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-display text-lg font-bold">Editar venda</h2>
+      <div className="modal-sheet w-full sm:max-w-5xl h-[90dvh] max-h-screen flex flex-col overflow-hidden !p-0">
+        {/* Cabeçalho fixo */}
+        <header className="shrink-0 p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50/50">
+          <div>
+            <h2 className="font-display text-lg font-bold">Editar venda{sale ? ` #${sale.code}` : ''}</h2>
+            <p className="mt-0.5 flex items-center gap-1.5 text-xs text-amber-600">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              Ao salvar, o estoque é reajustado e o financeiro vinculado é refeito.
+            </p>
+          </div>
           <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
             <X className="h-5 w-5" />
           </button>
-        </div>
+        </header>
 
-        <div className="mb-4 flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          Ao salvar, o estoque é reajustado e o financeiro vinculado a esta venda é refeito.
-        </div>
+        {/* Corpo com scroll interno */}
+        <div className="flex-1 min-h-0 overflow-y-auto p-4">
+          {isLoading ? (
+            <div className="grid h-full place-items-center text-slate-500">Carregando venda...</div>
+          ) : (
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+              {/* ---- Coluna esquerda: carrinho (cliente + busca + itens) ---- */}
+              <div className="space-y-4 lg:col-span-2">
+                <div>
+                  <span className="label">Cliente</span>
+                  <ClientPicker
+                    value={client}
+                    onChange={setClient}
+                    defaultPersonName={salesSettings?.defaultPerson?.name ?? null}
+                  />
+                </div>
 
-        {isLoading ? (
-          <div className="grid h-32 place-items-center text-slate-500">Carregando venda...</div>
-        ) : (
-          <>
-            {/* Cliente */}
-            <div className="mb-3">
-              <span className="label">Cliente</span>
-              <ClientPicker value={client} onChange={setClient} />
-            </div>
+                {/* Busca de produto para adicionar à venda */}
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    className="input h-11 pl-9 text-sm"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Buscar produto para adicionar à venda..."
+                  />
+                  {results && search.trim().length >= 2 && (
+                    <div className="absolute z-10 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white shadow-elevated">
+                      {results.items.flatMap((p) =>
+                        p.variants.map((v) => (
+                          <button
+                            key={v.id}
+                            onClick={() => addVariant(v, p.name)}
+                            className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
+                          >
+                            {p.name} — {v.description} <span className="text-brand-600">{brl(v.salePrice)}</span>
+                          </button>
+                        )),
+                      )}
+                    </div>
+                  )}
+                </div>
 
-            {/* Itens */}
-            <ul className="space-y-2">
-              {items.map((it) => (
-                <li key={it.variantId} className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
-                  <div className="mb-2 flex items-start justify-between gap-2">
-                    <span className="text-sm font-semibold">{it.description}</span>
-                    <button
-                      className="text-slate-300 hover:text-rose-500"
-                      onClick={() => setItems((prev) => prev.filter((x) => x.variantId !== it.variantId))}
+                {/* Lista de itens (Mini-PDV) */}
+                {items.length === 0 ? (
+                  <div className="grid place-items-center rounded-2xl border border-dashed border-slate-200 py-10 text-center text-sm text-slate-400">
+                    <Receipt className="mb-2 h-8 w-8 text-slate-300" />
+                    Nenhum item na venda. Busque um produto acima para adicionar.
+                  </div>
+                ) : (
+                  <ul className="space-y-2">
+                    {items.map((it) => (
+                      <li key={it.variantId} className="rounded-xl border border-slate-200 bg-white p-3 shadow-soft">
+                        <div className="mb-2 flex items-start justify-between gap-2">
+                          <span className="text-sm font-semibold">{it.description}</span>
+                          <button
+                            className="text-slate-300 transition hover:text-rose-500"
+                            title="Remover item"
+                            onClick={() => setItems((prev) => prev.filter((x) => x.variantId !== it.variantId))}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              className="grid h-8 w-8 place-items-center rounded-lg bg-slate-50 ring-1 ring-slate-200 transition hover:bg-slate-100"
+                              onClick={() => changeQty(it.variantId, -1)}
+                            >
+                              <Minus className="h-4 w-4" />
+                            </button>
+                            <span className="w-7 text-center font-bold">{it.quantity}</span>
+                            <button
+                              className="grid h-8 w-8 place-items-center rounded-lg bg-slate-50 ring-1 ring-slate-200 transition hover:bg-slate-100"
+                              onClick={() => changeQty(it.variantId, 1)}
+                            >
+                              <Plus className="h-4 w-4" />
+                            </button>
+                          </div>
+                          <div className="flex items-center gap-1 text-sm">
+                            <span className="text-slate-400">R$</span>
+                            <EditItemPriceInput
+                              value={it.unitPrice}
+                              onChange={(v) => setItem(it.variantId, { unitPrice: v })}
+                            />
+                          </div>
+                          <span className="w-24 text-right font-bold">{brl(it.unitPrice * it.quantity)}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {/* ---- Coluna direita: resumo financeiro ---- */}
+              <div className="lg:col-span-1">
+                <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:sticky lg:top-0">
+                  <h3 className="font-display text-base font-bold text-slate-700">Resumo da venda</h3>
+
+                  <div className="flex justify-between text-sm text-slate-500">
+                    <span>Subtotal</span>
+                    <span className="font-semibold text-slate-700">{brl(subtotal)}</span>
+                  </div>
+
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-rose-600">Desconto (R$)</span>
+                    <FinancialAdjustInput
+                      value={discount}
+                      onChange={setDiscount}
+                      placeholder="0,00"
+                      className="w-24 rounded-lg border border-slate-200 bg-white px-2 py-1 text-right outline-none"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-emerald-600">Acréscimo (R$)</span>
+                    <FinancialAdjustInput
+                      value={surcharge}
+                      onChange={setSurcharge}
+                      placeholder="0,00"
+                      className="w-24 rounded-lg border border-slate-200 bg-white px-2 py-1 text-right outline-none"
+                    />
+                  </div>
+
+                  <label className="block text-sm">
+                    <span className="mb-1 block text-slate-500">Forma de pagamento</span>
+                    <select
+                      className="input h-10"
+                      value={paymentMethod}
+                      onChange={(e) => setPaymentMethod(e.target.value)}
                     >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        className="grid h-8 w-8 place-items-center rounded-lg bg-white ring-1 ring-slate-200"
-                        onClick={() => changeQty(it.variantId, -1)}
-                      >
-                        <Minus className="h-4 w-4" />
-                      </button>
-                      <span className="w-7 text-center font-bold">{it.quantity}</span>
-                      <button
-                        className="grid h-8 w-8 place-items-center rounded-lg bg-white ring-1 ring-slate-200"
-                        onClick={() => changeQty(it.variantId, 1)}
-                      >
-                        <Plus className="h-4 w-4" />
-                      </button>
-                    </div>
-                    <div className="flex items-center gap-1 text-sm">
-                      <span className="text-slate-400">R$</span>
-                      <EditItemPriceInput
-                        value={it.unitPrice}
-                        onChange={(v) => setItem(it.variantId, { unitPrice: v })}
-                      />
-                    </div>
-                    <span className="w-20 text-right font-bold">{brl(it.unitPrice * it.quantity)}</span>
-                  </div>
-                </li>
-              ))}
-            </ul>
+                      {SINGLE_METHODS.map((m) => (
+                        <option key={m} value={m}>
+                          {methodLabel[m]}
+                        </option>
+                      ))}
+                      <option value="A_PRAZO">{methodLabel.A_PRAZO}</option>
+                    </select>
+                  </label>
 
-            {/* Adicionar item */}
-            <div className="relative mt-3">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                className="input h-10 pl-9 text-sm"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Adicionar produto à venda..."
-              />
-              {results && search.trim().length >= 2 && (
-                <div className="mt-1 max-h-40 overflow-auto rounded-lg border border-slate-200">
-                  {results.items.flatMap((p) =>
-                    p.variants.map((v) => (
-                      <button
-                        key={v.id}
-                        onClick={() => addVariant(v, p.name)}
-                        className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
-                      >
-                        {p.name} — {v.description} <span className="text-brand-600">{brl(v.salePrice)}</span>
-                      </button>
-                    )),
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Totais e pagamento */}
-            <div className="mt-4 space-y-2 border-t border-slate-100 pt-3 text-sm">
-              <div className="flex justify-between text-slate-500">
-                <span>Subtotal</span>
-                <span className="font-semibold text-slate-700">{brl(subtotal)}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-rose-600">Desconto (R$)</span>
-                <FinancialAdjustInput
-                  value={discount}
-                  onChange={setDiscount}
-                  placeholder="0,00"
-                  className="w-24 rounded-lg border border-slate-200 px-2 py-1 text-right outline-none"
-                />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-emerald-600">Acréscimo (R$)</span>
-                <FinancialAdjustInput
-                  value={surcharge}
-                  onChange={setSurcharge}
-                  placeholder="0,00"
-                  className="w-24 rounded-lg border border-slate-200 px-2 py-1 text-right outline-none"
-                />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-500">Forma de pagamento</span>
-                <select
-                  className="rounded-lg border border-slate-200 px-2 py-1 outline-none"
-                  value={paymentMethod}
-                  onChange={(e) => setPaymentMethod(e.target.value)}
-                >
-                  {SINGLE_METHODS.map((m) => (
-                    <option key={m} value={m}>
-                      {methodLabel[m]}
-                    </option>
-                  ))}
-                  <option value="A_PRAZO">{methodLabel.A_PRAZO}</option>
-                </select>
-              </div>
-
-              {/* Parcelas da venda a prazo */}
-              {isAprazo && (
-                <div className="rounded-xl border border-brand-100 bg-brand-50/60 p-3">
-                  <div className="mb-2 text-xs font-semibold text-brand-700">
-                    Parcelas (geram contas a receber) — exige cliente
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <label className="block">
-                      <span className="label">Parcelas</span>
-                      <input
-                        className="input h-9"
-                        type="number"
-                        min={1}
-                        value={parcels}
-                        onChange={(e) => setParcels(Number(e.target.value) || 1)}
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="label">1º vencimento</span>
-                      <input
-                        className="input h-9"
-                        type="date"
-                        value={firstDue}
-                        onChange={(e) => setFirstDue(e.target.value)}
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="label">Intervalo (dias)</span>
-                      <input
-                        className="input h-9"
-                        type="number"
-                        value={intervalDays}
-                        onChange={(e) => setIntervalDays(Number(e.target.value) || 30)}
-                      />
-                    </label>
-                  </div>
-                  {parcels > 1 && (
-                    <div className="mt-2 text-xs text-brand-700">
-                      {parcels}× de aprox. <strong>{brl(round2(total / parcels))}</strong>
+                  {/* Parcelas da venda a prazo */}
+                  {isAprazo && (
+                    <div className="rounded-xl border border-brand-100 bg-brand-50/60 p-3">
+                      <div className="mb-2 text-xs font-semibold text-brand-700">
+                        Parcelas (geram contas a receber) — exige cliente
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <label className="block">
+                          <span className="label">Parcelas</span>
+                          <input
+                            className="input h-9"
+                            type="number"
+                            min={1}
+                            value={parcels}
+                            onChange={(e) => setParcels(Number(e.target.value) || 1)}
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="label">1º venc.</span>
+                          <input
+                            className="input h-9"
+                            type="date"
+                            value={firstDue}
+                            onChange={(e) => setFirstDue(e.target.value)}
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="label">Interv.</span>
+                          <input
+                            className="input h-9"
+                            type="number"
+                            value={intervalDays}
+                            onChange={(e) => setIntervalDays(Number(e.target.value) || 30)}
+                          />
+                        </label>
+                      </div>
+                      {parcels > 1 && (
+                        <div className="mt-2 text-xs text-brand-700">
+                          {parcels}× de aprox. <strong>{brl(round2(total / parcels))}</strong>
+                        </div>
+                      )}
                     </div>
                   )}
-                </div>
-              )}
 
-              <input
-                className="input h-10 text-sm"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Observação da venda"
-                maxLength={500}
-              />
-              <div className="flex justify-between pt-1 text-lg font-bold">
-                <span>Total</span>
-                <span>{brl(total)}</span>
+                  <label className="block text-sm">
+                    <span className="mb-1 block text-slate-500">Observação</span>
+                    <input
+                      className="input h-10"
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      placeholder="Observação da venda"
+                      maxLength={500}
+                    />
+                  </label>
+
+                  <div className="flex items-end justify-between border-t border-slate-200 pt-3">
+                    <span className="text-sm font-semibold text-slate-500">Total</span>
+                    <span className="font-display text-2xl font-extrabold text-slate-900">{brl(total)}</span>
+                  </div>
+
+                  {localError && (
+                    <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{localError}</div>
+                  )}
+                </div>
               </div>
             </div>
+          )}
+        </div>
 
-            {localError && (
-              <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{localError}</div>
-            )}
-
-            <div className="mt-5 flex justify-end gap-2">
-              <button className="btn-ghost" onClick={onClose}>
-                Cancelar
-              </button>
-              <button
-                className="btn-primary"
-                disabled={save.isPending || items.length === 0}
-                onClick={submit}
-              >
-                {save.isPending ? 'Salvando...' : 'Salvar alterações'}
-              </button>
-            </div>
-          </>
-        )}
+        {/* Rodapé fixo */}
+        <footer className="shrink-0 p-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
+          <button className="btn-ghost" onClick={onClose}>
+            Cancelar
+          </button>
+          <button className="btn-primary" disabled={save.isPending || items.length === 0} onClick={handleSaveClick}>
+            {save.isPending ? 'Salvando...' : 'Salvar alterações'}
+          </button>
+        </footer>
       </div>
     </div>
+    {changeConfig && (
+      <ChangeCalculatorModal
+        total={changeConfig.amount}
+        onClose={() => setChangeConfig(null)}
+        onConfirm={() => {
+          setChangeConfig(null);
+          changeConfig.onConfirm();
+        }}
+      />
+    )}
+    </>,
+    document.body,
   );
 }
 
@@ -793,9 +921,11 @@ function EditSaleModal({
 function ClientPicker({
   value,
   onChange,
+  defaultPersonName,
 }: {
   value: { id: string; name: string } | null;
   onChange: (c: { id: string; name: string } | null) => void;
+  defaultPersonName?: string | null;
 }) {
   const [term, setTerm] = useState('');
   const { data } = useQuery({
@@ -824,7 +954,7 @@ function ClientPicker({
         className="input"
         value={term}
         onChange={(e) => setTerm(e.target.value)}
-        placeholder="Buscar cliente (deixe vazio = Balcão)..."
+        placeholder={`Buscar cliente (Padrão: ${defaultPersonName || 'Nenhum'})...`}
       />
       {data && data.items.length > 0 && (
         <div className="absolute z-10 mt-1 max-h-40 w-full overflow-auto rounded-xl border border-slate-200 bg-white shadow-elevated">

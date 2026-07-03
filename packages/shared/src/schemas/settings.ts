@@ -46,6 +46,16 @@ export const paymentTypesSchema = z.object({
 });
 export type PaymentTypesSettings = z.infer<typeof paymentTypesSchema>;
 
+/**
+ * Cliente padrão usado em vendas não identificadas (substitui o fallback
+ * hardcoded "Balcão"). `defaultPersonId` aponta para um `Person` real do
+ * banco; `null` = nenhum cliente padrão configurado (comportamento antigo).
+ */
+export const salesSettingsSchema = z.object({
+  defaultPersonId: z.string().nullable().catch(null),
+});
+export type SalesSettings = z.infer<typeof salesSettingsSchema>;
+
 /** Lista padrão de tipos de recebimento (usada quando ainda não configurada). */
 export const DEFAULT_PAYMENT_TYPES: PaymentType[] = [
   { code: 'CASH', label: 'Dinheiro', kind: 'CASH', active: true },
