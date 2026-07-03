@@ -842,6 +842,7 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
   - **`ProductsPage.tsx`**: estados `orderBy`/`orderDir` no `queryKey` e na URL;
     dois `<select className="input">` no painel de filtros (grid `lg:grid-cols-5`).
   `npm run typecheck` → **0 erros**.
+<<<<<<< HEAD
 - ✅ **Onda 2026-06-30a — Fix modais de Caixa (React Portal)** (2026-06-30):
   Branch `feature/tela-produtos-caio`. Commit `e05e95c`.
   - **`CashPage.tsx`**: componente `Modal` compartilhado (usado por `TransactionModal`
@@ -952,6 +953,23 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
   `npm run typecheck` + `npm run build` → **0 erros** em todos os commits.
   **Pendências da tela sinalizadas pelo Comandante, ainda não detalhadas** —
   ver §12.15.
+=======
+- ✅ **Onda 2026-07-02 — Acerto de estoque: busca com Enter + tipo de movimentação** (2026-07-02):
+  Branch `feature/estoque-tipo-movimentacao` — **ainda não mesclada na `main`**.
+  - **Busca por Enter** (`StockAdjustPage.tsx` — `ProductSearch`): a busca de produto
+    deixa de disparar a cada tecla; novo estado `searchTerm` só é setado no `onKeyDown`
+    (Enter). Campo vazio + Enter lista todos os produtos (busca vazia já suportada
+    pela API).
+  - **Seletor "Tipo de movimentação"** (`Balanço/Inventário` [padrão] · `Entrada` ·
+    `Saída`) adicionado antes do campo de quantidade, com visual do design system
+    (azul/dourado). Label do campo de quantidade muda conforme o tipo.
+  - **Regra de cálculo**: `computedNewQuantity` — Balanço usa o valor digitado como
+    contagem final (comportamento antigo); Entrada soma `+quantidade` ao estoque
+    atual; Saída subtrai `-quantidade`. O resultado é enviado como `newQuantity` para
+    `POST /api/products/adjust-stock` (endpoint inalterado).
+  - Validado na tela pelo usuário.
+  `npm run typecheck` → **0 erros**.
+>>>>>>> feature/estoque-tipo-movimentacao
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---
