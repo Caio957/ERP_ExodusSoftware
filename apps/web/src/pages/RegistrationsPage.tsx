@@ -48,21 +48,23 @@ export function RegistrationsPage() {
 }
 
 // ---------------------------------------------------------------------------
-// Botão flutuante "Voltar ao topo" — aparece só depois de rolar a página.
+// Botão flutuante "Voltar ao topo" — aparece só depois que os filtros somem
+// do topo da tela (~250px); posicionado à direita, acima da bottom nav no
+// mobile, com efeito glass (translúcido em repouso, sólido no hover).
 function ScrollToTopButton() {
-  const [visible, setVisible] = useState(false);
+  const [showScroll, setShowScroll] = useState(false);
 
   useEffect(() => {
-    const onScroll = () => setVisible(window.scrollY > 300);
+    const onScroll = () => setShowScroll(window.scrollY > 250);
     window.addEventListener('scroll', onScroll);
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  if (!visible) return null;
+  if (!showScroll) return null;
 
   return (
     <button
-      className="fixed bottom-6 left-6 z-50 grid h-12 w-12 place-items-center rounded-full bg-brand-600 text-white shadow-lg transition hover:bg-brand-700"
+      className="fixed right-4 bottom-24 md:bottom-8 md:right-8 z-50 rounded-full bg-blue-600/40 p-3 text-white shadow-lg backdrop-blur-md transition-all duration-300 hover:bg-blue-600/90"
       onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
       title="Voltar ao topo"
     >
