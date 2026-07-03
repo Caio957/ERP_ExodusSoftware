@@ -9,6 +9,8 @@ interface VariantHit {
   stockQty: number;
 }
 
+type MovementType = 'BALANCE' | 'IN' | 'OUT';
+
 interface Adjustment {
   id: string;
   variantId: string;
@@ -24,6 +26,7 @@ interface Adjustment {
 export function StockAdjustPage() {
   const qc = useQueryClient();
   const [variant, setVariant] = useState<VariantHit | null>(null);
+  const [movementType, setMovementType] = useState<MovementType>('BALANCE');
   const [newQuantity, setNewQuantity] = useState('');
   const [reason, setReason] = useState('');
   const [done, setDone] = useState(false);
@@ -39,13 +42,14 @@ export function StockAdjustPage() {
     mutationFn: () =>
       api.post('/api/products/adjust-stock', {
         variantId: variant!.id,
-        newQuantity: Number(newQuantity),
+        newQuantity: computedNewQuantity,
         reason: reason.trim(),
       }),
     onSuccess: () => {
       invalidate();
       setDone(true);
       setVariant(null);
+      setMovementType('BALANCE');
       setNewQuantity('');
       setReason('');
       window.setTimeout(() => setDone(false), 3000);
@@ -56,12 +60,21 @@ export function StockAdjustPage() {
   function submit() {
     setLocalError(null);
     if (!variant) return setLocalError('Selecione o produto.');
-    if (newQuantity === '' || Number(newQuantity) < 0) return setLocalError('Informe a quantidade contada.');
+    const qtyLabel = movementType === 'IN' ? 'a quantidade de entrada' : movementType === 'OUT' ? 'a quantidade de saída' : 'a quantidade contada';
+    if (newQuantity === '' || Number(newQuantity) < 0) return setLocalError(`Informe ${qtyLabel}.`);
     if (reason.trim().length < 1) return setLocalError('Informe o motivo do acerto.');
     adjust.mutate();
   }
 
-  const diff = variant ? Number(newQuantity || 0) - variant.stockQty : 0;
+  const computedNewQuantity = variant
+    ? movementType === 'IN'
+      ? variant.stockQty + Number(newQuantity || 0)
+      : movementType === 'OUT'
+        ? variant.stockQty - Number(newQuantity || 0)
+        : Number(newQuantity || 0)
+    : 0;
+
+  const diff = variant ? computedNewQuantity - variant.stockQty : 0;
 
   return (
     <div className="mx-auto max-w-3xl space-y-5">
@@ -94,9 +107,41 @@ export function StockAdjustPage() {
 
         {variant && (
           <>
+            <div>
+              <span className="label">Tipo de movimentação *</span>
+              <div className="grid grid-cols-3 gap-2">
+                {(
+                  [
+                    { value: 'BALANCE', label: 'Balanço/Inventário' },
+                    { value: 'IN', label: 'Entrada' },
+                    { value: 'OUT', label: 'Saída' },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    className={`rounded-xl border px-3 py-2 text-sm font-medium transition ${
+                      movementType === opt.value
+                        ? 'border-brand-500 bg-brand-gradient text-white shadow-brand'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-accent-400 hover:text-accent-600'
+                    }`}
+                    onClick={() => setMovementType(opt.value)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <label className="block">
-                <span className="label">Quantidade contada *</span>
+                <span className="label">
+                  {movementType === 'IN'
+                    ? 'Quantidade de entrada *'
+                    : movementType === 'OUT'
+                      ? 'Quantidade de saída *'
+                      : 'Quantidade contada *'}
+                </span>
                 <input
                   className="input text-lg"
                   type="number"
@@ -346,13 +391,14 @@ function EditAdjustmentModal({
 
 function ProductSearch({ onPick }: { onPick: (v: VariantHit) => void }) {
   const [term, setTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState<string | null>(null);
   const { data } = useQuery({
-    queryKey: ['adjust-product-search', term],
+    queryKey: ['adjust-product-search', searchTerm],
     queryFn: () =>
       api.get<{
         items: Array<{ name: string; variants: Array<{ id: string; description: string; sku: string; stockQty: number }> }>;
-      }>(`/api/products?search=${encodeURIComponent(term)}`),
-    enabled: term.trim().length >= 2,
+      }>(`/api/products?search=${encodeURIComponent(searchTerm ?? '')}`),
+    enabled: searchTerm !== null,
   });
 
   return (
@@ -362,9 +408,15 @@ function ProductSearch({ onPick }: { onPick: (v: VariantHit) => void }) {
         className="input pl-9"
         value={term}
         onChange={(e) => setTerm(e.target.value)}
-        placeholder="Buscar produto..."
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            setSearchTerm(term.trim());
+          }
+        }}
+        placeholder="Buscar produto... (Enter para filtrar)"
       />
-      {data && term.trim().length >= 2 && (
+      {data && searchTerm !== null && (
         <div className="mt-1 max-h-44 overflow-auto rounded-xl border border-slate-200">
           {data.items.flatMap((p) =>
             p.variants.map((v) => (
