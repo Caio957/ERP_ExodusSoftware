@@ -54,6 +54,10 @@ export function RegistrationsPage() {
 // do Tailwind rode na entrada e na saída. O fundo escuro e o hover vêm de
 // style inline com rgba + eventos de mouse (bypass do bug de renderização
 // das classes de opacidade do Tailwind neste build).
+// Ejetado via createPortal(..., document.body): algum ancestral do layout
+// base (provavelmente com transform/overflow) quebra o containing block do
+// `fixed`, fazendo o botão se comportar como `absolute` e descer junto com
+// a lista em vez de ficar ancorado no viewport.
 function ScrollToTopButton() {
   const [showScroll, setShowScroll] = useState(false);
   const [hover, setHover] = useState(false);
@@ -64,7 +68,7 @@ function ScrollToTopButton() {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  return (
+  return createPortal(
     <button
       className={`fixed right-4 bottom-24 md:bottom-8 md:right-8 z-50 backdrop-blur-md transition-all duration-500 shadow-xl rounded-full p-3 flex items-center justify-center ${showScroll ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 -translate-y-12 pointer-events-none'}`}
       style={{
@@ -77,7 +81,8 @@ function ScrollToTopButton() {
       title="Voltar ao topo"
     >
       <ArrowUp className="w-6 h-6" />
-    </button>
+    </button>,
+    document.body,
   );
 }
 
