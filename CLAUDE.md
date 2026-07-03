@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-06-26
+- **Última atualização:** 2026-07-02
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -786,6 +786,21 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
     `ProductVariantOrderByRelationAggregateInput`.
   - **`ProductsPage.tsx`**: estados `orderBy`/`orderDir` no `queryKey` e na URL;
     dois `<select className="input">` no painel de filtros (grid `lg:grid-cols-5`).
+  `npm run typecheck` → **0 erros**.
+- ✅ **Onda 2026-07-02 — Acerto de estoque: busca com Enter + tipo de movimentação** (2026-07-02):
+  Branch `feature/estoque-tipo-movimentacao` — **ainda não mesclada na `main`**.
+  - **Busca por Enter** (`StockAdjustPage.tsx` — `ProductSearch`): a busca de produto
+    deixa de disparar a cada tecla; novo estado `searchTerm` só é setado no `onKeyDown`
+    (Enter). Campo vazio + Enter lista todos os produtos (busca vazia já suportada
+    pela API).
+  - **Seletor "Tipo de movimentação"** (`Balanço/Inventário` [padrão] · `Entrada` ·
+    `Saída`) adicionado antes do campo de quantidade, com visual do design system
+    (azul/dourado). Label do campo de quantidade muda conforme o tipo.
+  - **Regra de cálculo**: `computedNewQuantity` — Balanço usa o valor digitado como
+    contagem final (comportamento antigo); Entrada soma `+quantidade` ao estoque
+    atual; Saída subtrai `-quantidade`. O resultado é enviado como `newQuantity` para
+    `POST /api/products/adjust-stock` (endpoint inalterado).
+  - Validado na tela pelo usuário.
   `npm run typecheck` → **0 erros**.
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
