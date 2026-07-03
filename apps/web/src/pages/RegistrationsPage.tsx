@@ -48,23 +48,31 @@ export function RegistrationsPage() {
 }
 
 // ---------------------------------------------------------------------------
-// Botão flutuante "Voltar ao topo" — aparece só depois que os filtros somem
-// do topo da tela (~250px); posicionado à direita, acima da bottom nav no
-// mobile, com efeito glass (translúcido em repouso, sólido no hover).
+// Botão flutuante "Voltar ao topo" — aparece cedo (scrollY > 50) com uma
+// animação de entrada deslizando de cima para baixo. O botão fica SEMPRE no
+// DOM (só alterna opacidade/translate/pointer-events) para que a transição
+// do Tailwind rode na entrada e na saída. O fundo escuro e o hover vêm de
+// style inline com rgba + eventos de mouse (bypass do bug de renderização
+// das classes de opacidade do Tailwind neste build).
 function ScrollToTopButton() {
   const [showScroll, setShowScroll] = useState(false);
+  const [hover, setHover] = useState(false);
 
   useEffect(() => {
-    const onScroll = () => setShowScroll(window.scrollY > 250);
+    const onScroll = () => setShowScroll(window.scrollY > 50);
     window.addEventListener('scroll', onScroll);
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  if (!showScroll) return null;
-
   return (
     <button
-      className="fixed right-4 bottom-24 md:bottom-8 md:right-8 z-50 bg-slate-800 bg-opacity-60 backdrop-blur-md text-white hover:bg-opacity-90 transition-all duration-300 shadow-xl rounded-full p-3 flex items-center justify-center"
+      className={`fixed right-4 bottom-24 md:bottom-8 md:right-8 z-50 backdrop-blur-md transition-all duration-500 shadow-xl rounded-full p-3 flex items-center justify-center ${showScroll ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 -translate-y-12 pointer-events-none'}`}
+      style={{
+        backgroundColor: hover ? 'rgba(30, 41, 59, 0.9)' : 'rgba(30, 41, 59, 0.6)',
+        color: 'white',
+      }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
       title="Voltar ao topo"
     >
