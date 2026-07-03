@@ -25,6 +25,7 @@ import {
   type CompanyInfo,
   type SaleReceiptData,
 } from '../components/SaleReceipt';
+import { ChangeCalculatorModal } from '../components/ChangeCalculatorModal';
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -503,6 +504,7 @@ function EditSaleModal({
   const [notes, setNotes] = useState('');
   const [client, setClient] = useState<{ id: string; name: string } | null>(null);
   const [search, setSearch] = useState('');
+  const [changeConfig, setChangeConfig] = useState<{ amount: number; onConfirm: () => void } | null>(null);
   // Parcelas (quando a prazo).
   const [parcels, setParcels] = useState(1);
   const [firstDue, setFirstDue] = useState(() => new Date().toISOString().slice(0, 10));
@@ -605,11 +607,28 @@ function EditSaleModal({
     onError: (e) => window.alert(e instanceof ApiError ? e.message : 'Falha ao salvar'),
   });
 
-  function submit() {
+  function executeSave() {
     setLocalError(null);
     if (items.length === 0) return setLocalError('A venda precisa de ao menos um item.');
     if (isAprazo && !client) return setLocalError('Venda a prazo exige um cliente.');
     save.mutate();
+  }
+
+  // Intercepta o clique em "Salvar alterações": se o pagamento for em
+  // dinheiro, abre a calculadora de troco (mesmo fluxo maduro do PDV) antes
+  // de disparar a API; caso contrário, pede confirmação padrão.
+  function handleSaveClick() {
+    if (items.length === 0) {
+      setLocalError('A venda precisa de ao menos um item.');
+      return;
+    }
+    if (paymentMethod === 'CASH') {
+      setChangeConfig({ amount: total, onConfirm: executeSave });
+      return;
+    }
+    if (window.confirm('Deseja realmente salvar as alterações desta venda?')) {
+      executeSave();
+    }
   }
 
   // Guarda de segurança: bloqueia a edição se a venda ainda tiver financeiro
@@ -646,6 +665,7 @@ function EditSaleModal({
   }
 
   return createPortal(
+    <>
     <div className="modal-overlay">
       <div className="modal-sheet w-full sm:max-w-5xl h-[90dvh] max-h-screen flex flex-col overflow-hidden !p-0">
         {/* Cabeçalho fixo */}
@@ -876,12 +896,23 @@ function EditSaleModal({
           <button className="btn-ghost" onClick={onClose}>
             Cancelar
           </button>
-          <button className="btn-primary" disabled={save.isPending || items.length === 0} onClick={submit}>
+          <button className="btn-primary" disabled={save.isPending || items.length === 0} onClick={handleSaveClick}>
             {save.isPending ? 'Salvando...' : 'Salvar alterações'}
           </button>
         </footer>
       </div>
-    </div>,
+    </div>
+    {changeConfig && (
+      <ChangeCalculatorModal
+        total={changeConfig.amount}
+        onClose={() => setChangeConfig(null)}
+        onConfirm={() => {
+          setChangeConfig(null);
+          changeConfig.onConfirm();
+        }}
+      />
+    )}
+    </>,
     document.body,
   );
 }
