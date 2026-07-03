@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-07-01
+- **Última atualização:** 2026-07-02
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -22,8 +22,14 @@
   commits são empurrados para o GitHub nessas branches; o **merge para `main` é feito
   manualmente via PR no GitHub** (o merge dispara o auto-deploy no Railway). A IA
   trabalha sempre na branch ativa indicada — nunca commita direto na `main` sem
-  instrução explícita. Branch ativa no momento: **`feature/tela-produtos-caio`**
-  (commits `c8ba129`→`052b010` — ainda não mesclada; ver §11).
+  instrução explícita. Branch ativa no momento: **`feature/tela-produtos-caio`**.
+  ⚠️ **Estado divergente (2026-07-02)**: a `main` já recebeu um merge anterior
+  desta branch via PR #2 (até o commit `052b010`) + um commit direto
+  `da88071` ("force railway deploy"). A partir daí a branch local seguiu
+  recebendo commits novos (`777d921`→`72479ac` — módulo Cadastros completo:
+  ver §11) que **ainda não foram publicados** (`origin/feature/tela-produtos-caio`
+  segue parada em `052b010`). Antes do próximo merge, sincronizar
+  (`git push`) e abrir um novo PR com o conteúdo pendente.
 - **Fase atual:** Sistema em **produção no Railway** (projeto `exodus-software`,
   conta helomramos40@gmail.com). Banco PostgreSQL gerenciado, seed do ADMIN executado,
   interface redesenhada (design system "beauty"). **Todo o backlog de funcionalidades
@@ -192,8 +198,31 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   (Dynamic Measurement Engine), injeta `@page` com dimensões exatas e chama `window.print()`.
   Bloco A4 reutiliza `<SaleReceipt format="a4">` (mesmo visual da tela Vendas); code real
   obtido via `POST /api/sales` com `clientRef` idempotente ao finalizar online.
-- ✅ **Cadastros** (`/cadastros`, autenticado): CRUD de **clientes e fornecedores**
+- 🟡 **Cadastros** (`/cadastros`, autenticado): CRUD de **clientes e fornecedores**
   (nome, CPF/CNPJ, telefone, e-mail, endereço) com exclusão protegida por origem.
+  **Modal via React Portal** no mesmo padrão ouro de Produtos/Caixa (header com
+  ícone+título+subtítulo, corpo com scroll interno, rodapé fixo com `btn-ghost`/
+  `btn-primary`); grid responsivo `grid-cols-1 sm:grid-cols-2` (antes fixo em
+  2 colunas, sem colapsar no mobile). **Campos dinâmicos PF/PJ**: `isPJ =
+  document.replace(/\D/g,'').length > 11` alterna o label do nome
+  ("Razão Social"/"Nome Completo") e exibe um segundo campo — `tradeName`
+  ("Nome Fantasia"/"Apelido", novo campo `Person.tradeName` no schema).
+  **Máscaras em tempo real** (`lib/masks.ts`, sem dependências): `maskCpfCnpj`,
+  `maskPhone`, `maskCep` aplicadas no `onChange` e também no preenchimento
+  programático (lookup de CNPJ/CEP, que não dispara `onChange`). **Busca de
+  CNPJ**: motor trocado de BrasilAPI (bloqueia o campo `email` por proteção
+  anti-spam, sempre retorna `null`) para **ReceitaWS**, que retorna o payload
+  completo; a chamada é **proxeada pelo backend** (`GET /api/persons/cnpj/:cnpj`)
+  porque a ReceitaWS bloqueia CORS para chamadas diretas do browser — o proxy
+  também trata o caso da ReceitaWS responder HTTP 200 mesmo em erro
+  (`status: 'ERROR'` no corpo). **Listagem**: ordenação client-side (nome/código/
+  cidade, crescente/decrescente) via `<select>`; botão flutuante "voltar ao
+  topo" (aparece após `scrollY > 300`); documento/telefone exibidos com máscara
+  nos cards. **Busca "onisciente"**: filtro 100% client-side (nome, nome
+  fantasia/apelido, documento com/sem máscara, cidade, telefone) — a lista
+  completa é buscada uma vez por tipo e refinada localmente a cada tecla, sem
+  round-trip de rede. **Comandante sinalizou pendências adicionais na tela**
+  ainda não detalhadas/implementadas — ver §12.12.
 - ✅ **Vendas** (ADMIN, `/vendas`): **NºDOC sequencial** em todas as vendas; consulta
   com coluna de status do financeiro; **botão Visualizar** (ver itens, pagamentos,
   contas a receber) antes de decidir; **editar** (itens/qtd/preço/desconto/acréscimo/
@@ -326,7 +355,8 @@ O schema Prisma do briefing foi **mantido como base, porém corrigido e estendid
 | `ProductVariant.averageCost Decimal @default(0)` | Custo Médio Ponderado (CMP) — calculado automaticamente a cada entrada de nota; pode ser corrigido manualmente. |
 | `Product.tracksLotValidity` (booleano) | Liga/desliga exigência de lote/validade por produto (migração `add_lot_validity_control`). |
 | `Person.document` opcional (mantém `@unique`) | Clientes de balcão sem CPF; no Postgres, múltiplos `NULL` não colidem. |
-| Campos de endereço em `Person` | Autocompletar via BrasilAPI (§4.2). |
+| `Person.tradeName String?` | Nome fantasia (PJ) ou apelido (PF) — campo dinâmico conforme `isPJ` no formulário (migração `20260702000000_add_person_trade_name`). |
+| Campos de endereço em `Person` | Autocompletar via BrasilAPI (CEP) e ReceitaWS (CNPJ) — §4.2. |
 | `SupplierProductMapping` (nova) | Persistir o **De/Para** fornecedor↔variante (§4.3). |
 | Relações faltantes | `Invoice→supplier`, `CashRegister→user`, `Sale→user/client`, `FinancialAccount→invoice/person`. |
 | `StockMovement` (nova) | Razão (ledger) de estoque para auditoria e base da sugestão de compra. |
@@ -356,7 +386,7 @@ Outras decisões:
 |-----|-----------|---------------|--------|
 | 4.1 | Margem/Markup bidirecional | `packages/shared/src/pricing.ts`, `pages/ProductsPage.tsx` | ✅ |
 | 4.1 | Lote/validade configurável | `Product.tracksLotValidity`, `schemas/product.ts`, toggle no formulário | ✅ |
-| 4.2 | BrasilAPI (CNPJ) | Campos de endereço no schema/Zod prontos | 🟡 (falta autocomplete no front) |
+| 4.2 | BrasilAPI/ReceitaWS (CNPJ/CEP) | Autocomplete no `RegistrationsPage.tsx`; CNPJ via ReceitaWS proxeada em `GET /api/persons/cnpj/:cnpj` (CORS) | ✅ |
 | 4.3 | Entrada de XML + De/Para | `services/nfe-parser.ts`, `routes/invoices.ts`, `components/XmlImport.tsx` (upload) | ✅ |
 | 4.3 | Compra manual (sem XML) | `routes/invoices.ts` (`/manual`), `pages/PurchasesPage.tsx` | ✅ |
 | 4.3 | CFOP flexível | `InvoiceItem.cfop` | ✅ |
@@ -371,7 +401,7 @@ Outras decisões:
 | — | PDV: desconto/acréscimo/observação + valor unitário editável | `PdvPage.tsx`, `services/sales.ts` | ✅ |
 | — | Vendas: split de pagamento + "A prazo" (parcelas) | `SalePayment`, `services/sales.ts`, `PdvPage.tsx` (modal) | ✅ |
 | — | Vendas: consulta + editar/excluir | `routes/sales.ts` (PUT/DELETE), `SalesPage.tsx` | ✅ |
-| — | Cadastros de clientes/fornecedores | `routes/persons.ts`, `RegistrationsPage.tsx` | ✅ |
+| — | Cadastros de clientes/fornecedores | `routes/persons.ts`, `RegistrationsPage.tsx` | 🟡 |
 | — | Caixa: timeline + editar/excluir + histórico + resumo | `routes/cash.ts`, `CashPage.tsx` | ✅ |
 | — | Compra manual multi-produto + nº doc + contas a pagar | `routes/invoices.ts` (`/manual`), `PurchasesPage.tsx` | ✅ |
 | — | Financeiro: baixa parcial + estorno + filtros + código | `AccountSettlement`, `routes/financial.ts`, `FinancialPage.tsx` | ✅ |
@@ -392,11 +422,12 @@ Outras decisões:
 da venda, **relaxado para string** (tipos de recebimento configuráveis). Detalhe
 completo: `apps/api/prisma/schema.prisma`.
 
-**Migrações (11, todas aditivas/seguras):** `0_init`, `add_lot_validity_control`,
+**Migrações (12, todas aditivas/seguras):** `0_init`, `add_lot_validity_control`,
 `add_settings`, `sale_discount_surcharge_notes`, `financial_account_sale_link`,
 `sale_payments`, `invoice_document_notes`, `financial_settlements_code`,
 `sale_code_financial_flag`, `product_person_code`,
-`20260626000000_add_average_cost_to_variants` (pendente de merge para `main`).
+`20260626000000_add_average_cost_to_variants` (já mesclada na `main` via PR #2),
+`20260702000000_add_person_trade_name` (pendente de merge — ver ⚠️ no topo).
 Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
 
 ---
@@ -875,6 +906,52 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
     totalBleed - totalCollected`. Novo card "Fechamentos (Recolhido)" no
     frontend para transparência total.
   `npm run typecheck` + `npm run build` → **0 erros** em todos os commits.
+- ✅ **Onda 2026-07-02 — Cadastros: modal padrão ouro, máscaras, campos PF/PJ e
+  busca onisciente** (2026-07-02): Branch `feature/tela-produtos-caio`.
+  8 commits (`f4bf849`→`72479ac`), **ainda não publicados** (ver ⚠️ no topo).
+  - **`f4bf849`** (padronização visual): `PersonForm` (`RegistrationsPage.tsx`)
+    refeito para reusar a casca exata do modal de Produtos/Caixa —
+    `createPortal(..., document.body)`, `<form>` com `modal-sheet ... !p-0`,
+    header (ícone `Users`/`Truck` + título + subtítulo + X) e rodapé fixo
+    (`btn-ghost`/`btn-primary`); grid `grid-cols-1 sm:grid-cols-2` (antes
+    `grid-cols-2` fixo, sem colapsar no mobile); erro de salvamento migrado de
+    `window.alert` para banner inline. Preservada a busca de CNPJ/CEP existente.
+  - **`0fc3a00`** (máscaras): novo `apps/web/src/lib/masks.ts` (sem
+    dependências) — `maskCpfCnpj`, `maskPhone`, `maskCep`, aplicadas no
+    `onChange` dos campos correspondentes.
+  - **`28d2bdc`** (fix preenchimento programático): os lookups de CNPJ/CEP não
+    disparam `onChange`, então telefone/CEP chegavam crus na tela após a
+    busca — corrigido aplicando as mesmas funções de máscara diretamente no
+    `setForm` dos handlers de lookup.
+  - **`b32f4fb`** (campos dinâmicos PF/PJ): `Person.tradeName String?` (schema +
+    migração `20260702000000_add_person_trade_name`); `isPJ =
+    document.replace(/\D/g,'').length > 11` alterna o label do nome
+    ("Razão Social"/"Nome Completo") e exibe um 2º campo ("Nome Fantasia"/
+    "Apelido"); fix do bug de e-mail no lookup de CNPJ (`f.email || data.email`
+    nunca reavaliava o lado direito — trocado para `data.email || f.email`).
+  - **`7e8e102`** (troca de motor CNPJ): BrasilAPI bloqueia/sanitiza o campo
+    `email` por proteção anti-spam (sempre `null`) — trocado para **ReceitaWS**
+    (payload completo); tratamento do caso `status: 'ERROR'` (a ReceitaWS
+    responde HTTP 200 mesmo em erro).
+  - **`acc4d86`** (proxy CORS): ReceitaWS bloqueia fetch direto do browser
+    (sem `Access-Control-Allow-Origin`) — chamada movida para
+    `GET /api/persons/cnpj/:cnpj` (autenticada), que faz o proxy server-side
+    (Node não sofre CORS) e já converte `status: 'ERROR'` em
+    `AppError(400, ...)` no padrão `{ statusCode, code, message }` do
+    error-handler global.
+  - **`1618b4f`** (ordenação + UX): `<select>` de ordenação (nome/código/cidade,
+    crescente/decrescente, client-side via `useMemo`); botão flutuante
+    "voltar ao topo" (`fixed bottom-6 left-6`, aparece após `scrollY > 300`);
+    documento/telefone exibidos com máscara nos cards da listagem.
+  - **`72479ac`** (busca onisciente): a busca só filtrava `name`/`document`
+    **no backend** — cidade e telefone nunca entravam nessa query. Fix: lista
+    completa buscada uma vez por tipo (sem depender do termo na `queryKey`) e
+    filtrada 100% no cliente (nome, nome fantasia/apelido, documento com/sem
+    máscara, cidade, telefone) — digitação mais responsiva, sem round-trip por
+    tecla.
+  `npm run typecheck` + `npm run build` → **0 erros** em todos os commits.
+  **Pendências da tela sinalizadas pelo Comandante, ainda não detalhadas** —
+  ver §12.15.
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---
@@ -885,7 +962,9 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
 2. ~~**Deploy Railway não configurado**~~ **RESOLVIDO (2026-06-03)**: sistema em produção em https://exodus-web-production.up.railway.app.
 3. **`npm audit`**: 3 vulnerabilidades reportadas (1 moderada, 2 críticas) em deps transitivas — revisar antes de escalar.
 4. **Sem testes automatizados** (Vitest/Supertest) — apenas smoke test manual.
-5. **BrasilAPI** ainda não integrada no formulário de fornecedor (§4.2).
+5. ~~**BrasilAPI** ainda não integrada no formulário de fornecedor~~ **RESOLVIDO
+   (2026-07-02)**: CEP via BrasilAPI (endereço completo) + CNPJ via ReceitaWS
+   (proxeada pelo backend, ver §5 Cadastros).
 6. **Cadastro de produto** cria 1 variante por vez (multi-variante a fazer).
 7. ~~**Pagamento único por venda**~~ **RESOLVIDO** (PDV-B): split de pagamento + "A prazo".
 8. **Estoque pode ficar negativo** em vendas offline (decisão consciente). Avaliar política de bloqueio/alerta.
@@ -895,6 +974,13 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
 12. ~~**Tela de Suprimento/Sangria** usa `window.prompt()`~~ **RESOLVIDO** (Onda Caixa): modal próprio com observação.
 13. **Tipos de recebimento customizados** são tratados como "à vista não-dinheiro": o backend reconhece apenas os códigos literais `CASH` (entra no `expectedCash`) e `A_PRAZO` (gera parcelas). Um tipo novo com kind CASH/A_PRAZO não teria esse comportamento especial — por isso a tela de Configurações só permite adicionar tipos `OTHER` (os 5 base são fixos quanto a code/kind).
 14. ~~**Edição de venda** simplifica o pagamento para forma única~~ **RESOLVIDO (2026-06-05)**: edição agora aceita "a prazo" com parcelas; split de formas múltiplas segue sendo reaberto somente na criação (excluir e refazer para split).
+15. **Tela de Cadastros (`/cadastros`)**: o Comandante sinalizou que ainda há
+    pontos pendentes de refinamento nesta tela, **ainda não detalhados/
+    especificados**. Retomar com ele antes da próxima onda de Cadastros para
+    levantar o escopo exato (possíveis candidatos a confirmar: paginação para
+    bases grandes de clientes/fornecedores — hoje busca até 100 registros por
+    tipo sem paginação; edição de fornecedor com múltiplos contatos; outros
+    itens ainda não relatados).
 
 ---
 
