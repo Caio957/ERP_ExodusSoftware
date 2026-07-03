@@ -15,6 +15,7 @@ import {
   Ban,
   CircleDollarSign,
 } from 'lucide-react';
+import type { SalesSettings } from '@exodus/shared';
 import { api, ApiError } from '../lib/api';
 import {
   SaleReceipt,
@@ -502,6 +503,16 @@ function EditSaleModal({
   const [intervalDays, setIntervalDays] = useState(30);
   const [localError, setLocalError] = useState<string | null>(null);
 
+  // Cliente padrão configurado em Configurações → Vendas — usado como
+  // fallback no lugar do antigo "Balcão" quando nenhum cliente é selecionado.
+  const { data: salesSettings } = useQuery({
+    queryKey: ['settings', 'sales'],
+    queryFn: () =>
+      api.get<SalesSettings & { defaultPerson: { id: string; name: string; tradeName: string | null } | null }>(
+        '/api/settings/sales',
+      ),
+  });
+
   const { isLoading } = useQuery({
     queryKey: ['sale', saleId],
     queryFn: async () => {
@@ -564,7 +575,9 @@ function EditSaleModal({
     mutationFn: () =>
       api.put(`/api/sales/${saleId}`, {
         paymentMethod,
-        clientId: client?.id ?? undefined,
+        // Sem cliente selecionado: usa o cliente padrão configurado em vez
+        // de deixar a venda sem pessoa vinculada ("Balcão" hardcoded).
+        clientId: client?.id ?? salesSettings?.defaultPersonId ?? undefined,
         items: items.map((it) => ({ variantId: it.variantId, quantity: it.quantity, unitPrice: it.unitPrice })),
         discount: round2(discount),
         surcharge: round2(surcharge),
@@ -609,7 +622,11 @@ function EditSaleModal({
             {/* Cliente */}
             <div className="mb-3">
               <span className="label">Cliente</span>
-              <ClientPicker value={client} onChange={setClient} />
+              <ClientPicker
+                value={client}
+                onChange={setClient}
+                defaultPersonName={salesSettings?.defaultPerson?.name ?? null}
+              />
             </div>
 
             {/* Itens */}
@@ -805,9 +822,11 @@ function EditSaleModal({
 function ClientPicker({
   value,
   onChange,
+  defaultPersonName,
 }: {
   value: { id: string; name: string } | null;
   onChange: (c: { id: string; name: string } | null) => void;
+  defaultPersonName?: string | null;
 }) {
   const [term, setTerm] = useState('');
   const { data } = useQuery({
@@ -836,7 +855,7 @@ function ClientPicker({
         className="input"
         value={term}
         onChange={(e) => setTerm(e.target.value)}
-        placeholder="Buscar cliente (deixe vazio = Balcão)..."
+        placeholder={`Buscar cliente (Padrão: ${defaultPersonName || 'Nenhum'})...`}
       />
       {data && data.items.length > 0 && (
         <div className="absolute z-10 mt-1 max-h-40 w-full overflow-auto rounded-xl border border-slate-200 bg-white shadow-elevated">

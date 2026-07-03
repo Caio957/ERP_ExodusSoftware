@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ProductFormSettings, CompanyProfile, PaymentType } from '@exodus/shared';
-import { Settings, Save, Check, Package, CreditCard, Building2, Plus, Trash2, Users, Pencil, X, ShieldCheck } from 'lucide-react';
+import type { ProductFormSettings, CompanyProfile, PaymentType, SalesSettings } from '@exodus/shared';
+import { Settings, Save, Check, Package, CreditCard, Building2, Plus, Trash2, Users, Pencil, X, ShieldCheck, UserCheck, Search } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../store/auth';
 
 export function SettingsPage() {
-  const [tab, setTab] = useState<'produto' | 'recebimentos' | 'empresa' | 'usuarios'>('produto');
+  const [tab, setTab] = useState<'produto' | 'recebimentos' | 'empresa' | 'usuarios' | 'vendas'>('produto');
   return (
     <div className="mx-auto max-w-2xl space-y-5">
       <div className="flex items-center gap-3">
@@ -32,12 +32,16 @@ export function SettingsPage() {
         <button className={tab === 'usuarios' ? 'btn-primary' : 'btn-ghost'} onClick={() => setTab('usuarios')}>
           <Users className="h-5 w-5" /> Usuários
         </button>
+        <button className={tab === 'vendas' ? 'btn-primary' : 'btn-ghost'} onClick={() => setTab('vendas')}>
+          <UserCheck className="h-5 w-5" /> Vendas
+        </button>
       </div>
 
       {tab === 'produto' && <ProductFormSettingsCard />}
       {tab === 'recebimentos' && <PaymentTypesCard />}
       {tab === 'empresa' && <CompanyCard />}
       {tab === 'usuarios' && <UsersCard />}
+      {tab === 'vendas' && <SalesSettingsCard />}
     </div>
   );
 }
@@ -311,6 +315,119 @@ function CompanyCard() {
           <Save className="h-5 w-5" /> {save.isPending ? 'Salvando...' : 'Salvar'}
         </button>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Cliente padrão de vendas (substitui o fallback hardcoded "Balcão")
+// ---------------------------------------------------------------------------
+interface DefaultPerson {
+  id: string;
+  name: string;
+  tradeName: string | null;
+}
+
+function SalesSettingsCard() {
+  const qc = useQueryClient();
+  const [defaultPerson, setDefaultPerson] = useState<DefaultPerson | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['settings', 'sales'],
+    queryFn: () => api.get<SalesSettings & { defaultPerson: DefaultPerson | null }>('/api/settings/sales'),
+  });
+  useEffect(() => {
+    if (data) setDefaultPerson(data.defaultPerson);
+  }, [data]);
+
+  const save = useMutation({
+    mutationFn: () => api.put('/api/settings/sales', { defaultPersonId: defaultPerson?.id ?? null }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['settings', 'sales'] });
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 2500);
+    },
+    onError: (e) => window.alert(e instanceof ApiError ? e.message : 'Falha ao salvar'),
+  });
+
+  if (isLoading) return <div className="grid h-40 place-items-center text-slate-500">Carregando...</div>;
+
+  return (
+    <div className="card">
+      <div className="mb-1 flex items-center gap-2 font-semibold">
+        <UserCheck className="h-5 w-5 text-brand-600" /> Cliente padrão de vendas
+      </div>
+      <p className="mb-4 text-xs text-slate-500">
+        Usado no PDV e na edição de vendas quando nenhum cliente é selecionado —
+        substitui o antigo "Balcão" por um cliente real do cadastro.
+      </p>
+
+      <DefaultPersonPicker value={defaultPerson} onChange={setDefaultPerson} />
+
+      <div className="mt-5 flex items-center justify-end gap-3">
+        <SavedTag show={saved} />
+        <button className="btn-primary" disabled={save.isPending} onClick={() => save.mutate()}>
+          <Save className="h-5 w-5" /> {save.isPending ? 'Salvando...' : 'Salvar'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DefaultPersonPicker({
+  value,
+  onChange,
+}: {
+  value: DefaultPerson | null;
+  onChange: (p: DefaultPerson | null) => void;
+}) {
+  const [term, setTerm] = useState('');
+  const { data } = useQuery({
+    queryKey: ['settings-sales-person-search', term],
+    queryFn: () =>
+      api.get<{ items: DefaultPerson[] }>(
+        `/api/persons?type=CLIENT&pageSize=20${term.trim() ? `&search=${encodeURIComponent(term.trim())}` : ''}`,
+      ),
+    enabled: !value,
+  });
+
+  if (value) {
+    return (
+      <div className="flex items-center justify-between rounded-xl bg-brand-50 px-3 py-2 text-sm text-brand-700">
+        <span className="font-medium">{value.name}{value.tradeName ? ` (${value.tradeName})` : ''}</span>
+        <button className="text-xs underline" onClick={() => onChange(null)}>
+          remover
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative">
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        <input
+          className="input pl-9"
+          value={term}
+          onChange={(e) => setTerm(e.target.value)}
+          placeholder="Buscar cliente (nenhum padrão configurado)..."
+        />
+      </div>
+      {data && data.items.length > 0 && (
+        <div className="absolute z-10 mt-1 max-h-40 w-full overflow-auto rounded-xl border border-slate-200 bg-white shadow-elevated">
+          {data.items.map((p) => (
+            <button
+              key={p.id}
+              className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
+              onClick={() => onChange(p)}
+            >
+              {p.name}
+              {p.tradeName && <span className="text-slate-400"> ({p.tradeName})</span>}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

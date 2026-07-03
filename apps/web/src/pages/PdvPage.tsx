@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
-import { type PaymentType, DEFAULT_PAYMENT_TYPES } from '@exodus/shared';
+import { type PaymentType, type SalesSettings, DEFAULT_PAYMENT_TYPES } from '@exodus/shared';
 import {
   Search,
   ShoppingCart,
@@ -117,6 +117,26 @@ export function PdvPage() {
     queryFn: () => api.get<CompanyInfo>('/api/settings/company'),
   });
 
+  // Cliente padrão configurado em Configurações → Vendas (substitui o antigo
+  // fallback hardcoded "Balcão"). Pré-seleciona o cliente atual do PDV.
+  const { data: salesSettings } = useQuery({
+    queryKey: ['settings', 'sales'],
+    queryFn: () =>
+      api.get<SalesSettings & { defaultPerson: { id: string; name: string; tradeName: string | null } | null }>(
+        '/api/settings/sales',
+      ),
+  });
+  const defaultClient = salesSettings?.defaultPerson
+    ? { id: salesSettings.defaultPerson.id, name: salesSettings.defaultPerson.name }
+    : null;
+  const appliedDefaultClient = useRef(false);
+  useEffect(() => {
+    if (!appliedDefaultClient.current && defaultClient && !client) {
+      setClient(defaultClient);
+      appliedDefaultClient.current = true;
+    }
+  }, [defaultClient, client]);
+
   // Busca: campo vazio lista todos os produtos (Requisito B1).
   const { data: results } = useQuery({
     queryKey: ['product-search', search],
@@ -189,7 +209,7 @@ export function PdvPage() {
     setDiscount(0);
     setSurcharge(0);
     setNotes('');
-    setClient(null);
+    setClient(defaultClient);
   }
 
   function handlePrint(mode: 'thermal' | 'a4') {
