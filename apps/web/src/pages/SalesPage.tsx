@@ -513,28 +513,34 @@ function EditSaleModal({
       ),
   });
 
-  const { isLoading } = useQuery({
+  const { data: sale, isLoading } = useQuery({
     queryKey: ['sale', saleId],
-    queryFn: async () => {
-      const sale = await api.get<SaleDetail>(`/api/sales/${saleId}`);
-      setItems(
-        sale.items.map((it) => ({
-          variantId: it.variantId,
-          description: `${it.variant.product.name} - ${it.variant.description}`,
-          unitPrice: it.unitPrice,
-          quantity: it.quantity,
-        })),
-      );
-      // Mantém a prazo se a venda era a prazo; senão normaliza para forma única.
-      const isAprazo = sale.paymentMethod === 'A_PRAZO' || sale.payments.some((p) => p.method === 'A_PRAZO');
-      setPaymentMethod(isAprazo ? 'A_PRAZO' : (SINGLE_METHODS as readonly string[]).includes(sale.paymentMethod) ? sale.paymentMethod : 'CASH');
-      setDiscount(sale.discount);
-      setSurcharge(sale.surcharge);
-      setNotes(sale.notes ?? '');
-      setClient(sale.client ? { id: sale.client.id, name: sale.client.name } : null);
-      return sale;
-    },
+    queryFn: () => api.get<SaleDetail>(`/api/sales/${saleId}`),
   });
+
+  // Sincroniza o estado local do "mini-PDV" com os dados da venda assim que
+  // chegam. Guardado por items.length === 0 para inicializar só uma vez —
+  // evita sobrescrever edições do usuário caso a query seja invalidada/
+  // refeita (ex.: cache compartilhado com o ViewSaleModal, que usa a mesma
+  // queryKey com um queryFn diferente, sem efeitos colaterais).
+  useEffect(() => {
+    if (!sale || items.length > 0) return;
+    setItems(
+      sale.items.map((it) => ({
+        variantId: it.variantId,
+        description: `${it.variant.product.name} - ${it.variant.description}`,
+        unitPrice: it.unitPrice,
+        quantity: it.quantity,
+      })),
+    );
+    // Mantém a prazo se a venda era a prazo; senão normaliza para forma única.
+    const isAprazo = sale.paymentMethod === 'A_PRAZO' || sale.payments.some((p) => p.method === 'A_PRAZO');
+    setPaymentMethod(isAprazo ? 'A_PRAZO' : (SINGLE_METHODS as readonly string[]).includes(sale.paymentMethod) ? sale.paymentMethod : 'CASH');
+    setDiscount(sale.discount);
+    setSurcharge(sale.surcharge);
+    setNotes(sale.notes ?? '');
+    setClient(sale.client ? { id: sale.client.id, name: sale.client.name } : null);
+  }, [sale]);
 
   const { data: results } = useQuery({
     queryKey: ['sale-product-search', search],
@@ -606,7 +612,7 @@ function EditSaleModal({
         {/* Cabeçalho fixo */}
         <header className="shrink-0 p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50/50">
           <div>
-            <h2 className="font-display text-lg font-bold">Editar venda</h2>
+            <h2 className="font-display text-lg font-bold">Editar venda{sale ? ` #${sale.code}` : ''}</h2>
             <p className="mt-0.5 flex items-center gap-1.5 text-xs text-amber-600">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
               Ao salvar, o estoque é reajustado e o financeiro vinculado é refeito.
