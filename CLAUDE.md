@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-07-02
+- **Última atualização:** 2026-07-03
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -22,14 +22,27 @@
   commits são empurrados para o GitHub nessas branches; o **merge para `main` é feito
   manualmente via PR no GitHub** (o merge dispara o auto-deploy no Railway). A IA
   trabalha sempre na branch ativa indicada — nunca commita direto na `main` sem
-  instrução explícita. Branch ativa no momento: **`feature/tela-produtos-caio`**.
-  ⚠️ **Estado divergente (2026-07-02)**: a `main` já recebeu um merge anterior
-  desta branch via PR #2 (até o commit `052b010`) + um commit direto
-  `da88071` ("force railway deploy"). A partir daí a branch local seguiu
-  recebendo commits novos (`777d921`→`72479ac` — módulo Cadastros completo:
-  ver §11) que **ainda não foram publicados** (`origin/feature/tela-produtos-caio`
-  segue parada em `052b010`). Antes do próximo merge, sincronizar
-  (`git push`) e abrir um novo PR com o conteúdo pendente.
+  instrução explícita. Branch ativa no momento: **`feature/refinamento-cadastros`**.
+  ⚠️ **Estado divergente (2026-07-03) — três branches em paralelo**:
+  - `feature/tela-produtos-caio`: **já mesclada na `main`** via PR #3 (`19930a4`)
+    e PR #4 (`a0fe10b`) — módulos Produtos/Caixa/Relatório de Caixa/Cadastros
+    (onda 2026-07-02) inteiros já estão em produção após o próximo deploy.
+  - `feature/estoque-tipo-movimentacao` (Helom): commit `2b42d4b` (busca por
+    Enter + seletor de tipo de movimentação no Acerto de Estoque) — **ainda
+    não mesclada**.
+  - `feature/refinamento-cadastros` (Caio, branch ativa): refinamentos do
+    botão "voltar ao topo" (Dark Glassmorphism, animação drop-down, fix de
+    ancoragem via Portal — ver §11, onda 2026-07-03) — **ainda não mesclada**.
+  - **Conflito pendente**: uma tentativa de merge da branch do Helom direto na
+    `main` (commit `c70ebc6`, "resolve conflito de merge com feature do
+    estoque") **deixou marcadores de conflito Git não resolvidos** no
+    `CLAUDE.md` remoto (`<<<<<<<`/`=======`/`>>>>>>>`) na §11. Este documento
+    (nesta branch) já contém a resolução manual correta (ambos os blocos
+    preservados); ao abrir o próximo PR, usar esta versão como referência
+    para resolver o `CLAUDE.md` na `main`.
+  - Todas as três branches precisam ser reconciliadas e mescladas via Pull
+    Request para a `main` (as duas ainda não mescladas, mais a correção do
+    `CLAUDE.md` da `main`) antes do próximo deploy.
 - **Fase atual:** Sistema em **produção no Railway** (projeto `exodus-software`,
   conta helomramos40@gmail.com). Banco PostgreSQL gerenciado, seed do ADMIN executado,
   interface redesenhada (design system "beauty"). **Todo o backlog de funcionalidades
@@ -217,8 +230,14 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   também trata o caso da ReceitaWS responder HTTP 200 mesmo em erro
   (`status: 'ERROR'` no corpo). **Listagem**: ordenação client-side (nome/código/
   cidade, crescente/decrescente) via `<select>`; botão flutuante "voltar ao
-  topo" (aparece após `scrollY > 300`); documento/telefone exibidos com máscara
-  nos cards. **Busca "onisciente"**: filtro 100% client-side (nome, nome
+  topo" com design **Dark Glassmorphism** (fundo `rgba` escuro + `backdrop-blur`)
+  e **animação drop-down** de entrada (gatilho em `scrollY > 50`, opacidade +
+  translate-Y via classes dinâmicas); **ejetado via `createPortal(...,
+  document.body)`** para evitar Containing Block Hijacking (o `animate-fade-in`
+  do `Layout.tsx` deixa um `transform` persistente em elementos ancestrais,
+  quebrando o `position: fixed` e fazendo o botão se comportar como `absolute`);
+  documento/telefone exibidos com máscara nos cards. **Busca "onisciente"**:
+  filtro 100% client-side (nome, nome
   fantasia/apelido, documento com/sem máscara, cidade, telefone) — a lista
   completa é buscada uma vez por tipo e refinada localmente a cada tecla, sem
   round-trip de rede. **Comandante sinalizou pendências adicionais na tela**
@@ -842,7 +861,7 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
   - **`ProductsPage.tsx`**: estados `orderBy`/`orderDir` no `queryKey` e na URL;
     dois `<select className="input">` no painel de filtros (grid `lg:grid-cols-5`).
   `npm run typecheck` → **0 erros**.
-<<<<<<< HEAD
+
 - ✅ **Onda 2026-06-30a — Fix modais de Caixa (React Portal)** (2026-06-30):
   Branch `feature/tela-produtos-caio`. Commit `e05e95c`.
   - **`CashPage.tsx`**: componente `Modal` compartilhado (usado por `TransactionModal`
@@ -907,6 +926,21 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
     totalBleed - totalCollected`. Novo card "Fechamentos (Recolhido)" no
     frontend para transparência total.
   `npm run typecheck` + `npm run build` → **0 erros** em todos os commits.
+- ✅ **Onda 2026-07-02 — Acerto de estoque: busca com Enter + tipo de movimentação** (2026-07-02):
+  Branch `feature/estoque-tipo-movimentacao` — **ainda não mesclada na `main`**.
+  - **Busca por Enter** (`StockAdjustPage.tsx` — `ProductSearch`): a busca de produto
+    deixa de disparar a cada tecla; novo estado `searchTerm` só é setado no `onKeyDown`
+    (Enter). Campo vazio + Enter lista todos os produtos (busca vazia já suportada
+    pela API).
+  - **Seletor "Tipo de movimentação"** (`Balanço/Inventário` [padrão] · `Entrada` ·
+    `Saída`) adicionado antes do campo de quantidade, com visual do design system
+    (azul/dourado). Label do campo de quantidade muda conforme o tipo.
+  - **Regra de cálculo**: `computedNewQuantity` — Balanço usa o valor digitado como
+    contagem final (comportamento antigo); Entrada soma `+quantidade` ao estoque
+    atual; Saída subtrai `-quantidade`. O resultado é enviado como `newQuantity` para
+    `POST /api/products/adjust-stock` (endpoint inalterado).
+  - Validado na tela pelo usuário.
+  `npm run typecheck` → **0 erros**.
 - ✅ **Onda 2026-07-02 — Cadastros: modal padrão ouro, máscaras, campos PF/PJ e
   busca onisciente** (2026-07-02): Branch `feature/tela-produtos-caio`.
   8 commits (`f4bf849`→`72479ac`), **ainda não publicados** (ver ⚠️ no topo).
@@ -953,7 +987,15 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
   `npm run typecheck` + `npm run build` → **0 erros** em todos os commits.
   **Pendências da tela sinalizadas pelo Comandante, ainda não detalhadas** —
   ver §12.15.
-=======
+
+- ✅ **Onda 2026-07-03 — Refinamento UI/UX Cadastros (Scroll-to-top)**: Botão
+  "Voltar ao Topo" refatorado com Dark Glassmorphism e animação drop-down
+  fluida (gatilho reduzido para 50px). Correção crítica de CSS Hijacking
+  (ancoragem `absolute` indevida causada pelo `animate-fade-in`) resolvida
+  ejetando o botão via `createPortal(..., document.body)`, garantindo
+  ancoragem `fixed` perfeita ao viewport. Branch `feature/refinamento-cadastros`
+  (commits `670e9a1`→`a7ac204`). `npm run typecheck` + `npm run build` → **0 erros**.
+
 - ✅ **Onda 2026-07-02 — Acerto de estoque: busca com Enter + tipo de movimentação** (2026-07-02):
   Branch `feature/estoque-tipo-movimentacao` — **ainda não mesclada na `main`**.
   - **Busca por Enter** (`StockAdjustPage.tsx` — `ProductSearch`): a busca de produto
@@ -969,7 +1011,7 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
     `POST /api/products/adjust-stock` (endpoint inalterado).
   - Validado na tela pelo usuário.
   `npm run typecheck` → **0 erros**.
->>>>>>> feature/estoque-tipo-movimentacao
+
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---

@@ -48,26 +48,41 @@ export function RegistrationsPage() {
 }
 
 // ---------------------------------------------------------------------------
-// Botão flutuante "Voltar ao topo" — aparece só depois de rolar a página.
+// Botão flutuante "Voltar ao topo" — aparece cedo (scrollY > 50) com uma
+// animação de entrada deslizando de cima para baixo. O botão fica SEMPRE no
+// DOM (só alterna opacidade/translate/pointer-events) para que a transição
+// do Tailwind rode na entrada e na saída. O fundo escuro e o hover vêm de
+// style inline com rgba + eventos de mouse (bypass do bug de renderização
+// das classes de opacidade do Tailwind neste build).
+// Ejetado via createPortal(..., document.body): algum ancestral do layout
+// base (provavelmente com transform/overflow) quebra o containing block do
+// `fixed`, fazendo o botão se comportar como `absolute` e descer junto com
+// a lista em vez de ficar ancorado no viewport.
 function ScrollToTopButton() {
-  const [visible, setVisible] = useState(false);
+  const [showScroll, setShowScroll] = useState(false);
+  const [hover, setHover] = useState(false);
 
   useEffect(() => {
-    const onScroll = () => setVisible(window.scrollY > 300);
+    const onScroll = () => setShowScroll(window.scrollY > 50);
     window.addEventListener('scroll', onScroll);
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  if (!visible) return null;
-
-  return (
+  return createPortal(
     <button
-      className="fixed bottom-6 left-6 z-50 grid h-12 w-12 place-items-center rounded-full bg-brand-600 text-white shadow-lg transition hover:bg-brand-700"
+      className={`fixed right-4 bottom-24 md:bottom-8 md:right-8 z-50 backdrop-blur-md transition-all duration-500 shadow-xl rounded-full p-3 flex items-center justify-center ${showScroll ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 -translate-y-12 pointer-events-none'}`}
+      style={{
+        backgroundColor: hover ? 'rgba(30, 41, 59, 0.9)' : 'rgba(30, 41, 59, 0.6)',
+        color: 'white',
+      }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
       title="Voltar ao topo"
     >
-      <ArrowUp className="h-5 w-5" />
-    </button>
+      <ArrowUp className="w-6 h-6" />
+    </button>,
+    document.body,
   );
 }
 
