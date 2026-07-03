@@ -10,6 +10,7 @@ import {
   Minus,
   Search,
   AlertTriangle,
+  ShieldAlert,
   Eye,
   Printer,
   Ban,
@@ -356,7 +357,12 @@ function ViewSaleModal({
                 <CircleDollarSign className="h-4 w-4" /> Gerar financeiro
               </button>
             )}
-            <button className="btn-primary" onClick={() => onEdit(sale.id)}>
+            <button
+              className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={sale.financialGenerated}
+              title={sale.financialGenerated ? 'Exclua o financeiro antes de editar' : 'Editar venda'}
+              onClick={() => onEdit(sale.id)}
+            >
               <Pencil className="h-4 w-4" /> Editar
             </button>
           </footer>
@@ -604,6 +610,39 @@ function EditSaleModal({
     if (items.length === 0) return setLocalError('A venda precisa de ao menos um item.');
     if (isAprazo && !client) return setLocalError('Venda a prazo exige um cliente.');
     save.mutate();
+  }
+
+  // Guarda de segurança: bloqueia a edição se a venda ainda tiver financeiro
+  // gerado (o operador deve excluir o financeiro manualmente primeiro, para
+  // ter consciência do impacto no caixa/recebimentos).
+  if (sale?.financialGenerated) {
+    return createPortal(
+      <div className="modal-overlay">
+        <div className="modal-sheet w-full sm:max-w-md flex flex-col overflow-hidden !p-0">
+          <header className="shrink-0 p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50/50">
+            <h2 className="font-display text-lg font-bold">Editar venda #{sale.code}</h2>
+            <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
+              <X className="h-5 w-5" />
+            </button>
+          </header>
+          <div className="flex-1 min-h-0 overflow-y-auto p-6">
+            <div className="flex flex-col items-center gap-3 py-6 text-center">
+              <ShieldAlert className="h-12 w-12 text-rose-500" />
+              <p className="text-sm font-medium text-slate-700">
+                Acesso Negado: Esta venda possui financeiro gerado. Feche, exclua o financeiro e
+                tente novamente.
+              </p>
+            </div>
+          </div>
+          <footer className="shrink-0 p-4 border-t border-slate-200 bg-slate-50 flex justify-end">
+            <button className="btn-ghost" onClick={onClose}>
+              Fechar
+            </button>
+          </footer>
+        </div>
+      </div>,
+      document.body,
+    );
   }
 
   return createPortal(
