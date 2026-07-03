@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Receipt,
@@ -248,111 +249,120 @@ function ViewSaleModal({
     onError: (e) => window.alert(e instanceof ApiError ? e.message : 'Falha ao alterar o financeiro'),
   });
 
-  return (
+  return createPortal(
     <div className="modal-overlay">
-      <div className="modal-sheet sm:max-w-lg">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-display text-lg font-bold">Venda {sale ? `#${sale.code}` : ''}</h2>
+      <div className="modal-sheet w-full max-w-2xl flex flex-col overflow-hidden !p-0">
+        <header className="shrink-0 p-4 border-b border-slate-200 flex justify-between items-start bg-slate-50/50">
+          <div>
+            <h2 className="font-display text-lg font-bold">Venda {sale ? `#${sale.code}` : ''}</h2>
+            {sale && (
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
+                <span>{new Date(sale.soldAt).toLocaleString('pt-BR')}</span>
+                <FinancialBadge generated={sale.financialGenerated} />
+              </div>
+            )}
+          </div>
           <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
             <X className="h-5 w-5" />
           </button>
+        </header>
+
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-6">
+          {isLoading || !sale ? (
+            <div className="grid h-32 place-items-center text-slate-500">Carregando...</div>
+          ) : (
+            <>
+              <div className="text-sm">
+                <span className="text-slate-400">Cliente:</span> {sale.client?.name ?? 'Balcão'}
+              </div>
+
+              <ul className="divide-y divide-slate-100 text-sm">
+                {sale.items.map((it, i) => (
+                  <li key={i} className="flex justify-between py-1.5">
+                    <span>
+                      {it.variant.product.name} — {it.variant.description}
+                    </span>
+                    <span className="text-slate-500">
+                      {it.quantity} × {brl(it.unitPrice)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="space-y-1 border-t border-slate-100 pt-2 text-sm">
+                <Row label="Subtotal" value={brl(sale.subtotal)} />
+                {sale.discount > 0 && <Row label="Desconto" value={`- ${brl(sale.discount)}`} tone="rose" />}
+                {sale.surcharge > 0 && <Row label="Acréscimo" value={`+ ${brl(sale.surcharge)}`} tone="emerald" />}
+                <div className="flex justify-between pt-1 text-base font-bold">
+                  <span>Total</span>
+                  <span>{brl(sale.totalAmount)}</span>
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-slate-50 p-3 text-sm">
+                <div className="mb-1 font-semibold">Pagamento</div>
+                {(sale.payments.length ? sale.payments : [{ method: sale.paymentMethod, amount: sale.totalAmount }]).map(
+                  (p, i) => (
+                    <div key={i} className="flex justify-between text-slate-600">
+                      <span>{methodLabel[p.method] ?? p.method}</span>
+                      <span>{brl(p.amount)}</span>
+                    </div>
+                  ),
+                )}
+              </div>
+
+              {sale.financialAccounts.length > 0 && (
+                <div className="rounded-xl bg-slate-50 p-3 text-sm">
+                  <div className="mb-1 font-semibold">Contas a receber (a prazo)</div>
+                  {sale.financialAccounts.map((a) => (
+                    <div key={a.id} className="flex justify-between text-slate-600">
+                      <span>
+                        {new Date(a.dueDate).toLocaleDateString('pt-BR')} · {a.status}
+                      </span>
+                      <span>{brl(a.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {sale.notes && <p className="text-sm text-slate-500">Obs.: {sale.notes}</p>}
+            </>
+          )}
         </div>
 
-        {isLoading || !sale ? (
-          <div className="grid h-32 place-items-center text-slate-500">Carregando...</div>
-        ) : (
-          <>
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
-              <span>{new Date(sale.soldAt).toLocaleString('pt-BR')}</span>
-              <FinancialBadge generated={sale.financialGenerated} />
-            </div>
-            <div className="mb-3 text-sm">
-              <span className="text-slate-400">Cliente:</span> {sale.client?.name ?? 'Balcão'}
-            </div>
-
-            <ul className="mb-3 divide-y divide-slate-100 text-sm">
-              {sale.items.map((it, i) => (
-                <li key={i} className="flex justify-between py-1.5">
-                  <span>
-                    {it.variant.product.name} — {it.variant.description}
-                  </span>
-                  <span className="text-slate-500">
-                    {it.quantity} × {brl(it.unitPrice)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-
-            <div className="space-y-1 border-t border-slate-100 pt-2 text-sm">
-              <Row label="Subtotal" value={brl(sale.subtotal)} />
-              {sale.discount > 0 && <Row label="Desconto" value={`- ${brl(sale.discount)}`} tone="rose" />}
-              {sale.surcharge > 0 && <Row label="Acréscimo" value={`+ ${brl(sale.surcharge)}`} tone="emerald" />}
-              <div className="flex justify-between pt-1 text-base font-bold">
-                <span>Total</span>
-                <span>{brl(sale.totalAmount)}</span>
-              </div>
-            </div>
-
-            <div className="mt-3 rounded-xl bg-slate-50 p-3 text-sm">
-              <div className="mb-1 font-semibold">Pagamento</div>
-              {(sale.payments.length ? sale.payments : [{ method: sale.paymentMethod, amount: sale.totalAmount }]).map(
-                (p, i) => (
-                  <div key={i} className="flex justify-between text-slate-600">
-                    <span>{methodLabel[p.method] ?? p.method}</span>
-                    <span>{brl(p.amount)}</span>
-                  </div>
-                ),
-              )}
-            </div>
-
-            {sale.financialAccounts.length > 0 && (
-              <div className="mt-3 rounded-xl bg-slate-50 p-3 text-sm">
-                <div className="mb-1 font-semibold">Contas a receber (a prazo)</div>
-                {sale.financialAccounts.map((a) => (
-                  <div key={a.id} className="flex justify-between text-slate-600">
-                    <span>
-                      {new Date(a.dueDate).toLocaleDateString('pt-BR')} · {a.status}
-                    </span>
-                    <span>{brl(a.amount)}</span>
-                  </div>
-                ))}
-              </div>
+        {sale && (
+          <footer className="shrink-0 p-4 border-t border-slate-200 bg-slate-50 flex flex-wrap justify-end gap-3">
+            <button className="btn-ghost" onClick={() => onPrint(sale.id)}>
+              <Printer className="h-4 w-4" /> Imprimir
+            </button>
+            {sale.financialGenerated ? (
+              <button
+                className="inline-flex items-center gap-1 rounded-xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700 transition hover:bg-amber-100 disabled:opacity-50"
+                disabled={toggleFinancial.isPending}
+                onClick={() => {
+                  if (window.confirm('Excluir o financeiro desta venda? Ela deixará de contar no caixa/recebimentos.'))
+                    toggleFinancial.mutate(false);
+                }}
+              >
+                <Ban className="h-4 w-4" /> Excluir financeiro
+              </button>
+            ) : (
+              <button
+                className="inline-flex items-center gap-1 rounded-xl bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
+                disabled={toggleFinancial.isPending}
+                onClick={() => toggleFinancial.mutate(true)}
+              >
+                <CircleDollarSign className="h-4 w-4" /> Gerar financeiro
+              </button>
             )}
-
-            {sale.notes && <p className="mt-3 text-sm text-slate-500">Obs.: {sale.notes}</p>}
-
-            <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
-              <button className="btn-ghost" onClick={() => onPrint(sale.id)}>
-                <Printer className="h-4 w-4" /> Imprimir
-              </button>
-              {sale.financialGenerated ? (
-                <button
-                  className="inline-flex items-center gap-1 rounded-xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700 transition hover:bg-amber-100 disabled:opacity-50"
-                  disabled={toggleFinancial.isPending}
-                  onClick={() => {
-                    if (window.confirm('Excluir o financeiro desta venda? Ela deixará de contar no caixa/recebimentos.'))
-                      toggleFinancial.mutate(false);
-                  }}
-                >
-                  <Ban className="h-4 w-4" /> Excluir financeiro
-                </button>
-              ) : (
-                <button
-                  className="inline-flex items-center gap-1 rounded-xl bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
-                  disabled={toggleFinancial.isPending}
-                  onClick={() => toggleFinancial.mutate(true)}
-                >
-                  <CircleDollarSign className="h-4 w-4" /> Gerar financeiro
-                </button>
-              )}
-              <button className="btn-primary" onClick={() => onEdit(sale.id)}>
-                <Pencil className="h-4 w-4" /> Editar
-              </button>
-            </div>
-          </>
+            <button className="btn-primary" onClick={() => onEdit(sale.id)}>
+              <Pencil className="h-4 w-4" /> Editar
+            </button>
+          </footer>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
