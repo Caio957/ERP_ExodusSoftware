@@ -408,7 +408,7 @@ function PrintSaleModal({ saleId, onClose }: { saleId: string; onClose: () => vo
     payments: sale.payments.length ? sale.payments : [{ method: sale.paymentMethod, amount: sale.totalAmount }],
   };
 
-  return (
+  return createPortal(
     <div className="modal-overlay print:bg-white print:p-0">
       <div className="flex max-h-[92dvh] w-full animate-slide-up flex-col overflow-hidden rounded-t-3xl bg-white shadow-elevated sm:max-h-[90vh] sm:max-w-3xl sm:animate-scale-in sm:rounded-2xl print:max-h-none print:shadow-none">
         <div className="border-b border-slate-100 p-4 print:hidden">
@@ -442,7 +442,8 @@ function PrintSaleModal({ saleId, onClose }: { saleId: string; onClose: () => vo
           <SaleReceipt company={company ?? {}} sale={receipt} format={format} />
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -586,7 +587,7 @@ function EditSaleModal({
     save.mutate();
   }
 
-  return (
+  return createPortal(
     <div className="modal-overlay">
       <div className="modal-sheet sm:max-w-2xl">
         <div className="mb-4 flex items-center justify-between">
@@ -795,7 +796,8 @@ function EditSaleModal({
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
