@@ -64,11 +64,11 @@ function ScrollToTopButton() {
 
   return (
     <button
-      className="fixed right-4 bottom-24 md:bottom-8 md:right-8 z-50 rounded-full bg-blue-600/40 p-3 text-white shadow-lg backdrop-blur-md transition-all duration-300 hover:bg-blue-600/90"
+      className="fixed right-4 bottom-24 md:bottom-8 md:right-8 z-50 bg-slate-800 bg-opacity-60 backdrop-blur-md text-white hover:bg-opacity-90 transition-all duration-300 shadow-xl rounded-full p-3 flex items-center justify-center"
       onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
       title="Voltar ao topo"
     >
-      <ArrowUp className="h-5 w-5" />
+      <ArrowUp className="w-6 h-6" />
     </button>
   );
 }
