@@ -26,6 +26,7 @@ import {
   type SaleReceiptData,
 } from '../components/SaleReceipt';
 import { ChangeCalculatorModal } from '../components/ChangeCalculatorModal';
+import { useSearchHandler } from '../hooks/useSearchHandler';
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -509,6 +510,7 @@ function EditSaleModal({
   const [notes, setNotes] = useState('');
   const [client, setClient] = useState<{ id: string; name: string } | null>(null);
   const [search, setSearch] = useState('');
+  const [hasSearched, setHasSearched] = useState(false);
   const [changeConfig, setChangeConfig] = useState<{ amount: number; onConfirm: () => void } | null>(null);
   // Parcelas (quando a prazo).
   const [parcels, setParcels] = useState(1);
@@ -561,8 +563,9 @@ function EditSaleModal({
       api.get<{
         items: Array<{ name: string; variants: Array<{ id: string; description: string; salePrice: number }> }>;
       }>(`/api/products?search=${encodeURIComponent(search)}`),
-    enabled: search.trim().length >= 2,
+    enabled: search.trim().length >= 2 || hasSearched,
   });
+  const { onKeyDown: onSearchKeyDown } = useSearchHandler(() => setHasSearched(true));
 
   const subtotal = items.reduce((acc, it) => acc + it.unitPrice * it.quantity, 0);
   const total = Math.max(0, round2(subtotal - discount + surcharge));
@@ -588,6 +591,7 @@ function EditSaleModal({
       ];
     });
     setSearch('');
+    setHasSearched(false);
   }
 
   const save = useMutation({
@@ -711,9 +715,10 @@ function EditSaleModal({
                     className="input h-11 pl-9 text-sm"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Buscar produto para adicionar à venda..."
+                    onKeyDown={onSearchKeyDown}
+                    placeholder="Buscar produto para adicionar à venda... (Enter para listar tudo)"
                   />
-                  {results && search.trim().length >= 2 && (
+                  {results && (search.trim().length >= 2 || hasSearched) && (
                     <div className="absolute z-10 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white shadow-elevated">
                       {results.items.flatMap((p) =>
                         p.variants.map((v) => (
