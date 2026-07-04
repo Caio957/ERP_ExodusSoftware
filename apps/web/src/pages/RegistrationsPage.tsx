@@ -27,9 +27,14 @@ export function RegistrationsPage() {
   const [tab, setTab] = useState<PersonType>('CLIENT');
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="page-title">Cadastros</h1>
-        <p className="text-sm text-slate-500">Gerencie clientes e fornecedores da loja.</p>
+      <div className="flex items-center gap-3">
+        <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-gradient text-white shadow-brand">
+          <Users className="h-6 w-6" />
+        </span>
+        <div>
+          <h1 className="page-title">Cadastros</h1>
+          <p className="text-sm text-slate-500">Gerencie clientes e fornecedores da loja.</p>
+        </div>
       </div>
 
       <div className="flex gap-2">

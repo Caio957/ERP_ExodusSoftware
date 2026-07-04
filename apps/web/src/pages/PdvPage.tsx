@@ -20,6 +20,7 @@ import {
   Layers,
   Trash,
   ChevronDown,
+  ScanBarcode,
   type LucideIcon,
 } from 'lucide-react';
 import { api } from '../lib/api';
@@ -356,9 +357,14 @@ export function PdvPage() {
 
       {/* Busca + resultados */}
       <section className="flex flex-col gap-4">
-        <div>
-          <h1 className="page-title">Ponto de venda</h1>
-          <p className="text-sm text-slate-500">Escaneie um código de barras ou busque o produto.</p>
+        <div className="flex items-center gap-3">
+          <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-gradient text-white shadow-brand">
+            <ScanBarcode className="h-6 w-6" />
+          </span>
+          <div>
+            <h1 className="page-title">Ponto de venda</h1>
+            <p className="text-sm text-slate-500">Escaneie um código de barras ou busque o produto.</p>
+          </div>
         </div>
 
         <div className="relative">
