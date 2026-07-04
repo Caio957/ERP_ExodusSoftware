@@ -110,9 +110,14 @@ export function SalesPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="page-title">Vendas</h1>
-        <p className="text-sm text-slate-500">Consulte, visualize, edite ou exclua as vendas registradas.</p>
+      <div className="flex items-center gap-3">
+        <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-gradient text-white shadow-brand">
+          <Receipt className="h-6 w-6" />
+        </span>
+        <div>
+          <h1 className="page-title">Vendas</h1>
+          <p className="text-sm text-slate-500">Consulte, visualize, edite ou exclua as vendas registradas.</p>
+        </div>
       </div>
 
       {isLoading ? (

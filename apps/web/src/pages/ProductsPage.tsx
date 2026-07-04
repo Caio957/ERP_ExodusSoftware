@@ -81,9 +81,14 @@ export function ProductsPage() {
   return (
     <div className="flex flex-col space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="page-title">Produtos</h1>
-          <p className="text-sm text-slate-500">Catálogo, preços e estoque da loja.</p>
+        <div className="flex items-center gap-3">
+          <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-gradient text-white shadow-brand">
+            <Package className="h-6 w-6" />
+          </span>
+          <div>
+            <h1 className="page-title">Produtos</h1>
+            <p className="text-sm text-slate-500">Catálogo, preços e estoque da loja.</p>
+          </div>
         </div>
         <button className="btn-primary" onClick={() => setShowForm(true)}>
           <Plus className="h-5 w-5" /> Novo produto

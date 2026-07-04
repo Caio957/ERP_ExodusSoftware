@@ -32,6 +32,8 @@ const methodLabel: Record<string, string> = {
   SPLIT: 'Múltiplas formas',
 };
 
+const statusLabel = (s: string) => (s === 'OPEN' ? 'Aberto' : s === 'CLOSED' ? 'Fechado' : s);
+
 interface CashRegister {
   id: string;
   initialCash: number;
@@ -49,7 +51,12 @@ export function CashPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-4">
       <div className="flex items-center justify-between gap-2">
-        <h1 className="page-title">Caixa</h1>
+        <div className="flex items-center gap-3">
+          <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-gradient text-white shadow-brand">
+            <Wallet className="h-6 w-6" />
+          </span>
+          <h1 className="page-title">Caixa</h1>
+        </div>
         <div className="flex flex-wrap justify-end gap-2">
           <button className={tab === 'atual' ? 'btn-primary' : 'btn-ghost'} onClick={() => setTab('atual')}>
             <Wallet className="h-5 w-5" /> Atual
@@ -149,8 +156,8 @@ function CurrentCash() {
             <div className="mt-1 text-sm text-white/70">Fundo inicial: {brl(register.initialCash)}</div>
           </div>
           <span className="badge bg-white/20 text-white ring-1 ring-white/30">
-            <span className="h-2 w-2 rounded-full bg-emerald-300" />
-            {register.status}
+            <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-300" />
+            {statusLabel(register.status)}
           </span>
         </div>
       </div>
@@ -496,7 +503,7 @@ function CashHistory() {
               </div>
             </div>
             <span className={`badge ${selected.status === 'OPEN' ? 'badge-warning' : 'badge-neutral'}`}>
-              {selected.status}
+              {statusLabel(selected.status)}
             </span>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
@@ -528,7 +535,7 @@ function CashHistory() {
             </div>
             <div className="text-xs text-slate-400">{r.user?.name}</div>
           </div>
-          <span className={`badge ${r.status === 'OPEN' ? 'badge-warning' : 'badge-neutral'}`}>{r.status}</span>
+          <span className={`badge ${r.status === 'OPEN' ? 'badge-warning' : 'badge-neutral'}`}>{statusLabel(r.status)}</span>
         </button>
       ))}
       {data?.length === 0 && <p className="py-10 text-center text-slate-400">Nenhum caixa registrado.</p>}

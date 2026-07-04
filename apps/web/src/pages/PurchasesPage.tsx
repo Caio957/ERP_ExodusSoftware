@@ -12,6 +12,7 @@ import {
   X,
   Eye,
   Filter,
+  ShoppingCart,
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { XmlImport } from '../components/XmlImport';
@@ -62,9 +63,14 @@ export function PurchasesPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="page-title">Compras</h1>
-        <p className="text-sm text-slate-500">Sugestão de reposição, entrada de notas e compras lançadas.</p>
+      <div className="flex items-center gap-3">
+        <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-gradient text-white shadow-brand">
+          <ShoppingCart className="h-6 w-6" />
+        </span>
+        <div>
+          <h1 className="page-title">Compras</h1>
+          <p className="text-sm text-slate-500">Sugestão de reposição, entrada de notas e compras lançadas.</p>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2">
