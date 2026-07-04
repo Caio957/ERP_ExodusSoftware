@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ClipboardCheck, Search, Check, History, Pencil, Trash2, X } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
+import { useSearchHandler } from '../hooks/useSearchHandler';
 
 interface VariantHit {
   id: string;
@@ -400,6 +401,7 @@ function ProductSearch({ onPick }: { onPick: (v: VariantHit) => void }) {
       }>(`/api/products?search=${encodeURIComponent(searchTerm ?? '')}`),
     enabled: searchTerm !== null,
   });
+  const { onKeyDown } = useSearchHandler(setSearchTerm);
 
   return (
     <div className="relative">
@@ -408,12 +410,7 @@ function ProductSearch({ onPick }: { onPick: (v: VariantHit) => void }) {
         className="input pl-9"
         value={term}
         onChange={(e) => setTerm(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            setSearchTerm(term.trim());
-          }
-        }}
+        onKeyDown={onKeyDown}
         placeholder="Buscar produto... (Enter para filtrar)"
       />
       {data && searchTerm !== null && (

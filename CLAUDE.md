@@ -1063,6 +1063,35 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
     `onChange` sanitizado com `replace(/^0+(?=\d)/, '')` — remove zeros à
     esquerda antes de converter para número, evitando o acúmulo tipo "011".
   `npm run typecheck` → **0 erros**.
+- ✅ **Onda 2026-07-03c — Hook `useSearchHandler` (padronização "Enter = Buscar")**
+  (2026-07-03): Branch `feature/hook-busca-enter` — **ainda não mesclada na
+  `main`**.
+  - **Novo hook** `apps/web/src/hooks/useSearchHandler.ts`: `useSearchHandler(onSearch:
+    (term: string) => void)` retorna `{ onKeyDown }` — em qualquer Enter (com texto
+    ou vazio) dispara `onSearch` com o valor atual do input (trim), lido direto de
+    `e.currentTarget.value`. Segue as convenções de `useBarcodeScanner.ts` (função
+    nomeada exportada, JSDoc em português).
+  - **Levantamento prévio** (agente Explore) mapeou ~15 inputs de busca no app;
+    quase todos já buscam corretamente com campo vazio (backend retorna tudo sem
+    `search`). A única inconsistência real: dois pickers de autocomplete com gate
+    de tamanho mínimo (`enabled: term.length >= 2`) — digitar, apagar tudo e dar
+    Enter não fazia nada, porque a query nunca rodava abaixo de 2 caracteres.
+  - **`SalesPage.tsx`** (busca de produto no `EditSaleModal`/Mini-PDV): novo estado
+    `hasSearched`; gate vira `enabled: search.trim().length >= 2 || hasSearched`
+    (mesma condição no dropdown); `onKeyDown` do hook seta `hasSearched(true)`;
+    resetado para `false` em `addVariant` (junto com `setSearch('')` já existente).
+  - **`PurchasesPage.tsx`** (busca de fornecedor no `ManualPurchase`): mesmo padrão
+    — `hasSearchedSupplier`, gate `(supplierName.trim().length >= 2 ||
+    hasSearchedSupplier) && !supplierId`, resetado ao selecionar um fornecedor.
+  - **`StockAdjustPage.tsx`** (cleanup, zero mudança de comportamento): o
+    `onKeyDown` inline da `ProductSearch` (que já implementava manualmente o
+    padrão Enter-busca) foi substituído por `useSearchHandler(setSearchTerm)` —
+    elimina a implementação duplicada do mesmo conceito.
+  - **Fora do escopo** (decisão consciente, ver plano): `ProductsPage.tsx`,
+    `PdvPage.tsx`, `FinancialPage.tsx`, `RegistrationsPage.tsx`,
+    `SettingsPage.tsx`, `XmlImport.tsx` — todos já buscam certo com campo vazio,
+    sem gate de tamanho mínimo bloqueando; não precisam do hook.
+  `npm run typecheck` + `npm run build` → **0 erros**.
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---

@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { XmlImport } from '../components/XmlImport';
+import { useSearchHandler } from '../hooks/useSearchHandler';
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -215,6 +216,7 @@ function ManualPurchase() {
   const qc = useQueryClient();
   const [supplierName, setSupplierName] = useState('');
   const [supplierId, setSupplierId] = useState<string | null>(null);
+  const [hasSearchedSupplier, setHasSearchedSupplier] = useState(false);
   const [purchaseDate, setPurchaseDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<PItem[]>([]);
@@ -229,8 +231,9 @@ function ManualPurchase() {
     queryKey: ['suppliers', supplierName],
     queryFn: () =>
       api.get<{ items: SupplierLite[] }>(`/api/persons?type=SUPPLIER&search=${encodeURIComponent(supplierName)}`),
-    enabled: supplierName.trim().length >= 2 && !supplierId,
+    enabled: (supplierName.trim().length >= 2 || hasSearchedSupplier) && !supplierId,
   });
+  const { onKeyDown: onSupplierKeyDown } = useSearchHandler(() => setHasSearchedSupplier(true));
 
   const total = round2(items.reduce((a, it) => a + it.quantity * it.unitCost, 0));
 
@@ -312,9 +315,10 @@ function ManualPurchase() {
             setSupplierName(e.target.value);
             setSupplierId(null);
           }}
-          placeholder="Buscar ou digitar um novo fornecedor..."
+          onKeyDown={onSupplierKeyDown}
+          placeholder="Buscar ou digitar um novo fornecedor... (Enter para listar todos)"
         />
-        {!supplierId && supplierName.trim().length >= 2 && suppliers && suppliers.items.length > 0 && (
+        {!supplierId && (supplierName.trim().length >= 2 || hasSearchedSupplier) && suppliers && suppliers.items.length > 0 && (
           <div className="absolute z-10 mt-1 max-h-40 w-full overflow-auto rounded-xl border border-slate-200 bg-white shadow-elevated">
             {suppliers.items.map((s) => (
               <button
@@ -323,6 +327,7 @@ function ManualPurchase() {
                 onClick={() => {
                   setSupplierId(s.id);
                   setSupplierName(s.name);
+                  setHasSearchedSupplier(false);
                 }}
               >
                 {s.name}
