@@ -1055,6 +1055,14 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
     `paymentMethod === 'CASH'`, senão pede `window.confirm`, só então chama
     `executeSave()` (antigo `submit()`).
   `npm run typecheck` + `npm run build` → **0 erros** em todos os commits.
+- ✅ **Onda 2026-07-03b — Fix "zero fantasma" no input de Compras** (2026-07-03):
+  Branch `feature/refinamento-compras` — **ainda não mesclada na `main`**.
+  - **`PurchasesPage.tsx`** (aba Sugestão de compra): input "Tempo de reposição
+    (dias)" ganhou `onFocus={(e) => e.target.select()}` (seleciona o valor
+    inteiro ao focar, mesmo padrão já aplicado em PDV/Vendas/Produtos) e
+    `onChange` sanitizado com `replace(/^0+(?=\d)/, '')` — remove zeros à
+    esquerda antes de converter para número, evitando o acúmulo tipo "011".
+  `npm run typecheck` → **0 erros**.
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---

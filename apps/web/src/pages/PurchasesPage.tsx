@@ -100,7 +100,11 @@ export function PurchasesPage() {
                   className="input"
                   type="number"
                   value={leadTimeDays}
-                  onChange={(e) => setLeadTimeDays(Number(e.target.value))}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) => {
+                    const cleaned = e.target.value.replace(/^0+(?=\d)/, '');
+                    setLeadTimeDays(cleaned === '' ? 0 : Number(cleaned));
+                  }}
                 />
               </label>
             </div>
