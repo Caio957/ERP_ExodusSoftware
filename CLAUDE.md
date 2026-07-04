@@ -1055,6 +1055,7 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
     `paymentMethod === 'CASH'`, senão pede `window.confirm`, só então chama
     `executeSave()` (antigo `submit()`).
   `npm run typecheck` + `npm run build` → **0 erros** em todos os commits.
+
 - ✅ **Onda 2026-07-03b — Fix "zero fantasma" no input de Compras** (2026-07-03):
   Branch `feature/refinamento-compras` — **ainda não mesclada na `main`**.
   - **`PurchasesPage.tsx`** (aba Sugestão de compra): input "Tempo de reposição
@@ -1092,6 +1093,34 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
     `SettingsPage.tsx`, `XmlImport.tsx` — todos já buscam certo com campo vazio,
     sem gate de tamanho mínimo bloqueando; não precisam do hook.
   `npm run typecheck` + `npm run build` → **0 erros**.
+
+- ✅ **Onda 2026-07-03d — Drag-and-drop de XML + padronização visual de cabeçalhos**
+  (2026-07-03): Branch `feature/xml-import-visual` — **ainda não mesclada na
+  `main`**. 2 commits (`0999cbd`, `3e42163`).
+  - **`0999cbd` (fix + upgrade do upload de XML — `XmlImport.tsx`)**: a área de
+    upload só tinha um `<input type="file">` escondido — **arrastar o XML fazia o
+    navegador abrir o arquivo numa aba** (comportamento padrão de drop sem
+    handler), derrubando o app. Correções: (1) `handleFile` refatorado em
+    `processFile(file)` compartilhado entre clique e drop; (2) `onDragOver`/
+    `onDragLeave`/`onDrop` na zona de upload com estado `dragOver`; (3) **guarda
+    global** `window.addEventListener('dragover'/'drop', preventDefault)` no
+    mount do componente — soltar o arquivo fora da zona não navega mais para o
+    XML; (4) validação de extensão/MIME `.xml` com mensagem de erro amigável;
+    (5) visual premium: `card-feature`, zona com gradiente azul→branco, ao
+    arrastar vira borda dourada sólida + `shadow-glow-gold` + `scale-[1.02]`,
+    tile do ícone alterna azul→dourado (`icon-tile-gold` + `animate-pop`),
+    spinner `Loader2` no processamento, chips `badge-brand`/`badge-gold`,
+    `StepBadge` com anel dourado na etapa ativa.
+  - **`3e42163` (cabeçalhos premium em todas as telas)**: Produtos (`Package`),
+    Compras (`ShoppingCart`), Vendas (`Receipt`), Financeiro (`Landmark`),
+    Cadastros (`Users`), Caixa (`Wallet`) e PDV (`ScanBarcode`) ganham o tile
+    de ícone em gradiente azul do padrão Dashboard/Estoque/Configurações
+    (`h-11 w-11 rounded-xl bg-brand-gradient shadow-brand`). **Caixa**: status
+    cru `OPEN`/`CLOSED` traduzido para "Aberto"/"Fechado" (helper
+    `statusLabel`) nos 3 pontos que exibiam o valor bruto; ponto verde do card
+    hero agora pulsa (`animate-pulse`).
+  `npm run typecheck` + `npm run build` → **0 erros** em todos os commits.
+
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---

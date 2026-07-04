@@ -12,6 +12,7 @@ import {
   Search,
   RotateCcw,
   Filter,
+  Landmark,
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 
@@ -96,9 +97,14 @@ export function FinancialPage() {
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="page-title">Financeiro</h1>
-          <p className="text-sm text-slate-500">Contas a pagar e a receber da loja.</p>
+        <div className="flex items-center gap-3">
+          <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-gradient text-white shadow-brand">
+            <Landmark className="h-6 w-6" />
+          </span>
+          <div>
+            <h1 className="page-title">Financeiro</h1>
+            <p className="text-sm text-slate-500">Contas a pagar e a receber da loja.</p>
+          </div>
         </div>
         <button className="btn-primary" onClick={() => setCreating(true)}>
           <Plus className="h-5 w-5" /> Novo lançamento

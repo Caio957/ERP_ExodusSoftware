@@ -1,6 +1,18 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { UploadCloud, FileText, Search, X, Check, ChevronRight, Plus, Trash2, AlertCircle } from 'lucide-react';
+import {
+  UploadCloud,
+  FileText,
+  Search,
+  X,
+  Check,
+  ChevronRight,
+  Plus,
+  Trash2,
+  AlertCircle,
+  Loader2,
+  Sparkles,
+} from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -51,6 +63,20 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  // Sem isso, soltar o arquivo fora da zona de drop faz o navegador NAVEGAR
+  // para o XML (abre o arquivo numa aba, derrubando o app). Bloqueia o
+  // comportamento padrão em toda a janela enquanto a tela está montada.
+  useEffect(() => {
+    const prevent = (e: DragEvent) => e.preventDefault();
+    window.addEventListener('dragover', prevent);
+    window.addEventListener('drop', prevent);
+    return () => {
+      window.removeEventListener('dragover', prevent);
+      window.removeEventListener('drop', prevent);
+    };
+  }, []);
 
   // passo 1: De/Para
   const [mapping, setMapping] = useState<Record<number, VariantDetail>>({});
@@ -66,10 +92,13 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
   ]);
 
   // ----- Upload -----
-  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
+  // Núcleo compartilhado entre o clique (input file) e o arrastar-e-soltar.
+  async function processFile(file: File) {
+    const isXml = /\.xml$/i.test(file.name) || file.type === 'text/xml' || file.type === 'application/xml';
+    if (!isXml) {
+      setError(`"${file.name}" não é um XML — selecione o arquivo .xml da NFe emitida pelo fornecedor.`);
+      return;
+    }
     setFileName(file.name);
     setError(null);
     setBusy(true);
@@ -90,6 +119,12 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
     } finally {
       setBusy(false);
     }
+  }
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (file) void processFile(file);
   }
 
   // ----- Confirmação final -----
@@ -195,22 +230,60 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
 
       {/* ETAPA: upload */}
       {step === 'upload' && (
-        <div className="card">
+        <div className="card-feature">
           <label className="label">Arquivo XML da nota de compra (NFe)</label>
-          <label className="mt-1 flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-300 p-10 text-center transition hover:border-brand-400 hover:bg-brand-50/40">
-            <UploadCloud className="h-10 w-10 text-brand-400" />
-            <span className="font-semibold text-slate-700">
-              {busy ? 'Processando...' : 'Clique para selecionar o arquivo .xml'}
+          <label
+            onDragOver={(e) => {
+              e.preventDefault();
+              if (!busy) setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              if (busy) return;
+              const file = e.dataTransfer.files?.[0];
+              if (file) void processFile(file);
+            }}
+            className={`group mt-1 flex cursor-pointer flex-col items-center justify-center gap-3 rounded-3xl border-2 p-12 text-center transition-all duration-300 ${
+              dragOver
+                ? 'scale-[1.02] border-solid border-accent-400 bg-gradient-to-br from-brand-50 via-white to-accent-50 shadow-glow-gold'
+                : 'border-dashed border-brand-200 bg-gradient-to-br from-white to-brand-50/40 hover:border-brand-400 hover:shadow-glow-brand'
+            }`}
+          >
+            <span
+              className={`grid h-16 w-16 place-items-center rounded-2xl transition-all duration-300 ${
+                dragOver ? 'icon-tile-gold animate-pop' : 'icon-tile group-hover:scale-110'
+              }`}
+            >
+              {busy ? <Loader2 className="h-8 w-8 animate-spin" /> : <UploadCloud className="h-8 w-8" />}
+            </span>
+            <span className="font-display text-lg font-bold text-slate-800">
+              {busy ? (
+                'Lendo e processando a nota…'
+              ) : dragOver ? (
+                <span className="gradient-text-gold">Solte o arquivo para importar!</span>
+              ) : (
+                <>
+                  Arraste o XML aqui <span className="gradient-text">ou clique para selecionar</span>
+                </>
+              )}
             </span>
             <span className="text-xs text-slate-400">
               {fileName ? (
-                <span className="inline-flex items-center gap-1 text-brand-600">
+                <span className="inline-flex items-center gap-1 font-semibold text-brand-600">
                   <FileText className="h-3.5 w-3.5" /> {fileName}
                 </span>
               ) : (
-                'Selecione o XML emitido pelo fornecedor'
+                'O sistema lê os itens, o fornecedor e as duplicatas automaticamente'
               )}
             </span>
+            <div className="mt-1 flex flex-wrap justify-center gap-2">
+              <span className="badge-brand">NFe modelo 55</span>
+              <span className="badge-gold">
+                <Sparkles className="h-3.5 w-3.5" /> Leitura automática
+              </span>
+            </div>
             <input type="file" accept=".xml,text/xml,application/xml" className="hidden" disabled={busy} onChange={handleFile} />
           </label>
         </div>
@@ -444,7 +517,15 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
 
 function StepBadge({ n, label, active, done }: { n: number; label: string; active: boolean; done: boolean }) {
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 ${active ? 'bg-brand-gradient text-white' : done ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'}`}>
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 transition-all duration-300 ${
+        active
+          ? 'bg-brand-gradient text-white shadow-brand ring-2 ring-accent-300/70'
+          : done
+            ? 'bg-emerald-100 text-emerald-700'
+            : 'bg-slate-100 text-slate-400'
+      }`}
+    >
       {done ? <Check className="h-3 w-3" /> : <span className="text-[10px] font-bold">{n}</span>}
       {label}
     </span>
