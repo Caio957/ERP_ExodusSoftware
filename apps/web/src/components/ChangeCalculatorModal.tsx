@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -35,17 +36,17 @@ export function ChangeCalculatorModal({
     setRaw(toRaw(received));
   }, [received]);
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 p-4 backdrop-blur-sm sm:items-center">
-      <div className="w-full max-w-sm animate-slide-up rounded-2xl bg-white p-6 shadow-elevated sm:animate-scale-in">
-        <div className="mb-4 flex items-center justify-between">
+  return createPortal(
+    <div className="modal-overlay">
+      <div className="modal-sheet w-full sm:max-w-md flex flex-col h-auto max-h-[90dvh] overflow-hidden !p-0">
+        <header className="shrink-0 flex items-center justify-between border-b border-slate-200 bg-slate-50/50 p-4">
           <h3 className="font-display text-lg font-bold">Pagamento em Dinheiro</h3>
           <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
             <X className="h-5 w-5" />
           </button>
-        </div>
+        </header>
 
-        <div className="mb-4 space-y-3">
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
           <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
             <span className="text-sm text-slate-500">Total da venda</span>
             <span className="text-xl font-bold">{brl(total)}</span>
@@ -81,7 +82,7 @@ export function ChangeCalculatorModal({
           </div>
         </div>
 
-        <div className="flex gap-2">
+        <footer className="shrink-0 flex gap-2 border-t border-slate-200 bg-slate-50 p-4 rounded-b-xl">
           <button
             className="btn-ghost flex-1 text-sm"
             onClick={onConfirm}
@@ -95,8 +96,9 @@ export function ChangeCalculatorModal({
           >
             Confirmar venda
           </button>
-        </div>
+        </footer>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
