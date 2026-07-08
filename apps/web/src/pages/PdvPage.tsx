@@ -378,7 +378,7 @@ export function PdvPage() {
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <div className="grid max-h-[45vh] grid-cols-2 gap-3 overflow-y-auto sm:grid-cols-3 lg:max-h-none lg:overflow-visible [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
           {allVariants?.map(({ product: p, variant: v }) => {
             const out = v.stockQty <= 0;
             return (
