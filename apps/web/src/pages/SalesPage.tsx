@@ -712,6 +712,7 @@ function PrintSaleModal({ saleId, onClose }: { saleId: string; onClose: () => vo
     surcharge: sale.surcharge,
     total: sale.totalAmount,
     payments: sale.payments.length ? sale.payments : [{ method: sale.paymentMethod, amount: sale.totalAmount }],
+    notes: sale.notes,
   };
 
   return <PrintReceiptModal sale={receipt} company={company ?? {}} onClose={onClose} />;

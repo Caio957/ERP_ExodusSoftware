@@ -27,8 +27,7 @@ import { api } from '../lib/api';
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner';
 import { lookupByBarcode } from '../lib/products';
 import { enqueueSale } from '../lib/sync';
-import { ThermalReceipt, type ReceiptItem } from '../components/ThermalReceipt';
-import { SaleReceipt, type CompanyInfo } from '../components/SaleReceipt';
+import { SaleReceipt, type CompanyInfo, type SaleReceiptData } from '../components/SaleReceipt';
 import { ChangeCalculatorModal } from '../components/ChangeCalculatorModal';
 
 interface CartItem {
@@ -87,9 +86,8 @@ export function PdvPage() {
   const [confirmMethod, setConfirmMethod] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [lastSale, setLastSale] = useState<{
-    items: ReceiptItem[];
+    items: SaleReceiptData['items'];
     total: number;
-    method: string;
     payments: { method: string; amount: number }[];
     subtotal: number;
     discount: number;
@@ -97,6 +95,7 @@ export function PdvPage() {
     clientName: string | null;
     soldAt: Date;
     code: number;
+    notes: string | null;
   } | null>(null);
   const [printMode, setPrintMode] = useState<'thermal' | 'a4' | null>(null);
   const [receiptHeight, setReceiptHeight] = useState<number>(0);
@@ -285,7 +284,6 @@ export function PdvPage() {
         unitPrice: c.unitPrice,
       })),
       total,
-      method: payments.length === 1 ? payments[0]!.method : 'SPLIT',
       payments,
       subtotal,
       discount: round2(discount),
@@ -293,6 +291,7 @@ export function PdvPage() {
       clientName: client?.name ?? null,
       soldAt: new Date(),
       code: saleCode,
+      notes: notes.trim() || null,
     });
     resetSale();
     setShowPayment(false);
@@ -332,6 +331,23 @@ export function PdvPage() {
   const allVariants = results?.items.flatMap((p) =>
     p.variants.map((v) => ({ product: p, variant: v })),
   );
+
+  // Recibo normalizado (mesma forma usada pela consulta de Vendas) — reaproveitado
+  // no preview on-screen e nos dois portais off-screen de impressão (bobina/A4).
+  const receiptData: SaleReceiptData | null = lastSale
+    ? {
+        code: lastSale.code,
+        soldAt: lastSale.soldAt,
+        clientName: lastSale.clientName,
+        items: lastSale.items,
+        subtotal: lastSale.subtotal,
+        discount: lastSale.discount,
+        surcharge: lastSale.surcharge,
+        total: lastSale.total,
+        payments: lastSale.payments,
+        notes: lastSale.notes,
+      }
+    : null;
 
   return (
     <>
@@ -680,7 +696,7 @@ export function PdvPage() {
 
       {/* Modal de recibo pós-venda — print:hidden evita duplicar o recibo
           on-screen junto com a instância off-screen medida pelo Dynamic
-          Measurement Engine (ambos carregam a classe .thermal-receipt). */}
+          Measurement Engine (ambos renderizam <SaleReceipt>, classe .print-area). */}
       {lastSale && createPortal(
         <div className="modal-overlay print:hidden">
           <div className="modal-sheet w-full sm:max-w-sm flex flex-col h-auto max-h-[90dvh] overflow-hidden !p-0">
@@ -699,7 +715,7 @@ export function PdvPage() {
             </header>
 
             <div className="flex-1 min-h-0 overflow-y-auto p-4">
-              <ThermalReceipt items={lastSale.items} total={lastSale.total} paymentMethod={lastSale.method} />
+              {receiptData && <SaleReceipt company={company ?? {}} sale={receiptData} format="thermal" />}
             </div>
 
             <footer className="shrink-0 space-y-2 border-t border-slate-200 bg-slate-50 p-4 rounded-b-xl">
@@ -753,37 +769,19 @@ export function PdvPage() {
       }</style>
     )}
 
-    {lastSale && printMode === 'thermal' && createPortal(
+    {receiptData && printMode === 'thermal' && createPortal(
       <div id="thermal-print-root" className="fixed top-[-9999px] left-[-9999px] w-full bg-white text-black">
-        <div ref={receiptRef} className="w-full max-w-[80mm] mx-auto flex justify-center font-mono text-[11px] leading-tight">
-          <ThermalReceipt
-            items={lastSale.items}
-            total={lastSale.total}
-            paymentMethod={lastSale.method}
-          />
+        <div ref={receiptRef} className="mx-auto flex w-full justify-center">
+          <SaleReceipt company={company ?? {}} sale={receiptData} format="thermal" />
         </div>
       </div>,
       document.body,
     )}
 
-    {lastSale && printMode === 'a4' && createPortal(
+    {receiptData && printMode === 'a4' && createPortal(
       <div id="a4-print-root" className="fixed top-[-9999px] left-[-9999px] w-full bg-white text-black">
         <div className="w-full max-w-[210mm] mx-auto bg-white">
-          <SaleReceipt
-            company={company ?? {}}
-            sale={{
-              code: lastSale.code,
-              soldAt: lastSale.soldAt,
-              clientName: lastSale.clientName,
-              items: lastSale.items,
-              subtotal: lastSale.subtotal,
-              discount: lastSale.discount,
-              surcharge: lastSale.surcharge,
-              total: lastSale.total,
-              payments: lastSale.payments,
-            }}
-            format="a4"
-          />
+          <SaleReceipt company={company ?? {}} sale={receiptData} format="a4" />
         </div>
       </div>,
       document.body,

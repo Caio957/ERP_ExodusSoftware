@@ -33,6 +33,7 @@ export interface SaleReceiptData {
   surcharge: number;
   total: number;
   payments: Array<{ method: string; amount: number }>;
+  notes?: string | null;
 }
 
 export type ReceiptFormat = 'thermal' | 'a4';
@@ -70,7 +71,7 @@ function ThermalSaleReceipt({
           <span>Venda #{sale.code}</span>
           <span>{fmtDate(sale.soldAt)}</span>
         </div>
-        <div>Cliente: {sale.clientName?.trim() || 'Balcão'}</div>
+        <div>Cliente: {sale.clientName?.trim() || 'Consumidor Final'}</div>
 
         <div className="my-1 border-t border-dashed border-black" />
         {sale.items.map((it, i) => (
@@ -116,6 +117,14 @@ function ThermalSaleReceipt({
           </div>
         ))}
 
+        {sale.notes?.trim() && (
+          <>
+            <div className="my-1 border-t border-dashed border-black" />
+            <div className="font-bold">Obs.</div>
+            <div className="whitespace-pre-wrap">{sale.notes}</div>
+          </>
+        )}
+
         <div className="my-1 border-t border-dashed border-black" />
         <div className="text-center">Obrigada pela preferência! 💄</div>
         <div className="text-center text-[10px]">Comprovante não fiscal</div>
@@ -154,7 +163,7 @@ function A4SaleReceipt({ company, sale }: { company: CompanyInfo; sale: SaleRece
         </div>
 
         <div className="mt-4 text-sm text-slate-600">
-          <span className="font-semibold">Cliente:</span> {sale.clientName?.trim() || 'Balcão'}
+          <span className="font-semibold">Cliente:</span> {sale.clientName?.trim() || 'Consumidor Final'}
         </div>
 
         {/* Itens */}
@@ -215,6 +224,12 @@ function A4SaleReceipt({ company, sale }: { company: CompanyInfo; sale: SaleRece
             </div>
           ))}
         </div>
+
+        {sale.notes?.trim() && (
+          <div className="mt-4 text-sm text-slate-600">
+            <span className="font-semibold">Obs.:</span> {sale.notes}
+          </div>
+        )}
 
         <div className="mt-8 text-center text-sm text-slate-500">
           Obrigada pela preferência! 💄
