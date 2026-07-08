@@ -564,46 +564,55 @@ export function PdvPage() {
       </aside>
 
       {/* Modal de confirmação rápida (pagamento à vista) */}
-      {confirmMethod && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-4 backdrop-blur-sm sm:items-center">
-          <div className="w-full max-w-sm animate-slide-up rounded-2xl bg-white p-6 shadow-elevated sm:animate-scale-in">
-            <h3 className="mb-1 font-display text-lg font-bold">Confirmar venda?</h3>
-            <p className="mb-4 text-sm text-slate-500">
-              Revise os dados antes de finalizar.
-            </p>
-            <div className="mb-4 space-y-1 rounded-xl bg-slate-50 px-4 py-3 text-sm">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Itens</span>
-                <span className="font-medium">{cart.reduce((a, it) => a + it.quantity, 0)}</span>
-              </div>
-              {client && (
+      {confirmMethod && createPortal(
+        <div className="modal-overlay">
+          <div className="modal-sheet w-full sm:max-w-sm flex flex-col h-auto max-h-[90dvh] overflow-hidden !p-0">
+            <header className="shrink-0 flex items-center justify-between border-b border-slate-200 bg-slate-50/50 p-4">
+              <h3 className="font-display text-lg font-bold">Confirmar venda?</h3>
+              <button className="text-slate-400 hover:text-slate-700" onClick={() => setConfirmMethod(null)}>
+                <X className="h-5 w-5" />
+              </button>
+            </header>
+
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
+              <p className="text-sm text-slate-500">
+                Revise os dados antes de finalizar.
+              </p>
+              <div className="space-y-1 rounded-xl bg-slate-50 px-4 py-3 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Cliente</span>
-                  <span className="font-medium">{client.name}</span>
+                  <span className="text-slate-500">Itens</span>
+                  <span className="font-medium">{cart.reduce((a, it) => a + it.quantity, 0)}</span>
                 </div>
-              )}
-              <div className="flex justify-between">
-                <span className="text-slate-500">Pagamento</span>
-                <span className="font-medium">{paymentTypes.find((t) => t.code === confirmMethod)?.label ?? confirmMethod}</span>
-              </div>
-              {discount > 0 && (
-                <div className="flex justify-between text-rose-600">
-                  <span>Desconto</span>
-                  <span>- {brl(discount)}</span>
+                {client && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Cliente</span>
+                    <span className="font-medium">{client.name}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Pagamento</span>
+                  <span className="font-medium">{paymentTypes.find((t) => t.code === confirmMethod)?.label ?? confirmMethod}</span>
                 </div>
-              )}
-              {surcharge > 0 && (
-                <div className="flex justify-between text-emerald-600">
-                  <span>Acréscimo</span>
-                  <span>+ {brl(surcharge)}</span>
+                {discount > 0 && (
+                  <div className="flex justify-between text-rose-600">
+                    <span>Desconto</span>
+                    <span>- {brl(discount)}</span>
+                  </div>
+                )}
+                {surcharge > 0 && (
+                  <div className="flex justify-between text-emerald-600">
+                    <span>Acréscimo</span>
+                    <span>+ {brl(surcharge)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between border-t border-slate-200 pt-1 text-base font-bold">
+                  <span>Total</span>
+                  <span>{brl(total)}</span>
                 </div>
-              )}
-              <div className="flex justify-between border-t border-slate-200 pt-1 text-base font-bold">
-                <span>Total</span>
-                <span>{brl(total)}</span>
               </div>
             </div>
-            <div className="flex gap-2">
+
+            <footer className="shrink-0 flex gap-2 border-t border-slate-200 bg-slate-50 p-4 rounded-b-xl">
               <button className="btn-ghost flex-1" onClick={() => setConfirmMethod(null)}>
                 Voltar e revisar
               </button>
@@ -616,9 +625,10 @@ export function PdvPage() {
               >
                 Confirmar venda
               </button>
-            </div>
+            </footer>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {showPayment && (
@@ -670,18 +680,28 @@ export function PdvPage() {
       {/* Modal de recibo pós-venda — print:hidden evita duplicar o recibo
           on-screen junto com a instância off-screen medida pelo Dynamic
           Measurement Engine (ambos carregam a classe .thermal-receipt). */}
-      {lastSale && (
+      {lastSale && createPortal(
         <div className="modal-overlay print:hidden">
-          <div className="modal-sheet sm:max-w-sm">
-            <div className="mb-3 flex flex-col items-center text-center">
+          <div className="modal-sheet w-full sm:max-w-sm flex flex-col h-auto max-h-[90dvh] overflow-hidden !p-0">
+            <header className="shrink-0 relative flex flex-col items-center border-b border-slate-200 bg-slate-50/50 p-4 text-center">
+              <button
+                className="absolute right-4 top-4 text-slate-400 hover:text-slate-700"
+                onClick={() => setLastSale(null)}
+              >
+                <X className="h-5 w-5" />
+              </button>
               <div className="mb-2 grid h-14 w-14 place-items-center rounded-full bg-emerald-100 text-emerald-600">
                 <CheckCircle2 className="h-8 w-8" />
               </div>
               <h3 className="text-lg font-bold">Venda concluída!</h3>
               <p className="text-sm text-slate-500">{brl(lastSale.total)} registrados</p>
+            </header>
+
+            <div className="flex-1 min-h-0 overflow-y-auto p-4">
+              <ThermalReceipt items={lastSale.items} total={lastSale.total} paymentMethod={lastSale.method} />
             </div>
-            <ThermalReceipt items={lastSale.items} total={lastSale.total} paymentMethod={lastSale.method} />
-            <div className="mt-4 space-y-2">
+
+            <footer className="shrink-0 space-y-2 border-t border-slate-200 bg-slate-50 p-4 rounded-b-xl">
               <div className="grid grid-cols-2 gap-2">
                 <button
                   className="btn-primary flex items-center justify-center gap-1.5 text-sm"
@@ -702,9 +722,10 @@ export function PdvPage() {
               >
                 <X className="h-4 w-4" /> Fechar
               </button>
-            </div>
+            </footer>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
 
@@ -876,16 +897,17 @@ function PaymentModal({
   const aPrazoOk = !hasAPrazoLine || (hasClient && parcels >= 1 && firstDueValid);
   const canConfirm = balanced && aPrazoOk && lines.every((l) => l.amount > 0);
 
-  return (
+  return createPortal(
     <div className="modal-overlay">
-      <div className="modal-sheet sm:max-w-md">
-        <div className="mb-3 flex items-center justify-between">
+      <div className="modal-sheet w-full sm:max-w-md flex flex-col h-auto max-h-[90dvh] overflow-hidden !p-0">
+        <header className="shrink-0 flex items-center justify-between border-b border-slate-200 bg-slate-50/50 p-4">
           <h3 className="font-display text-lg font-bold">Pagamento</h3>
           <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
             <X className="h-5 w-5" />
           </button>
-        </div>
+        </header>
 
+        <div className="flex-1 min-h-0 overflow-y-auto p-4">
         <div className="mb-3 flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
           <span className="text-sm text-slate-500">Total da venda</span>
           <span className="text-xl font-bold">{brl(total)}</span>
@@ -1074,7 +1096,9 @@ function PaymentModal({
           </div>
         )}
 
-        <div className="mt-5 flex justify-end gap-2">
+        </div>
+
+        <footer className="shrink-0 flex justify-end gap-3 border-t border-slate-200 bg-slate-50 p-4 rounded-b-xl">
           <button className="btn-ghost" onClick={onClose}>
             Cancelar
           </button>
@@ -1085,9 +1109,10 @@ function PaymentModal({
           >
             Confirmar venda
           </button>
-        </div>
+        </footer>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -1407,35 +1432,39 @@ function ClientSearchOverlay({
       ),
   });
 
-  return (
+  return createPortal(
     <div className="modal-overlay" style={{ zIndex: 60 }}>
-      <div className="modal-sheet sm:max-w-sm">
-        <div className="mb-3 flex items-center justify-between">
+      <div className="modal-sheet w-full sm:max-w-sm flex flex-col h-auto max-h-[90dvh] overflow-hidden !p-0">
+        <header className="shrink-0 flex items-center justify-between border-b border-slate-200 bg-slate-50/50 p-4">
           <h3 className="font-display font-bold">Selecionar cliente</h3>
           <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
             <X className="h-5 w-5" />
           </button>
-        </div>
-        <input
-          className="input h-10 text-sm"
-          value={term}
-          onChange={(e) => setTerm(e.target.value)}
-          placeholder="Buscar cliente..."
-          autoFocus
-        />
-        <div className="mt-2 max-h-60 overflow-auto">
-          {data?.items.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => onSelect({ id: c.id, name: c.name })}
-              className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50"
-            >
-              {c.name}
-              {c.document && <span className="ml-1 text-xs text-slate-400">{c.document}</span>}
-            </button>
-          ))}
+        </header>
+
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-2">
+          <input
+            className="input h-10 text-sm"
+            value={term}
+            onChange={(e) => setTerm(e.target.value)}
+            placeholder="Buscar cliente..."
+            autoFocus
+          />
+          <div className="max-h-60 overflow-auto">
+            {data?.items.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => onSelect({ id: c.id, name: c.name })}
+                className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50"
+              >
+                {c.name}
+                {c.document && <span className="ml-1 text-xs text-slate-400">{c.document}</span>}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
