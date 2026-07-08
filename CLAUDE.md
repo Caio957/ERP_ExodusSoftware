@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-07-03
+- **Última atualização:** 2026-07-08
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -22,8 +22,11 @@
   commits são empurrados para o GitHub nessas branches; o **merge para `main` é feito
   manualmente via PR no GitHub** (o merge dispara o auto-deploy no Railway). A IA
   trabalha sempre na branch ativa indicada — nunca commita direto na `main` sem
-  instrução explícita. Branch ativa no momento: **`feature/refinamento-vendas`**
-  (commits `82c98f7`→`6508dbf` — ainda não mesclada; ver §11).
+  instrução explícita. Branch ativa no momento: **`refinamento-vendas`** (criada a
+  partir da `main` pós-merge de `feature/refinamento-pdv` via PR #9, em `199f3b1`).
+  **Enviada ao GitHub** (`199f3b1`→`faa3616`, 8 commits — filtros/paginação/scroll-to-top
+  em Vendas + unificação e correção da impressão PDV↔Vendas), **pronta para PR/merge**
+  — aguardando revisão do Comandante; ver §11 para o histórico completo de commits.
   ✅ **Divergência anterior resolvida (2026-07-03)**: as três branches em
   paralelo (`feature/tela-produtos-caio`, `feature/estoque-tipo-movimentacao`
   e `feature/refinamento-cadastros`), incluindo os marcadores de conflito
@@ -196,8 +199,12 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   **Motor de impressão dual** (`printMode` state): botões "🖨️ Bobina (80mm)" e "📄 Papel A4"
   no modal pós-venda; `handlePrint` mede altura do recibo via `receiptRef.offsetHeight`
   (Dynamic Measurement Engine), injeta `@page` com dimensões exatas e chama `window.print()`.
-  Bloco A4 reutiliza `<SaleReceipt format="a4">` (mesmo visual da tela Vendas); code real
-  obtido via `POST /api/sales` com `clientRef` idempotente ao finalizar online.
+  **Bobina e A4 reutilizam exclusivamente `<SaleReceipt>`** (`format="thermal"`/`"a4"`) —
+  o antigo `components/ThermalReceipt.tsx` (endereço/telefone **hardcoded**, ignorava os
+  dados reais de `/api/settings/company`) foi removido; a bobina do PDV agora mostra os
+  dados configurados da empresa (nome, CNPJ/CPF, endereço, telefone **e e-mail**) e a
+  observação da venda, igual ao A4 (onda 2026-07-07, ver §11). Code real obtido via
+  `POST /api/sales` com `clientRef` idempotente ao finalizar online.
 - 🟡 **Cadastros** (`/cadastros`, autenticado): CRUD de **clientes e fornecedores**
   (nome, CPF/CNPJ, telefone, e-mail, endereço) com exclusão protegida por origem.
   **Modal via React Portal** no mesmo padrão ouro de Produtos/Caixa (header com
@@ -254,7 +261,19 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   /api/settings/sales`): substitui o fallback hardcoded "Balcão" por um
   `Person` real escolhido pelo ADMIN — pré-selecionado automaticamente no PDV
   (removível pelo operador) e usado como fallback do `clientId` ao salvar uma
-  edição sem cliente selecionado.
+  edição sem cliente selecionado. **Filtros avançados** (busca por NºDOC/cliente,
+  forma de pagamento, faixa de valor, financeiro, desconto, acréscimo — 100%
+  client-side, `useMemo`) + **paginação** (10/25/50/100 por página, padrão Tray)
+  + **botão flutuante "Voltar ao topo"** (mesmo padrão de Cadastros, `bottom-24
+  md:bottom-8` para não cobrir a bottom nav no mobile). **Impressão unificada com
+  o PDV**: `PrintReceiptModal.tsx` (novo, `components/`) reaproveita o mesmo motor
+  de impressão dual (medição off-screen + `@page` dinâmico + remoção física dos
+  irmãos do `body`) e o mesmo `<SaleReceipt>` usado no PDV — a bobina e o A4
+  impressos a partir de `/vendas` agora têm exatamente o mesmo texto/layout do
+  PDV, incluindo dados completos da empresa e a observação da venda (`sale.notes`,
+  novo campo em `SaleReceiptData`); cliente sem nome exibe "Consumidor Final" no
+  comprovante impresso (mantém "Balcão" nas telas do app). `PrintSaleModal` virou
+  só a ponte de dados (busca `sale`+`company`, mapeia para `SaleReceiptData`).
 - ✅ **Produtos**: filtros (marca/grupo/subgrupo) + busca + **ordenação** (Descrição,
   Código, SKU, Preço de venda — crescente/decrescente via selects no painel de filtros);
   editar produto e variantes (asteriscos `*` também no modal Editar); excluir (com
@@ -1120,6 +1139,100 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
     `statusLabel`) nos 3 pontos que exibiam o valor bruto; ponto verde do card
     hero agora pulsa (`animate-pulse`).
   `npm run typecheck` + `npm run build` → **0 erros** em todos os commits.
+
+- ✅ **Onda 2026-07-07/08 — Refinamento de PDV/Vendas (Padrão Ouro, filtros,
+  paginação, impressão unificada)** (2026-07-07 a 2026-07-08): Branch
+  `refinamento-pdv` (mesclada em `refinamento-vendas` via PR #9, commit
+  `199f3b1`) + `refinamento-vendas` — **enviada ao GitHub, pronta para PR/
+  merge, ainda não mesclada na `main`**. 8 commits (`acb7f3c`→`faa3616`).
+  - **`acb7f3c`** (Padrão Ouro nos overlays do PDV): `ChangeCalculatorModal`,
+    `PaymentModal` (split), `ClientSearchOverlay`, o modal de confirmação rápida
+    e o modal pós-venda passam todos a usar `createPortal(..., document.body)`
+    + casca header/body/footer — mesma causa raiz do `animate-fade-in`
+    documentada em Produtos/Caixa/Cadastros/Vendas corrigida também no PDV.
+  - **`3733cc5`** (grade de produtos no mobile): `max-h-[45vh] overflow-y-auto`
+    (± 3 linhas visíveis) + `lg:max-h-none lg:overflow-visible` no grid de
+    produtos do PDV — antes o Carrinho ficava fora da dobra em listas longas.
+  - **`2495d6b`** (código no card de produto): pílula de marca vazia (`badge-brand`
+    sem `p.brand`) substituída por `#{p.code}` — sempre presente, nunca vazio.
+  - **`26b56f5`** (Filtros Avançados em Vendas): painel expansível com busca
+    (NºDOC/cliente, ignora `#`), forma de pagamento, faixa de valor, financeiro,
+    desconto, acréscimo — combinados via `useMemo`, 100% client-side.
+  - **`be5e9f6`** (Paginação em Vendas): `currentPage`/`itemsPerPage` (padrão
+    Tray — 10/25/50/100), reset ao mudar filtro, rodapé com Anterior/Próximo.
+  - **`9e1311a`**+**`b5453e9`** (Voltar ao topo em Vendas): mesmo padrão de
+    Cadastros; posição corrigida para `right-4 bottom-24 md:bottom-8
+    md:right-8` (cobria a bottom nav no mobile com `bottom-8` fixo).
+  - **`902d2e9`** (extração do `PrintReceiptModal.tsx`): a impressão de Vendas
+    usava `window.print()` puro (`printReceipt()`) sobre o modal on-screen —
+    sem `@page` dinâmico nem remoção dos irmãos do DOM, gerava página em
+    branco. Motor off-screen do PDV extraído para `components/
+    PrintReceiptModal.tsx` (compartilhável); `PrintSaleModal` (`SalesPage.tsx`)
+    virou só a ponte de dados.
+  - **`fix(sales): align receipt printing with pdv`** (fix de paridade):
+    comparação direta PDV × Vendas revelou que a bobina do PDV
+    usava `components/ThermalReceipt.tsx` — componente **separado** de
+    `SaleReceipt`, com endereço/telefone **hardcoded** ("Rua Principal, 123",
+    "Montes Claros - MG") em vez dos dados reais de `/api/settings/company`
+    (que o PDV já buscava, mas só repassava para o A4). `ThermalReceipt.tsx`
+    **removido** (código morto); PDV migrado para `<SaleReceipt format="thermal">`
+    — mesmo componente que o A4 e que Vendas já usavam — via um objeto
+    `receiptData: SaleReceiptData` único reaproveitado no preview on-screen e
+    nos dois portais off-screen. `SaleReceiptData` ganhou `notes?: string |
+    null`, renderizado em `ThermalSaleReceipt` e `A4SaleReceipt`
+    (`SaleReceipt.tsx`) — nem PDV nem Vendas imprimiam a observação da venda
+    antes. Fallback de cliente sem nome trocado de "Balcão" para "Consumidor
+    Final" **somente no comprovante impresso** (as telas do app continuam
+    usando "Balcão"). Resultado: bobina e A4 agora são **byte-idênticos** entre
+    PDV e Vendas — mesmo componente, mesmos dados, mesmo motor de impressão.
+  - **`fix(receipts): show company contact information`** (dados da empresa
+    incompletos): a unificação anterior deixou passar um gap no `CompanyInfo`
+    (`SaleReceipt.tsx`) — a interface **não tinha campo `email`** e o telefone/
+    endereço/documento eram renderizados por condicionais soltas e repetidas
+    em cada formato. Reconhecimento confirmou no `companyProfileSchema`
+    (`packages/shared/src/schemas/settings.ts`) e em `SettingsPage.tsx`
+    (`CompanyCard`) que "Configurações → Empresa" só tem **5 campos**: `name`,
+    `document`, `phone`, `email`, `address` (endereço é texto livre único —
+    **não existe** `city`/`state`/`uf` separados). `CompanyInfo` ganhou
+    `email?: string`; novo helper `companyInfoLines(company)` monta a lista
+    filtrada (documento → endereço → telefone → e-mail, cada um só se
+    preenchido) e é chamado **pelos dois formatos** — cupom térmico stacka
+    uma linha por item, A4 usa o mesmo array com estilo próprio. Nenhuma
+    mudança foi necessária em `PrintReceiptModal.tsx`/`PdvPage.tsx`/
+    `SalesPage.tsx`: os três já repassavam o objeto `company` completo da
+    query `/api/settings/company` — o dado sempre chegou até `SaleReceipt`,
+    só não era exibido por faltar no tipo/render.
+  - **`fix(receipts): load company settings in print modal`** (o preview
+    continuava só com "Exodus Cosméticos" mesmo após o fix anterior):
+    diagnóstico em runtime obrigatório — nada de leitura estática. Confirmado
+    por consulta direta ao Postgres local (`prisma.setting.findMany()`) que a
+    tabela `Setting` **não tinha nenhuma linha `company_profile`**; só
+    existiam `product_form` e `sales`. `GET /api/settings/company` (curl com
+    login real) confirmou o comportamento correto do backend:
+    `companyProfileSchema.parse(setting?.value ?? {})` cai nos `.default('')`
+    e devolve `{name:"",document:"",phone:"",email:"",address:""}` — **não
+    era bug de código**, a empresa nunca tinha sido salva em Configurações →
+    Empresa neste ambiente local. `companyInfoLines()` corretamente não
+    renderiza nada além do nome-fallback quando todos os campos vêm vazios
+    (comportamento por design, não falha). As queryKeys já eram consistentes
+    em todo o app (`['settings', 'company']` em `SettingsPage.tsx`,
+    `PdvPage.tsx`, `CashPage.tsx`, `SalesPage.tsx` — confirmado via grep,
+    incluindo a `invalidateQueries` pós-save). Mesmo assim, endurecido por
+    pedido explícito: **`PrintReceiptModal.tsx` agora busca `/api/settings/company`
+    internamente** (mesma queryKey, cache compartilhado com quem já buscava —
+    sem chamada duplicada) como fonte da verdade própria; a prop `company`
+    recebida do chamador (`SalesPage`) vira só o fallback usado enquanto essa
+    query interna ainda não resolveu (`companyFromApi ?? companyFallback`).
+    Botão "Imprimir" desabilitado + rótulo "Carregando dados da empresa..."
+    enquanto a query está em voo. `PdvPage.tsx` não tinha o mesmo risco (já
+    busca `company` diretamente, sem um modal intermediário orientado a
+    prop) — nenhuma mudança lá. **Dado de teste gravado no Postgres local**
+    (`company_profile`: "Empresa Teste Runtime", CNPJ/telefone/e-mail/endereço
+    fictícios claramente identificáveis) só para desbloquear a verificação
+    visual do Comandante — substituir pelos dados reais em Configurações →
+    Empresa.
+  `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros** em
+  todos os commits.
 
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 

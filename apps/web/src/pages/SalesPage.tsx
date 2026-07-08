@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -15,16 +15,16 @@ import {
   Printer,
   Ban,
   CircleDollarSign,
+  Filter,
+  RotateCcw,
+  ChevronLeft,
+  ChevronRight,
+  ArrowUp,
 } from 'lucide-react';
 import type { SalesSettings } from '@exodus/shared';
 import { api, ApiError } from '../lib/api';
-import {
-  SaleReceipt,
-  printReceipt,
-  type ReceiptFormat,
-  type CompanyInfo,
-  type SaleReceiptData,
-} from '../components/SaleReceipt';
+import { type CompanyInfo, type SaleReceiptData } from '../components/SaleReceipt';
+import { PrintReceiptModal } from '../components/PrintReceiptModal';
 import { ChangeCalculatorModal } from '../components/ChangeCalculatorModal';
 import { useSearchHandler } from '../hooks/useSearchHandler';
 
@@ -49,6 +49,8 @@ interface SaleListItem {
   soldAt: string;
   paymentMethod: string;
   totalAmount: number;
+  discount: number;
+  surcharge: number;
   financialGenerated: boolean;
   client: { name: string } | null;
   items: Array<{ id: string }>;
@@ -77,16 +79,99 @@ interface SaleDetail {
   financialAccounts: Array<{ id: string; description: string; amount: number; dueDate: string; status: string }>;
 }
 
+interface SalesFilterValues {
+  search: string;
+  paymentMethod: string;
+  minTotal: string;
+  maxTotal: string;
+  financeStatus: 'ALL' | 'GENERATED' | 'NOT_GENERATED';
+  hasDiscount: 'ALL' | 'YES' | 'NO';
+  hasAddition: 'ALL' | 'YES' | 'NO';
+}
+
+const EMPTY_SALES_FILTERS: SalesFilterValues = {
+  search: '',
+  paymentMethod: 'ALL',
+  minTotal: '',
+  maxTotal: '',
+  financeStatus: 'ALL',
+  hasDiscount: 'ALL',
+  hasAddition: 'ALL',
+};
+
 export function SalesPage() {
   const qc = useQueryClient();
   const [viewingId, setViewingId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [printingId, setPrintingId] = useState<string | null>(null);
+  const [showFilters, setShowFilters] = useState(false);
+  const [filterValues, setFilterValues] = useState<SalesFilterValues>(EMPTY_SALES_FILTERS);
+
+  function updateFilter<K extends keyof SalesFilterValues>(key: K, value: SalesFilterValues[K]) {
+    setFilterValues((prev) => ({ ...prev, [key]: value }));
+  }
 
   const { data, isLoading } = useQuery({
     queryKey: ['sales'],
     queryFn: () => api.get<{ items: SaleListItem[] }>('/api/sales?pageSize=100'),
   });
+
+  // Filtro avançado 100% client-side: código/cliente, forma de pagamento, faixa de
+  // valor, status do financeiro, presença de desconto e de acréscimo — combinados.
+  const filteredSales = useMemo(() => {
+    const items = data?.items ?? [];
+    const term = filterValues.search.trim().replace(/^#/, '').toLowerCase();
+    const min = filterValues.minTotal.trim() ? parseFloat(filterValues.minTotal.replace(',', '.')) : null;
+    const max = filterValues.maxTotal.trim() ? parseFloat(filterValues.maxTotal.replace(',', '.')) : null;
+
+    return items.filter((s) => {
+      if (term) {
+        const matchesCode = String(s.code).includes(term);
+        const matchesClient = (s.client?.name ?? 'Balcão').toLowerCase().includes(term);
+        if (!matchesCode && !matchesClient) return false;
+      }
+      if (filterValues.paymentMethod !== 'ALL' && s.paymentMethod !== filterValues.paymentMethod) return false;
+      if (min !== null && !isNaN(min) && s.totalAmount < min) return false;
+      if (max !== null && !isNaN(max) && s.totalAmount > max) return false;
+      if (filterValues.financeStatus === 'GENERATED' && !s.financialGenerated) return false;
+      if (filterValues.financeStatus === 'NOT_GENERATED' && s.financialGenerated) return false;
+      if (filterValues.hasDiscount === 'YES' && !(s.discount > 0)) return false;
+      if (filterValues.hasDiscount === 'NO' && s.discount > 0) return false;
+      if (filterValues.hasAddition === 'YES' && !(s.surcharge > 0)) return false;
+      if (filterValues.hasAddition === 'NO' && s.surcharge > 0) return false;
+      return true;
+    });
+  }, [data, filterValues]);
+
+  const activeFilterCount = [
+    filterValues.paymentMethod !== 'ALL',
+    filterValues.minTotal.trim() !== '',
+    filterValues.maxTotal.trim() !== '',
+    filterValues.financeStatus !== 'ALL',
+    filterValues.hasDiscount !== 'ALL',
+    filterValues.hasAddition !== 'ALL',
+  ].filter(Boolean).length;
+
+  // Paginação client-side (padrão Tray) — evita DOM overload em listas grandes.
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
+
+  // Filtro mudou → volta pra primeira página (o recorte antigo pode não existir mais).
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterValues]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredSales.length / itemsPerPage));
+
+  // Rede de segurança: se totalPages encolher (novo filtro/pageSize), evita página fantasma.
+  useEffect(() => {
+    setCurrentPage((p) => Math.min(p, totalPages));
+  }, [totalPages]);
+
+  const paginatedSales = useMemo(
+    () => filteredSales.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage),
+    [filteredSales, currentPage, itemsPerPage],
+  );
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['sales'] });
@@ -121,10 +206,123 @@ export function SalesPage() {
         </div>
       </div>
 
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+          <input
+            className="input pl-12"
+            value={filterValues.search}
+            onChange={(e) => updateFilter('search', e.target.value)}
+            placeholder="Buscar por NºDOC (ex: #10) ou cliente..."
+          />
+        </div>
+        <button
+          className={`relative ${showFilters ? 'btn-primary' : 'btn-ghost'}`}
+          onClick={() => setShowFilters((v) => !v)}
+          title="Filtros avançados"
+        >
+          <Filter className="h-5 w-5" /> Filtros avançados
+          {activeFilterCount > 0 && (
+            <span className="absolute -right-2 -top-2 grid h-5 w-5 place-items-center rounded-full bg-accent-500 text-[11px] font-bold text-white shadow-soft">
+              {activeFilterCount}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {showFilters && (
+        <div className="card animate-fade-in space-y-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3 lg:grid-cols-4">
+            <label className="block">
+              <span className="label">Forma de pagamento</span>
+              <select
+                className="input"
+                value={filterValues.paymentMethod}
+                onChange={(e) => updateFilter('paymentMethod', e.target.value)}
+              >
+                <option value="ALL">Todas</option>
+                {Object.entries(methodLabel).map(([code, label]) => (
+                  <option key={code} value={code}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="label">Valor mínimo (R$)</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                className="input"
+                value={filterValues.minTotal}
+                onChange={(e) => updateFilter('minTotal', sanitizeBr(e.target.value))}
+                placeholder="0,00"
+              />
+            </label>
+            <label className="block">
+              <span className="label">Valor máximo (R$)</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                className="input"
+                value={filterValues.maxTotal}
+                onChange={(e) => updateFilter('maxTotal', sanitizeBr(e.target.value))}
+                placeholder="Sem limite"
+              />
+            </label>
+            <label className="block">
+              <span className="label">Financeiro</span>
+              <select
+                className="input"
+                value={filterValues.financeStatus}
+                onChange={(e) => updateFilter('financeStatus', e.target.value as SalesFilterValues['financeStatus'])}
+              >
+                <option value="ALL">Todos</option>
+                <option value="GENERATED">Com financeiro</option>
+                <option value="NOT_GENERATED">Sem financeiro</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="label">Desconto</span>
+              <select
+                className="input"
+                value={filterValues.hasDiscount}
+                onChange={(e) => updateFilter('hasDiscount', e.target.value as SalesFilterValues['hasDiscount'])}
+              >
+                <option value="ALL">Todos</option>
+                <option value="YES">Com desconto</option>
+                <option value="NO">Sem desconto</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="label">Acréscimo</span>
+              <select
+                className="input"
+                value={filterValues.hasAddition}
+                onChange={(e) => updateFilter('hasAddition', e.target.value as SalesFilterValues['hasAddition'])}
+              >
+                <option value="ALL">Todos</option>
+                <option value="YES">Com acréscimo</option>
+                <option value="NO">Sem acréscimo</option>
+              </select>
+            </label>
+          </div>
+          <div className="flex items-center justify-between border-t border-slate-100 pt-3">
+            <span className="text-xs text-slate-400">
+              {filteredSales.length} de {data?.items.length ?? 0} venda(s)
+            </span>
+            <button className="btn-ghost text-sm" onClick={() => setFilterValues(EMPTY_SALES_FILTERS)}>
+              <RotateCcw className="h-4 w-4" /> Limpar filtros
+            </button>
+          </div>
+        </div>
+      )}
+
       {isLoading ? (
         <div className="grid h-40 place-items-center text-slate-500">Carregando...</div>
       ) : (
-        <div className="card overflow-x-auto">
+        <div className="card">
+        <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-slate-400">
@@ -139,7 +337,7 @@ export function SalesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {data?.items.map((s) => (
+              {paginatedSales.map((s) => (
                 <tr key={s.id}>
                   <td className="py-2 font-semibold text-slate-500">#{s.code}</td>
                   <td>{new Date(s.soldAt).toLocaleString('pt-BR')}</td>
@@ -172,16 +370,71 @@ export function SalesPage() {
                   </td>
                 </tr>
               ))}
-              {data?.items.length === 0 && (
+              {paginatedSales.length === 0 && (
                 <tr>
                   <td colSpan={8} className="py-10 text-center text-slate-400">
                     <Receipt className="mx-auto mb-2 h-10 w-10 text-slate-300" />
-                    Nenhuma venda registrada.
+                    {data?.items.length === 0 ? (
+                      'Nenhuma venda registrada.'
+                    ) : (
+                      <>
+                        Nenhuma venda encontrada com os filtros aplicados.{' '}
+                        <button
+                          className="font-semibold text-brand-600 hover:underline"
+                          onClick={() => setFilterValues(EMPTY_SALES_FILTERS)}
+                        >
+                          Limpar filtros
+                        </button>
+                      </>
+                    )}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+        </div>
+
+        {filteredSales.length > 0 && (
+          <div className="mt-4 flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <label className="flex items-center gap-2 text-sm text-slate-500">
+              Linhas por página
+              <select
+                className="input h-9 w-auto py-1"
+                value={String(itemsPerPage)}
+                onChange={(e) => {
+                  setItemsPerPage(Number(e.target.value));
+                  setCurrentPage(1);
+                }}
+              >
+                <option value="10">10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </label>
+
+            <div className="flex items-center gap-3 text-sm">
+              <button
+                className="btn-ghost h-9 px-3"
+                disabled={currentPage <= 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              >
+                <ChevronLeft className="h-4 w-4" /> Anterior
+              </button>
+              <span className="text-slate-500">
+                Página <span className="font-semibold text-slate-700">{currentPage}</span> de{' '}
+                <span className="font-semibold text-slate-700">{totalPages}</span>
+              </span>
+              <button
+                className="btn-ghost h-9 px-3"
+                disabled={currentPage >= totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              >
+                Próximo <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
         </div>
       )}
 
@@ -210,7 +463,43 @@ export function SalesPage() {
       )}
 
       {printingId && <PrintSaleModal saleId={printingId} onClose={() => setPrintingId(null)} />}
+
+      <ScrollToTopButton />
     </div>
+  );
+}
+
+// Botão flutuante "Voltar ao topo" — mesmo padrão validado em Cadastros
+// (RegistrationsPage.tsx). Ejetado via createPortal(..., document.body):
+// o `animate-fade-in` do Layout.tsx deixa um `transform` persistente no
+// wrapper de rota, virando containing block e quebrando `position: fixed`
+// em descendentes (o botão desceria junto com a lista em vez de ficar
+// ancorado no viewport). A rolagem desta página é a do documento (Layout
+// usa scroll natural, sem overflow interno), então o listener é no `window`.
+function ScrollToTopButton() {
+  const [showScrollTop, setShowScrollTop] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setShowScrollTop(window.scrollY > 300);
+    window.addEventListener('scroll', onScroll);
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  function scrollToTop() {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  return createPortal(
+    <button
+      className={`fixed right-4 bottom-24 md:bottom-8 md:right-8 z-50 grid h-12 w-12 place-items-center rounded-full bg-brand-gradient text-white shadow-lg transition-all duration-300 hover:shadow-brand-lg hover:-translate-y-0.5 ${
+        showScrollTop ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-4 opacity-0'
+      }`}
+      onClick={scrollToTop}
+      title="Voltar ao topo"
+    >
+      <ArrowUp className="h-6 w-6" />
+    </button>,
+    document.body,
   );
 }
 
@@ -394,7 +683,6 @@ function Row({ label, value, tone }: { label: string; value: string; tone?: 'ros
 // Impressão (escolha do formato: cupom térmico ou folha A4).
 // ---------------------------------------------------------------------------
 function PrintSaleModal({ saleId, onClose }: { saleId: string; onClose: () => void }) {
-  const [format, setFormat] = useState<ReceiptFormat>('thermal');
   const { data: sale } = useQuery({
     queryKey: ['sale', saleId],
     queryFn: () => api.get<SaleDetail>(`/api/sales/${saleId}`),
@@ -406,6 +694,10 @@ function PrintSaleModal({ saleId, onClose }: { saleId: string; onClose: () => vo
 
   if (!sale) return null;
 
+  // Ponte de dados: o histórico de vendas guarda itens com `variant.product.name`
+  // (relação completa), enquanto o motor de impressão (mesmo formato usado no
+  // PDV) espera uma descrição já resolvida por item — mapeamento equivalente
+  // ao que o PDV monta a partir do carrinho.
   const receipt: SaleReceiptData = {
     code: sale.code,
     soldAt: sale.soldAt,
@@ -420,45 +712,10 @@ function PrintSaleModal({ saleId, onClose }: { saleId: string; onClose: () => vo
     surcharge: sale.surcharge,
     total: sale.totalAmount,
     payments: sale.payments.length ? sale.payments : [{ method: sale.paymentMethod, amount: sale.totalAmount }],
+    notes: sale.notes,
   };
 
-  return createPortal(
-    <div className="modal-overlay print:bg-white print:p-0">
-      <div className="flex max-h-[92dvh] w-full animate-slide-up flex-col overflow-hidden rounded-t-3xl bg-white shadow-elevated sm:max-h-[90vh] sm:max-w-3xl sm:animate-scale-in sm:rounded-2xl print:max-h-none print:shadow-none">
-        <div className="border-b border-slate-100 p-4 print:hidden">
-          <div className="flex items-center justify-between">
-            <h2 className="font-display text-lg font-bold">Imprimir comprovante</h2>
-            <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-          <div className="mt-3 flex items-center gap-2">
-            <div className="flex flex-1 rounded-xl bg-slate-100 p-1">
-              <button
-                className={`flex-1 rounded-lg px-3 py-1.5 text-sm font-medium ${format === 'thermal' ? 'bg-white shadow-soft' : 'text-slate-500'}`}
-                onClick={() => setFormat('thermal')}
-              >
-                Cupom térmico
-              </button>
-              <button
-                className={`flex-1 rounded-lg px-3 py-1.5 text-sm font-medium ${format === 'a4' ? 'bg-white shadow-soft' : 'text-slate-500'}`}
-                onClick={() => setFormat('a4')}
-              >
-                Folha A4
-              </button>
-            </div>
-            <button className="btn-primary shrink-0" onClick={() => printReceipt()}>
-              <Printer className="h-4 w-4" /> Imprimir
-            </button>
-          </div>
-        </div>
-        <div className="overflow-auto bg-slate-100 p-6 print:overflow-visible print:bg-white print:p-0">
-          <SaleReceipt company={company ?? {}} sale={receipt} format={format} />
-        </div>
-      </div>
-    </div>,
-    document.body,
-  );
+  return <PrintReceiptModal sale={receipt} company={company ?? {}} onClose={onClose} />;
 }
 
 // ---------------------------------------------------------------------------

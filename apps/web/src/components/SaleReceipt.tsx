@@ -1,7 +1,8 @@
 // Comprovante de venda (não fiscal) em dois formatos: cupom térmico 58/80mm
 // para a mini-impressora do balcão e folha A4 estilizada para impressora comum.
-// A impressão é disparada via window.print(); o CSS @media print (index.css)
-// deixa visível apenas o elemento com a classe `.print-area`.
+// O CSS @media print (index.css) deixa visível apenas a classe `.print-area`;
+// o disparo de window.print() (medição de altura + @page dinâmico + remoção
+// física dos irmãos do DOM) fica a cargo de components/PrintReceiptModal.tsx.
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -19,7 +20,23 @@ export interface CompanyInfo {
   name?: string;
   document?: string;
   phone?: string;
+  email?: string;
   address?: string;
+}
+
+/**
+ * Linhas de identificação da empresa (documento, endereço, telefone, e-mail)
+ * já formatadas e filtradas — reaproveitadas pelo cupom térmico (uma linha
+ * por item) e pela folha A4 (mesmo bloco, estilo diferente). O nome da
+ * empresa fica de fora: cada formato já o exibe como título, separadamente.
+ */
+function companyInfoLines(company: CompanyInfo): string[] {
+  return [
+    company.document?.trim() ? `CNPJ/CPF: ${company.document.trim()}` : null,
+    company.address?.trim() || null,
+    company.phone?.trim() ? `Tel: ${company.phone.trim()}` : null,
+    company.email?.trim() || null,
+  ].filter((line): line is string => Boolean(line));
 }
 
 export interface SaleReceiptData {
@@ -32,6 +49,7 @@ export interface SaleReceiptData {
   surcharge: number;
   total: number;
   payments: Array<{ method: string; amount: number }>;
+  notes?: string | null;
 }
 
 export type ReceiptFormat = 'thermal' | 'a4';
@@ -59,9 +77,9 @@ function ThermalSaleReceipt({
       <div className="px-2 py-2">
         <div className="text-center">
           <div className="text-sm font-bold uppercase">{storeName}</div>
-          {company.address?.trim() && <div>{company.address}</div>}
-          {company.phone?.trim() && <div>Tel: {company.phone}</div>}
-          {company.document?.trim() && <div>CNPJ/CPF: {company.document}</div>}
+          {companyInfoLines(company).map((line, i) => (
+            <div key={i}>{line}</div>
+          ))}
         </div>
 
         <div className="my-1 border-t border-dashed border-black" />
@@ -69,7 +87,7 @@ function ThermalSaleReceipt({
           <span>Venda #{sale.code}</span>
           <span>{fmtDate(sale.soldAt)}</span>
         </div>
-        <div>Cliente: {sale.clientName?.trim() || 'Balcão'}</div>
+        <div>Cliente: {sale.clientName?.trim() || 'Consumidor Final'}</div>
 
         <div className="my-1 border-t border-dashed border-black" />
         {sale.items.map((it, i) => (
@@ -115,6 +133,14 @@ function ThermalSaleReceipt({
           </div>
         ))}
 
+        {sale.notes?.trim() && (
+          <>
+            <div className="my-1 border-t border-dashed border-black" />
+            <div className="font-bold">Obs.</div>
+            <div className="whitespace-pre-wrap">{sale.notes}</div>
+          </>
+        )}
+
         <div className="my-1 border-t border-dashed border-black" />
         <div className="text-center">Obrigada pela preferência! 💄</div>
         <div className="text-center text-[10px]">Comprovante não fiscal</div>
@@ -137,12 +163,11 @@ function A4SaleReceipt({ company, sale }: { company: CompanyInfo; sale: SaleRece
             </div>
             <div>
               <div className="font-display text-2xl font-bold">{storeName}</div>
-              {company.address?.trim() && <div className="text-sm text-slate-500">{company.address}</div>}
-              <div className="text-sm text-slate-500">
-                {[company.phone?.trim() && `Tel: ${company.phone}`, company.document?.trim() && `CNPJ/CPF: ${company.document}`]
-                  .filter(Boolean)
-                  .join('  ·  ')}
-              </div>
+              {companyInfoLines(company).map((line, i) => (
+                <div key={i} className="text-sm text-slate-500">
+                  {line}
+                </div>
+              ))}
             </div>
           </div>
           <div className="text-right">
@@ -153,7 +178,7 @@ function A4SaleReceipt({ company, sale }: { company: CompanyInfo; sale: SaleRece
         </div>
 
         <div className="mt-4 text-sm text-slate-600">
-          <span className="font-semibold">Cliente:</span> {sale.clientName?.trim() || 'Balcão'}
+          <span className="font-semibold">Cliente:</span> {sale.clientName?.trim() || 'Consumidor Final'}
         </div>
 
         {/* Itens */}
@@ -215,6 +240,12 @@ function A4SaleReceipt({ company, sale }: { company: CompanyInfo; sale: SaleRece
           ))}
         </div>
 
+        {sale.notes?.trim() && (
+          <div className="mt-4 text-sm text-slate-600">
+            <span className="font-semibold">Obs.:</span> {sale.notes}
+          </div>
+        )}
+
         <div className="mt-8 text-center text-sm text-slate-500">
           Obrigada pela preferência! 💄
           <div className="mt-1 text-xs text-slate-400">Documento sem valor fiscal.</div>
@@ -239,9 +270,4 @@ export function SaleReceipt({
   ) : (
     <ThermalSaleReceipt company={company} sale={sale} />
   );
-}
-
-/** Dispara a impressão nativa do navegador (pareada à impressora). */
-export function printReceipt() {
-  window.print();
 }

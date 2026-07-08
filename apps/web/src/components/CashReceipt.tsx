@@ -18,7 +18,7 @@ export interface CashReceiptData {
 
 /**
  * Relatório de fechamento/resumo de caixa otimizado para bobina térmica
- * 58/80mm — mesma estética monocromática do ThermalReceipt (Requisito 4.7).
+ * 58/80mm — mesma estética monocromática do cupom de venda (Requisito 4.7).
  */
 export function CashReceipt({
   storeName = 'Exodus Cosméticos',
