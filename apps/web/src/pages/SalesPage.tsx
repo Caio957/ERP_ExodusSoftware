@@ -17,6 +17,8 @@ import {
   CircleDollarSign,
   Filter,
   RotateCcw,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import type { SalesSettings } from '@exodus/shared';
 import { api, ApiError } from '../lib/api';
@@ -153,6 +155,27 @@ export function SalesPage() {
     filterValues.hasDiscount !== 'ALL',
     filterValues.hasAddition !== 'ALL',
   ].filter(Boolean).length;
+
+  // Paginação client-side (padrão Tray) — evita DOM overload em listas grandes.
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
+
+  // Filtro mudou → volta pra primeira página (o recorte antigo pode não existir mais).
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterValues]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredSales.length / itemsPerPage));
+
+  // Rede de segurança: se totalPages encolher (novo filtro/pageSize), evita página fantasma.
+  useEffect(() => {
+    setCurrentPage((p) => Math.min(p, totalPages));
+  }, [totalPages]);
+
+  const paginatedSales = useMemo(
+    () => filteredSales.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage),
+    [filteredSales, currentPage, itemsPerPage],
+  );
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['sales'] });
@@ -302,7 +325,8 @@ export function SalesPage() {
       {isLoading ? (
         <div className="grid h-40 place-items-center text-slate-500">Carregando...</div>
       ) : (
-        <div className="card overflow-x-auto">
+        <div className="card">
+        <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-slate-400">
@@ -317,7 +341,7 @@ export function SalesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredSales.map((s) => (
+              {paginatedSales.map((s) => (
                 <tr key={s.id}>
                   <td className="py-2 font-semibold text-slate-500">#{s.code}</td>
                   <td>{new Date(s.soldAt).toLocaleString('pt-BR')}</td>
@@ -350,7 +374,7 @@ export function SalesPage() {
                   </td>
                 </tr>
               ))}
-              {filteredSales.length === 0 && (
+              {paginatedSales.length === 0 && (
                 <tr>
                   <td colSpan={8} className="py-10 text-center text-slate-400">
                     <Receipt className="mx-auto mb-2 h-10 w-10 text-slate-300" />
@@ -372,6 +396,49 @@ export function SalesPage() {
               )}
             </tbody>
           </table>
+        </div>
+
+        {filteredSales.length > 0 && (
+          <div className="mt-4 flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <label className="flex items-center gap-2 text-sm text-slate-500">
+              Linhas por página
+              <select
+                className="input h-9 w-auto py-1"
+                value={String(itemsPerPage)}
+                onChange={(e) => {
+                  setItemsPerPage(Number(e.target.value));
+                  setCurrentPage(1);
+                }}
+              >
+                <option value="10">10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </label>
+
+            <div className="flex items-center gap-3 text-sm">
+              <button
+                className="btn-ghost h-9 px-3"
+                disabled={currentPage <= 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              >
+                <ChevronLeft className="h-4 w-4" /> Anterior
+              </button>
+              <span className="text-slate-500">
+                Página <span className="font-semibold text-slate-700">{currentPage}</span> de{' '}
+                <span className="font-semibold text-slate-700">{totalPages}</span>
+              </span>
+              <button
+                className="btn-ghost h-9 px-3"
+                disabled={currentPage >= totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              >
+                Próximo <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
         </div>
       )}
 
