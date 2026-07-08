@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-07-07
+- **Última atualização:** 2026-07-08
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -23,8 +23,10 @@
   manualmente via PR no GitHub** (o merge dispara o auto-deploy no Railway). A IA
   trabalha sempre na branch ativa indicada — nunca commita direto na `main` sem
   instrução explícita. Branch ativa no momento: **`refinamento-vendas`** (criada a
-  partir da `main` pós-merge de `feature/refinamento-pdv` via PR #9, em `199f3b1`;
-  ainda não mesclada — ver §11 para o histórico completo de commits).
+  partir da `main` pós-merge de `feature/refinamento-pdv` via PR #9, em `199f3b1`).
+  **Enviada ao GitHub** (`199f3b1`→`faa3616`, 8 commits — filtros/paginação/scroll-to-top
+  em Vendas + unificação e correção da impressão PDV↔Vendas), **pronta para PR/merge**
+  — aguardando revisão do Comandante; ver §11 para o histórico completo de commits.
   ✅ **Divergência anterior resolvida (2026-07-03)**: as três branches em
   paralelo (`feature/tela-produtos-caio`, `feature/estoque-tipo-movimentacao`
   e `feature/refinamento-cadastros`), incluindo os marcadores de conflito
@@ -1138,11 +1140,11 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
     hero agora pulsa (`animate-pulse`).
   `npm run typecheck` + `npm run build` → **0 erros** em todos os commits.
 
-- ✅ **Onda 2026-07-07 — Refinamento de PDV/Vendas (Padrão Ouro, filtros,
-  paginação, impressão unificada)** (2026-07-07): Branch `refinamento-pdv`
-  (mesclada em `refinamento-vendas` via PR #9, commit `199f3b1`) +
-  `refinamento-vendas` — **ainda não mesclada na `main`**. 8 commits
-  (`acb7f3c`→`902d2e9`) + este commit de fix de paridade/documentação.
+- ✅ **Onda 2026-07-07/08 — Refinamento de PDV/Vendas (Padrão Ouro, filtros,
+  paginação, impressão unificada)** (2026-07-07 a 2026-07-08): Branch
+  `refinamento-pdv` (mesclada em `refinamento-vendas` via PR #9, commit
+  `199f3b1`) + `refinamento-vendas` — **enviada ao GitHub, pronta para PR/
+  merge, ainda não mesclada na `main`**. 8 commits (`acb7f3c`→`faa3616`).
   - **`acb7f3c`** (Padrão Ouro nos overlays do PDV): `ChangeCalculatorModal`,
     `PaymentModal` (split), `ClientSearchOverlay`, o modal de confirmação rápida
     e o modal pós-venda passam todos a usar `createPortal(..., document.body)`
