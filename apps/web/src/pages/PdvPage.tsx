@@ -48,6 +48,7 @@ interface CashRegister {
 interface ProductSearchResult {
   items: Array<{
     id: string;
+    code: number;
     name: string;
     brand: string;
     variants: Array<{
@@ -394,7 +395,7 @@ export function PdvPage() {
                 }
                 className="card-hover flex flex-col items-start gap-1 text-left"
               >
-                <span className="badge-brand mb-1">{p.brand}</span>
+                <span className="text-xs font-bold tracking-wider text-slate-400 mb-2 inline-block">#{p.code}</span>
                 <span className="line-clamp-2 text-sm font-semibold leading-snug">{p.name}</span>
                 <span className="text-xs text-slate-500">{v.description}</span>
                 <span className="mt-auto pt-2 text-lg font-bold text-brand-700">{brl(v.salePrice)}</span>
