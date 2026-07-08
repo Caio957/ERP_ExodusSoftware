@@ -36,3 +36,6 @@ apps/web/.vite/
 
 # Docker
 .docker-data/
+
+# Claude Code (config local por máquina/usuário)
+.claude/
