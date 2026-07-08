@@ -496,7 +496,7 @@ function ScrollToTopButton() {
 
   return createPortal(
     <button
-      className={`fixed bottom-8 right-8 z-50 grid h-12 w-12 place-items-center rounded-full bg-brand-gradient text-white shadow-lg transition-all duration-300 hover:shadow-brand-lg hover:-translate-y-0.5 ${
+      className={`fixed right-4 bottom-24 md:bottom-8 md:right-8 z-50 grid h-12 w-12 place-items-center rounded-full bg-brand-gradient text-white shadow-lg transition-all duration-300 hover:shadow-brand-lg hover:-translate-y-0.5 ${
         showScrollTop ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-4 opacity-0'
       }`}
       onClick={scrollToTop}
