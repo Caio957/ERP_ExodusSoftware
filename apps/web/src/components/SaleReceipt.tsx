@@ -1,7 +1,8 @@
 // Comprovante de venda (não fiscal) em dois formatos: cupom térmico 58/80mm
 // para a mini-impressora do balcão e folha A4 estilizada para impressora comum.
-// A impressão é disparada via window.print(); o CSS @media print (index.css)
-// deixa visível apenas o elemento com a classe `.print-area`.
+// O CSS @media print (index.css) deixa visível apenas a classe `.print-area`;
+// o disparo de window.print() (medição de altura + @page dinâmico + remoção
+// física dos irmãos do DOM) fica a cargo de components/PrintReceiptModal.tsx.
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -239,9 +240,4 @@ export function SaleReceipt({
   ) : (
     <ThermalSaleReceipt company={company} sale={sale} />
   );
-}
-
-/** Dispara a impressão nativa do navegador (pareada à impressora). */
-export function printReceipt() {
-  window.print();
 }

@@ -23,13 +23,8 @@ import {
 } from 'lucide-react';
 import type { SalesSettings } from '@exodus/shared';
 import { api, ApiError } from '../lib/api';
-import {
-  SaleReceipt,
-  printReceipt,
-  type ReceiptFormat,
-  type CompanyInfo,
-  type SaleReceiptData,
-} from '../components/SaleReceipt';
+import { type CompanyInfo, type SaleReceiptData } from '../components/SaleReceipt';
+import { PrintReceiptModal } from '../components/PrintReceiptModal';
 import { ChangeCalculatorModal } from '../components/ChangeCalculatorModal';
 import { useSearchHandler } from '../hooks/useSearchHandler';
 
@@ -688,7 +683,6 @@ function Row({ label, value, tone }: { label: string; value: string; tone?: 'ros
 // Impressão (escolha do formato: cupom térmico ou folha A4).
 // ---------------------------------------------------------------------------
 function PrintSaleModal({ saleId, onClose }: { saleId: string; onClose: () => void }) {
-  const [format, setFormat] = useState<ReceiptFormat>('thermal');
   const { data: sale } = useQuery({
     queryKey: ['sale', saleId],
     queryFn: () => api.get<SaleDetail>(`/api/sales/${saleId}`),
@@ -700,6 +694,10 @@ function PrintSaleModal({ saleId, onClose }: { saleId: string; onClose: () => vo
 
   if (!sale) return null;
 
+  // Ponte de dados: o histórico de vendas guarda itens com `variant.product.name`
+  // (relação completa), enquanto o motor de impressão (mesmo formato usado no
+  // PDV) espera uma descrição já resolvida por item — mapeamento equivalente
+  // ao que o PDV monta a partir do carrinho.
   const receipt: SaleReceiptData = {
     code: sale.code,
     soldAt: sale.soldAt,
@@ -716,43 +714,7 @@ function PrintSaleModal({ saleId, onClose }: { saleId: string; onClose: () => vo
     payments: sale.payments.length ? sale.payments : [{ method: sale.paymentMethod, amount: sale.totalAmount }],
   };
 
-  return createPortal(
-    <div className="modal-overlay print:bg-white print:p-0">
-      <div className="flex max-h-[92dvh] w-full animate-slide-up flex-col overflow-hidden rounded-t-3xl bg-white shadow-elevated sm:max-h-[90vh] sm:max-w-3xl sm:animate-scale-in sm:rounded-2xl print:max-h-none print:shadow-none">
-        <div className="border-b border-slate-100 p-4 print:hidden">
-          <div className="flex items-center justify-between">
-            <h2 className="font-display text-lg font-bold">Imprimir comprovante</h2>
-            <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-          <div className="mt-3 flex items-center gap-2">
-            <div className="flex flex-1 rounded-xl bg-slate-100 p-1">
-              <button
-                className={`flex-1 rounded-lg px-3 py-1.5 text-sm font-medium ${format === 'thermal' ? 'bg-white shadow-soft' : 'text-slate-500'}`}
-                onClick={() => setFormat('thermal')}
-              >
-                Cupom térmico
-              </button>
-              <button
-                className={`flex-1 rounded-lg px-3 py-1.5 text-sm font-medium ${format === 'a4' ? 'bg-white shadow-soft' : 'text-slate-500'}`}
-                onClick={() => setFormat('a4')}
-              >
-                Folha A4
-              </button>
-            </div>
-            <button className="btn-primary shrink-0" onClick={() => printReceipt()}>
-              <Printer className="h-4 w-4" /> Imprimir
-            </button>
-          </div>
-        </div>
-        <div className="overflow-auto bg-slate-100 p-6 print:overflow-visible print:bg-white print:p-0">
-          <SaleReceipt company={company ?? {}} sale={receipt} format={format} />
-        </div>
-      </div>
-    </div>,
-    document.body,
-  );
+  return <PrintReceiptModal sale={receipt} company={company ?? {}} onClose={onClose} />;
 }
 
 // ---------------------------------------------------------------------------
