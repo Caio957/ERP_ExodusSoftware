@@ -19,6 +19,7 @@ import {
   RotateCcw,
   ChevronLeft,
   ChevronRight,
+  ArrowUp,
 } from 'lucide-react';
 import type { SalesSettings } from '@exodus/shared';
 import { api, ApiError } from '../lib/api';
@@ -467,7 +468,43 @@ export function SalesPage() {
       )}
 
       {printingId && <PrintSaleModal saleId={printingId} onClose={() => setPrintingId(null)} />}
+
+      <ScrollToTopButton />
     </div>
+  );
+}
+
+// Botão flutuante "Voltar ao topo" — mesmo padrão validado em Cadastros
+// (RegistrationsPage.tsx). Ejetado via createPortal(..., document.body):
+// o `animate-fade-in` do Layout.tsx deixa um `transform` persistente no
+// wrapper de rota, virando containing block e quebrando `position: fixed`
+// em descendentes (o botão desceria junto com a lista em vez de ficar
+// ancorado no viewport). A rolagem desta página é a do documento (Layout
+// usa scroll natural, sem overflow interno), então o listener é no `window`.
+function ScrollToTopButton() {
+  const [showScrollTop, setShowScrollTop] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setShowScrollTop(window.scrollY > 300);
+    window.addEventListener('scroll', onScroll);
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  function scrollToTop() {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  return createPortal(
+    <button
+      className={`fixed bottom-8 right-8 z-50 grid h-12 w-12 place-items-center rounded-full bg-brand-gradient text-white shadow-lg transition-all duration-300 hover:shadow-brand-lg hover:-translate-y-0.5 ${
+        showScrollTop ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-4 opacity-0'
+      }`}
+      onClick={scrollToTop}
+      title="Voltar ao topo"
+    >
+      <ArrowUp className="h-6 w-6" />
+    </button>,
+    document.body,
   );
 }
 
