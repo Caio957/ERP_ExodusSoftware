@@ -1200,6 +1200,35 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
     `SalesPage.tsx`: os três já repassavam o objeto `company` completo da
     query `/api/settings/company` — o dado sempre chegou até `SaleReceipt`,
     só não era exibido por faltar no tipo/render.
+  - **`fix(receipts): load company settings in print modal`** (o preview
+    continuava só com "Exodus Cosméticos" mesmo após o fix anterior):
+    diagnóstico em runtime obrigatório — nada de leitura estática. Confirmado
+    por consulta direta ao Postgres local (`prisma.setting.findMany()`) que a
+    tabela `Setting` **não tinha nenhuma linha `company_profile`**; só
+    existiam `product_form` e `sales`. `GET /api/settings/company` (curl com
+    login real) confirmou o comportamento correto do backend:
+    `companyProfileSchema.parse(setting?.value ?? {})` cai nos `.default('')`
+    e devolve `{name:"",document:"",phone:"",email:"",address:""}` — **não
+    era bug de código**, a empresa nunca tinha sido salva em Configurações →
+    Empresa neste ambiente local. `companyInfoLines()` corretamente não
+    renderiza nada além do nome-fallback quando todos os campos vêm vazios
+    (comportamento por design, não falha). As queryKeys já eram consistentes
+    em todo o app (`['settings', 'company']` em `SettingsPage.tsx`,
+    `PdvPage.tsx`, `CashPage.tsx`, `SalesPage.tsx` — confirmado via grep,
+    incluindo a `invalidateQueries` pós-save). Mesmo assim, endurecido por
+    pedido explícito: **`PrintReceiptModal.tsx` agora busca `/api/settings/company`
+    internamente** (mesma queryKey, cache compartilhado com quem já buscava —
+    sem chamada duplicada) como fonte da verdade própria; a prop `company`
+    recebida do chamador (`SalesPage`) vira só o fallback usado enquanto essa
+    query interna ainda não resolveu (`companyFromApi ?? companyFallback`).
+    Botão "Imprimir" desabilitado + rótulo "Carregando dados da empresa..."
+    enquanto a query está em voo. `PdvPage.tsx` não tinha o mesmo risco (já
+    busca `company` diretamente, sem um modal intermediário orientado a
+    prop) — nenhuma mudança lá. **Dado de teste gravado no Postgres local**
+    (`company_profile`: "Empresa Teste Runtime", CNPJ/telefone/e-mail/endereço
+    fictícios claramente identificáveis) só para desbloquear a verificação
+    visual do Comandante — substituir pelos dados reais em Configurações →
+    Empresa.
   `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros** em
   todos os commits.
 

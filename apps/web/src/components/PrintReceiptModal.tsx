@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useQuery } from '@tanstack/react-query';
 import { Printer, X } from 'lucide-react';
+import { api } from '../lib/api';
 import { SaleReceipt, type CompanyInfo, type ReceiptFormat, type SaleReceiptData } from './SaleReceipt';
 
 const PRINT_ROOT_ID = 'sale-receipt-print-root';
@@ -18,13 +20,22 @@ const PRINT_ROOT_ID = 'sale-receipt-print-root';
  */
 export function PrintReceiptModal({
   sale,
-  company,
+  company: companyFallback,
   onClose,
 }: {
   sale: SaleReceiptData;
   company: CompanyInfo;
   onClose: () => void;
 }) {
+  // Fonte da verdade própria: não depende de o chamador ter passado um
+  // `company` fresco (ex.: prop capturada antes de a config ser salva).
+  // `companyFallback` só é usado enquanto esta query ainda não resolveu.
+  const { data: companyFromApi, isLoading: companyLoading } = useQuery({
+    queryKey: ['settings', 'company'],
+    queryFn: () => api.get<CompanyInfo>('/api/settings/company'),
+  });
+  const company = companyFromApi ?? companyFallback;
+
   const [format, setFormat] = useState<ReceiptFormat>('thermal');
   const [printMode, setPrintMode] = useState<ReceiptFormat | null>(null);
   const [receiptHeight, setReceiptHeight] = useState(0);
@@ -82,8 +93,13 @@ export function PrintReceiptModal({
                   Folha A4
                 </button>
               </div>
-              <button className="btn-primary shrink-0" onClick={() => setPrintMode(format)}>
-                <Printer className="h-4 w-4" /> Imprimir
+              <button
+                className="btn-primary shrink-0 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={companyLoading}
+                onClick={() => setPrintMode(format)}
+              >
+                <Printer className="h-4 w-4" />
+                {companyLoading ? 'Carregando dados da empresa...' : 'Imprimir'}
               </button>
             </div>
 
