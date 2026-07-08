@@ -20,7 +20,23 @@ export interface CompanyInfo {
   name?: string;
   document?: string;
   phone?: string;
+  email?: string;
   address?: string;
+}
+
+/**
+ * Linhas de identificação da empresa (documento, endereço, telefone, e-mail)
+ * já formatadas e filtradas — reaproveitadas pelo cupom térmico (uma linha
+ * por item) e pela folha A4 (mesmo bloco, estilo diferente). O nome da
+ * empresa fica de fora: cada formato já o exibe como título, separadamente.
+ */
+function companyInfoLines(company: CompanyInfo): string[] {
+  return [
+    company.document?.trim() ? `CNPJ/CPF: ${company.document.trim()}` : null,
+    company.address?.trim() || null,
+    company.phone?.trim() ? `Tel: ${company.phone.trim()}` : null,
+    company.email?.trim() || null,
+  ].filter((line): line is string => Boolean(line));
 }
 
 export interface SaleReceiptData {
@@ -61,9 +77,9 @@ function ThermalSaleReceipt({
       <div className="px-2 py-2">
         <div className="text-center">
           <div className="text-sm font-bold uppercase">{storeName}</div>
-          {company.address?.trim() && <div>{company.address}</div>}
-          {company.phone?.trim() && <div>Tel: {company.phone}</div>}
-          {company.document?.trim() && <div>CNPJ/CPF: {company.document}</div>}
+          {companyInfoLines(company).map((line, i) => (
+            <div key={i}>{line}</div>
+          ))}
         </div>
 
         <div className="my-1 border-t border-dashed border-black" />
@@ -147,12 +163,11 @@ function A4SaleReceipt({ company, sale }: { company: CompanyInfo; sale: SaleRece
             </div>
             <div>
               <div className="font-display text-2xl font-bold">{storeName}</div>
-              {company.address?.trim() && <div className="text-sm text-slate-500">{company.address}</div>}
-              <div className="text-sm text-slate-500">
-                {[company.phone?.trim() && `Tel: ${company.phone}`, company.document?.trim() && `CNPJ/CPF: ${company.document}`]
-                  .filter(Boolean)
-                  .join('  ·  ')}
-              </div>
+              {companyInfoLines(company).map((line, i) => (
+                <div key={i} className="text-sm text-slate-500">
+                  {line}
+                </div>
+              ))}
             </div>
           </div>
           <div className="text-right">

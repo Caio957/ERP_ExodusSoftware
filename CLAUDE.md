@@ -200,9 +200,9 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   **Bobina e A4 reutilizam exclusivamente `<SaleReceipt>`** (`format="thermal"`/`"a4"`) —
   o antigo `components/ThermalReceipt.tsx` (endereço/telefone **hardcoded**, ignorava os
   dados reais de `/api/settings/company`) foi removido; a bobina do PDV agora mostra os
-  dados configurados da empresa e a observação da venda, igual ao A4 (onda 2026-07-07,
-  ver §11). Code real obtido via `POST /api/sales` com `clientRef` idempotente ao
-  finalizar online.
+  dados configurados da empresa (nome, CNPJ/CPF, endereço, telefone **e e-mail**) e a
+  observação da venda, igual ao A4 (onda 2026-07-07, ver §11). Code real obtido via
+  `POST /api/sales` com `clientRef` idempotente ao finalizar online.
 - 🟡 **Cadastros** (`/cadastros`, autenticado): CRUD de **clientes e fornecedores**
   (nome, CPF/CNPJ, telefone, e-mail, endereço) com exclusão protegida por origem.
   **Modal via React Portal** no mesmo padrão ouro de Produtos/Caixa (header com
@@ -1183,6 +1183,23 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
     Final" **somente no comprovante impresso** (as telas do app continuam
     usando "Balcão"). Resultado: bobina e A4 agora são **byte-idênticos** entre
     PDV e Vendas — mesmo componente, mesmos dados, mesmo motor de impressão.
+  - **`fix(receipts): show company contact information`** (dados da empresa
+    incompletos): a unificação anterior deixou passar um gap no `CompanyInfo`
+    (`SaleReceipt.tsx`) — a interface **não tinha campo `email`** e o telefone/
+    endereço/documento eram renderizados por condicionais soltas e repetidas
+    em cada formato. Reconhecimento confirmou no `companyProfileSchema`
+    (`packages/shared/src/schemas/settings.ts`) e em `SettingsPage.tsx`
+    (`CompanyCard`) que "Configurações → Empresa" só tem **5 campos**: `name`,
+    `document`, `phone`, `email`, `address` (endereço é texto livre único —
+    **não existe** `city`/`state`/`uf` separados). `CompanyInfo` ganhou
+    `email?: string`; novo helper `companyInfoLines(company)` monta a lista
+    filtrada (documento → endereço → telefone → e-mail, cada um só se
+    preenchido) e é chamado **pelos dois formatos** — cupom térmico stacka
+    uma linha por item, A4 usa o mesmo array com estilo próprio. Nenhuma
+    mudança foi necessária em `PrintReceiptModal.tsx`/`PdvPage.tsx`/
+    `SalesPage.tsx`: os três já repassavam o objeto `company` completo da
+    query `/api/settings/company` — o dado sempre chegou até `SaleReceipt`,
+    só não era exibido por faltar no tipo/render.
   `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros** em
   todos os commits.
 
