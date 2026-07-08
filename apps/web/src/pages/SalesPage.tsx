@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -15,6 +15,8 @@ import {
   Printer,
   Ban,
   CircleDollarSign,
+  Filter,
+  RotateCcw,
 } from 'lucide-react';
 import type { SalesSettings } from '@exodus/shared';
 import { api, ApiError } from '../lib/api';
@@ -49,6 +51,8 @@ interface SaleListItem {
   soldAt: string;
   paymentMethod: string;
   totalAmount: number;
+  discount: number;
+  surcharge: number;
   financialGenerated: boolean;
   client: { name: string } | null;
   items: Array<{ id: string }>;
@@ -77,16 +81,78 @@ interface SaleDetail {
   financialAccounts: Array<{ id: string; description: string; amount: number; dueDate: string; status: string }>;
 }
 
+interface SalesFilterValues {
+  search: string;
+  paymentMethod: string;
+  minTotal: string;
+  maxTotal: string;
+  financeStatus: 'ALL' | 'GENERATED' | 'NOT_GENERATED';
+  hasDiscount: 'ALL' | 'YES' | 'NO';
+  hasAddition: 'ALL' | 'YES' | 'NO';
+}
+
+const EMPTY_SALES_FILTERS: SalesFilterValues = {
+  search: '',
+  paymentMethod: 'ALL',
+  minTotal: '',
+  maxTotal: '',
+  financeStatus: 'ALL',
+  hasDiscount: 'ALL',
+  hasAddition: 'ALL',
+};
+
 export function SalesPage() {
   const qc = useQueryClient();
   const [viewingId, setViewingId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [printingId, setPrintingId] = useState<string | null>(null);
+  const [showFilters, setShowFilters] = useState(false);
+  const [filterValues, setFilterValues] = useState<SalesFilterValues>(EMPTY_SALES_FILTERS);
+
+  function updateFilter<K extends keyof SalesFilterValues>(key: K, value: SalesFilterValues[K]) {
+    setFilterValues((prev) => ({ ...prev, [key]: value }));
+  }
 
   const { data, isLoading } = useQuery({
     queryKey: ['sales'],
     queryFn: () => api.get<{ items: SaleListItem[] }>('/api/sales?pageSize=100'),
   });
+
+  // Filtro avançado 100% client-side: código/cliente, forma de pagamento, faixa de
+  // valor, status do financeiro, presença de desconto e de acréscimo — combinados.
+  const filteredSales = useMemo(() => {
+    const items = data?.items ?? [];
+    const term = filterValues.search.trim().replace(/^#/, '').toLowerCase();
+    const min = filterValues.minTotal.trim() ? parseFloat(filterValues.minTotal.replace(',', '.')) : null;
+    const max = filterValues.maxTotal.trim() ? parseFloat(filterValues.maxTotal.replace(',', '.')) : null;
+
+    return items.filter((s) => {
+      if (term) {
+        const matchesCode = String(s.code).includes(term);
+        const matchesClient = (s.client?.name ?? 'Balcão').toLowerCase().includes(term);
+        if (!matchesCode && !matchesClient) return false;
+      }
+      if (filterValues.paymentMethod !== 'ALL' && s.paymentMethod !== filterValues.paymentMethod) return false;
+      if (min !== null && !isNaN(min) && s.totalAmount < min) return false;
+      if (max !== null && !isNaN(max) && s.totalAmount > max) return false;
+      if (filterValues.financeStatus === 'GENERATED' && !s.financialGenerated) return false;
+      if (filterValues.financeStatus === 'NOT_GENERATED' && s.financialGenerated) return false;
+      if (filterValues.hasDiscount === 'YES' && !(s.discount > 0)) return false;
+      if (filterValues.hasDiscount === 'NO' && s.discount > 0) return false;
+      if (filterValues.hasAddition === 'YES' && !(s.surcharge > 0)) return false;
+      if (filterValues.hasAddition === 'NO' && s.surcharge > 0) return false;
+      return true;
+    });
+  }, [data, filterValues]);
+
+  const activeFilterCount = [
+    filterValues.paymentMethod !== 'ALL',
+    filterValues.minTotal.trim() !== '',
+    filterValues.maxTotal.trim() !== '',
+    filterValues.financeStatus !== 'ALL',
+    filterValues.hasDiscount !== 'ALL',
+    filterValues.hasAddition !== 'ALL',
+  ].filter(Boolean).length;
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['sales'] });
@@ -121,6 +187,118 @@ export function SalesPage() {
         </div>
       </div>
 
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+          <input
+            className="input pl-12"
+            value={filterValues.search}
+            onChange={(e) => updateFilter('search', e.target.value)}
+            placeholder="Buscar por NºDOC (ex: #10) ou cliente..."
+          />
+        </div>
+        <button
+          className={`relative ${showFilters ? 'btn-primary' : 'btn-ghost'}`}
+          onClick={() => setShowFilters((v) => !v)}
+          title="Filtros avançados"
+        >
+          <Filter className="h-5 w-5" /> Filtros avançados
+          {activeFilterCount > 0 && (
+            <span className="absolute -right-2 -top-2 grid h-5 w-5 place-items-center rounded-full bg-accent-500 text-[11px] font-bold text-white shadow-soft">
+              {activeFilterCount}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {showFilters && (
+        <div className="card animate-fade-in space-y-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3 lg:grid-cols-4">
+            <label className="block">
+              <span className="label">Forma de pagamento</span>
+              <select
+                className="input"
+                value={filterValues.paymentMethod}
+                onChange={(e) => updateFilter('paymentMethod', e.target.value)}
+              >
+                <option value="ALL">Todas</option>
+                {Object.entries(methodLabel).map(([code, label]) => (
+                  <option key={code} value={code}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="label">Valor mínimo (R$)</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                className="input"
+                value={filterValues.minTotal}
+                onChange={(e) => updateFilter('minTotal', sanitizeBr(e.target.value))}
+                placeholder="0,00"
+              />
+            </label>
+            <label className="block">
+              <span className="label">Valor máximo (R$)</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                className="input"
+                value={filterValues.maxTotal}
+                onChange={(e) => updateFilter('maxTotal', sanitizeBr(e.target.value))}
+                placeholder="Sem limite"
+              />
+            </label>
+            <label className="block">
+              <span className="label">Financeiro</span>
+              <select
+                className="input"
+                value={filterValues.financeStatus}
+                onChange={(e) => updateFilter('financeStatus', e.target.value as SalesFilterValues['financeStatus'])}
+              >
+                <option value="ALL">Todos</option>
+                <option value="GENERATED">Com financeiro</option>
+                <option value="NOT_GENERATED">Sem financeiro</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="label">Desconto</span>
+              <select
+                className="input"
+                value={filterValues.hasDiscount}
+                onChange={(e) => updateFilter('hasDiscount', e.target.value as SalesFilterValues['hasDiscount'])}
+              >
+                <option value="ALL">Todos</option>
+                <option value="YES">Com desconto</option>
+                <option value="NO">Sem desconto</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="label">Acréscimo</span>
+              <select
+                className="input"
+                value={filterValues.hasAddition}
+                onChange={(e) => updateFilter('hasAddition', e.target.value as SalesFilterValues['hasAddition'])}
+              >
+                <option value="ALL">Todos</option>
+                <option value="YES">Com acréscimo</option>
+                <option value="NO">Sem acréscimo</option>
+              </select>
+            </label>
+          </div>
+          <div className="flex items-center justify-between border-t border-slate-100 pt-3">
+            <span className="text-xs text-slate-400">
+              {filteredSales.length} de {data?.items.length ?? 0} venda(s)
+            </span>
+            <button className="btn-ghost text-sm" onClick={() => setFilterValues(EMPTY_SALES_FILTERS)}>
+              <RotateCcw className="h-4 w-4" /> Limpar filtros
+            </button>
+          </div>
+        </div>
+      )}
+
       {isLoading ? (
         <div className="grid h-40 place-items-center text-slate-500">Carregando...</div>
       ) : (
@@ -139,7 +317,7 @@ export function SalesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {data?.items.map((s) => (
+              {filteredSales.map((s) => (
                 <tr key={s.id}>
                   <td className="py-2 font-semibold text-slate-500">#{s.code}</td>
                   <td>{new Date(s.soldAt).toLocaleString('pt-BR')}</td>
@@ -172,11 +350,23 @@ export function SalesPage() {
                   </td>
                 </tr>
               ))}
-              {data?.items.length === 0 && (
+              {filteredSales.length === 0 && (
                 <tr>
                   <td colSpan={8} className="py-10 text-center text-slate-400">
                     <Receipt className="mx-auto mb-2 h-10 w-10 text-slate-300" />
-                    Nenhuma venda registrada.
+                    {data?.items.length === 0 ? (
+                      'Nenhuma venda registrada.'
+                    ) : (
+                      <>
+                        Nenhuma venda encontrada com os filtros aplicados.{' '}
+                        <button
+                          className="font-semibold text-brand-600 hover:underline"
+                          onClick={() => setFilterValues(EMPTY_SALES_FILTERS)}
+                        >
+                          Limpar filtros
+                        </button>
+                      </>
+                    )}
                   </td>
                 </tr>
               )}
