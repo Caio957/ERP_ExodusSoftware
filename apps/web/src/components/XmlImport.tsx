@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -15,6 +15,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
+import { useSearchHandler } from '../hooks/useSearchHandler';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const fmtDate = (s: string) => new Date(s + 'T00:00:00').toLocaleDateString('pt-BR');
@@ -574,7 +575,11 @@ function ProductPickerModal({
   onClose: () => void;
   onSelect: (v: VariantDetail) => void;
 }) {
+  // Busca pesada (nome/SKU/EAN) só dispara no Enter — `searchInput` guarda o
+  // texto digitado, `search` é o valor efetivamente aplicado na query.
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
+  const { onKeyDown: onSearchKeyDown } = useSearchHandler(setSearch);
   const [brand, setBrand] = useState('');
   const [group, setGroup] = useState('');
 
@@ -585,13 +590,32 @@ function ProductPickerModal({
       if (search.trim()) params.set('search', search.trim());
       if (brand.trim()) params.set('brand', brand.trim());
       if (group.trim()) params.set('group', group.trim());
-      params.set('pageSize', '200');
+      // Schema compartilhado (paginationQuery) limita pageSize a 100 — pedir
+      // 200 derrubava a request com 400 "Dados inválidos" (lista sempre vazia).
+      params.set('pageSize', '100');
       return api.get<{ items: ProductRow[] }>(`/api/products?${params}`);
     },
     staleTime: 30_000,
   });
 
   const products = data?.items ?? [];
+
+  // Sugestões de Marca/Grupo derivadas do resultado já carregado — sem
+  // round-trip extra de rede (não existe endpoint dedicado de valores únicos).
+  const brandOptions = useMemo(
+    () =>
+      Array.from(new Set(products.map((p) => p.brand?.trim()).filter((b): b is string => !!b))).sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [products],
+  );
+  const groupOptions = useMemo(
+    () =>
+      Array.from(new Set(products.map((p) => p.group?.trim()).filter((g): g is string => !!g))).sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [products],
+  );
 
   return createPortal(
     <div className="modal-overlay">
@@ -610,14 +634,15 @@ function ProductPickerModal({
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
                 className="input h-10 pl-9"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar por nome, SKU, código de barras..."
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={onSearchKeyDown}
+                placeholder="Buscar por nome, SKU, código de barras... (Enter para buscar)"
                 autoFocus
               />
             </label>
-            <input className="input h-9 text-sm" value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="Filtrar marca" />
-            <input className="input h-9 text-sm" value={group} onChange={(e) => setGroup(e.target.value)} placeholder="Filtrar grupo" />
+            <SmartFilterInput value={brand} onChange={setBrand} options={brandOptions} placeholder="Filtrar marca" />
+            <SmartFilterInput value={group} onChange={setGroup} options={groupOptions} placeholder="Filtrar grupo" />
           </div>
 
           {/* Lista */}
@@ -668,5 +693,73 @@ function ProductPickerModal({
       </div>
     </div>,
     document.body,
+  );
+}
+
+/**
+ * Input de filtro com auto-suggest a partir de valores já carregados (marca/
+ * grupo). O dropdown flutuante é `absolute` sobre um wrapper `relative`, então
+ * nunca empurra o layout ao redor. `onBlur` fecha a lista com atraso de 150ms
+ * para dar tempo do `onClick` da sugestão ser registrado antes de sumir.
+ */
+function SmartFilterInput({
+  value,
+  onChange,
+  options,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  placeholder: string;
+}) {
+  const [raw, setRaw] = useState(value);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => setRaw(value), [value]);
+
+  const term = raw.trim().toLowerCase();
+  const filtered = term ? options.filter((o) => o.toLowerCase().includes(term)) : options;
+
+  function commit(v: string) {
+    setRaw(v);
+    onChange(v);
+    setOpen(false);
+  }
+
+  return (
+    <div className="relative">
+      <input
+        className="input h-9 text-sm"
+        value={raw}
+        placeholder={placeholder}
+        onChange={(e) => {
+          setRaw(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => window.setTimeout(() => setOpen(false), 150)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            commit(raw.trim());
+          }
+        }}
+      />
+      {open && filtered.length > 0 && (
+        <div className="absolute z-50 w-full mt-1 bg-white shadow-lg rounded-md border border-slate-200 max-h-48 overflow-y-auto">
+          {filtered.map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              className="block w-full px-3 py-2 text-left text-sm hover:bg-brand-50"
+              onClick={() => commit(opt)}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
