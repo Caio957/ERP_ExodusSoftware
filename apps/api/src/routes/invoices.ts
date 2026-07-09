@@ -13,6 +13,7 @@ import { prisma } from '../lib/prisma.js';
 import { serializeDecimals } from '../lib/serialize.js';
 import { parseNfeXml } from '../services/nfe-parser.js';
 import { BusinessError, ConflictError, NotFoundError } from '../lib/errors.js';
+import { calcWeightedAverageCost } from '../lib/inventory.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 
@@ -108,17 +109,13 @@ export async function invoiceRoutes(app: FastifyInstance) {
         // Entrada de estoque + custo + CMP + (novo preço de venda, opcional)
         for (const it of items) {
           const current = await tx.productVariant.findUniqueOrThrow({ where: { id: it.variantId }, select: { stockQty: true, averageCost: true } });
-          const prevStock = current.stockQty;
-          const prevAvg = Number(current.averageCost);
-          const newAvg = prevStock <= 0
-            ? it.unitCost
-            : ((prevStock * prevAvg) + (it.quantity * it.unitCost)) / (prevStock + it.quantity);
+          const newAvg = calcWeightedAverageCost(current.stockQty, Number(current.averageCost), it.quantity, it.unitCost);
           await tx.productVariant.update({
             where: { id: it.variantId },
             data: {
               stockQty: { increment: it.quantity },
               costPrice: it.unitCost,
-              averageCost: Math.round(newAvg * 100) / 100,
+              averageCost: newAvg,
               ...(it.newSalePrice != null ? { salePrice: it.newSalePrice } : {}),
             },
           });
@@ -248,17 +245,13 @@ export async function invoiceRoutes(app: FastifyInstance) {
         // Entrada de estoque + custo + CMP + (novo preço de venda) + lote/validade por item.
         for (const it of items) {
           const variant = variantById.get(it.variantId)!;
-          const prevStock = variant.stockQty;
-          const prevAvg = Number(variant.averageCost);
-          const newAvg = prevStock <= 0
-            ? it.unitCost
-            : ((prevStock * prevAvg) + (it.quantity * it.unitCost)) / (prevStock + it.quantity);
+          const newAvg = calcWeightedAverageCost(variant.stockQty, Number(variant.averageCost), it.quantity, it.unitCost);
           await tx.productVariant.update({
             where: { id: it.variantId },
             data: {
               stockQty: { increment: it.quantity },
               costPrice: it.unitCost,
-              averageCost: Math.round(newAvg * 100) / 100,
+              averageCost: newAvg,
               ...(it.newSalePrice != null ? { salePrice: it.newSalePrice } : {}),
               ...(it.tracksLotValidity ? { batch: it.batch ?? null, validity: it.validity ?? null } : {}),
             },
