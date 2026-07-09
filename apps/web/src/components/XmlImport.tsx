@@ -16,9 +16,19 @@ import {
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { useSearchHandler } from '../hooks/useSearchHandler';
+import { maskCpfCnpj } from '../lib/masks';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-const fmtDate = (s: string) => new Date(s + 'T00:00:00').toLocaleDateString('pt-BR');
+
+// NFe 3.10 traz `dEmi`/`dVenc` como data pura (YYYY-MM-DD) — precisa do
+// "T00:00:00" para não sofrer shift de fuso. NFe 4.00 traz `dhEmi` como
+// datetime ISO já com offset (ex: 2026-07-09T15:48:32-03:00) — concatenar
+// "T00:00:00" nesse formato gera uma string inválida ("Invalid Date").
+function fmtDate(s: string): string {
+  if (!s) return '—';
+  const date = s.includes('T') ? new Date(s) : new Date(s + 'T00:00:00');
+  return isNaN(date.getTime()) ? '—' : date.toLocaleDateString('pt-BR');
+}
 
 // ---------------------------------------------------------------------------
 // Tipos
@@ -306,7 +316,7 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
               <div>
                 <div className="text-xs text-slate-400">Fornecedor</div>
                 <div className="font-semibold">{parsed.supplier.name || '—'}</div>
-                <div className="text-xs text-slate-500">{parsed.supplier.document}</div>
+                <div className="text-xs text-slate-500">{maskCpfCnpj(parsed.supplier.document)}</div>
                 {!parsed.supplier.existingId && (
                   <span className="text-xs text-amber-600">Será cadastrado automaticamente</span>
                 )}
