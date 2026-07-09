@@ -24,6 +24,7 @@ import {
 } from '@exodus/shared';
 import { api, ApiError } from '../lib/api';
 import { XmlImport } from '../components/XmlImport';
+import { PurchaseFinancialEngine, type PurchaseInstallment } from '../components/PurchaseFinancialEngine';
 import { useSearchHandler } from '../hooks/useSearchHandler';
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -245,9 +246,8 @@ function ManualPurchase() {
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<PItem[]>([]);
   const [genPayable, setGenPayable] = useState(false);
-  const [parcels, setParcels] = useState(1);
-  const [firstDue, setFirstDue] = useState(() => new Date().toISOString().slice(0, 10));
-  const [intervalDays, setIntervalDays] = useState(30);
+  const [manualInstallments, setManualInstallments] = useState<PurchaseInstallment[]>([]);
+  const [manualInstallmentsValid, setManualInstallmentsValid] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
@@ -278,21 +278,6 @@ function ManualPurchase() {
     setItems((prev) => prev.filter((p) => p.variantId !== variantId));
   }, []);
 
-  function genInstallments() {
-    const n = Math.max(1, Math.floor(parcels));
-    const base = Math.floor((total / n) * 100) / 100;
-    const parts: { dueDate: string; amount: number }[] = [];
-    let acc = 0;
-    for (let i = 0; i < n; i++) {
-      const amount = i === n - 1 ? round2(total - acc) : base;
-      acc = round2(acc + amount);
-      const d = new Date(firstDue);
-      d.setDate(d.getDate() + i * intervalDays);
-      parts.push({ dueDate: d.toISOString().slice(0, 10), amount });
-    }
-    return parts;
-  }
-
   const save = useMutation({
     mutationFn: () =>
       api.post('/api/invoices/manual', {
@@ -309,7 +294,7 @@ function ManualPurchase() {
           batch: it.batch || undefined,
           validity: it.validity || undefined,
         })),
-        installments: genPayable ? genInstallments() : undefined,
+        installments: genPayable ? manualInstallments : undefined,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['products'] });
@@ -319,6 +304,8 @@ function ManualPurchase() {
       setItems([]);
       setNotes('');
       setGenPayable(false);
+      setManualInstallments([]);
+      setManualInstallmentsValid(false);
       window.setTimeout(() => setDone(false), 3000);
     },
     onError: (e) => setLocalError(e instanceof ApiError ? e.message : 'Falha ao registrar'),
@@ -332,6 +319,9 @@ function ManualPurchase() {
       if (it.quantity <= 0 || it.unitCost < 0) return setLocalError('Quantidade/custo inválidos.');
       if (it.tracksLot && (!it.batch.trim() || !it.validity))
         return setLocalError(`Lote/validade obrigatórios em "${it.label}".`);
+    }
+    if (genPayable && !manualInstallmentsValid) {
+      return setLocalError('As parcelas não fecham com o total da compra.');
     }
     save.mutate();
   }
@@ -454,14 +444,13 @@ function ManualPurchase() {
       </label>
 
       {genPayable && (
-        <div className="grid grid-cols-3 gap-2">
-          <Num label="Parcelas" value={parcels} onChange={(v) => setParcels(v || 1)} />
-          <label className="block">
-            <span className="label">1º vencimento</span>
-            <input className="input" type="date" value={firstDue} onChange={(e) => setFirstDue(e.target.value)} />
-          </label>
-          <Num label="Intervalo (dias)" value={intervalDays} onChange={(v) => setIntervalDays(v || 30)} />
-        </div>
+        <PurchaseFinancialEngine
+          totalAmount={total}
+          onChange={(installments, valid) => {
+            setManualInstallments(installments);
+            setManualInstallmentsValid(valid);
+          }}
+        />
       )}
 
       {(localError || save.error instanceof ApiError) && (
@@ -476,7 +465,11 @@ function ManualPurchase() {
             <Check className="h-4 w-4" /> Compra registrada!
           </span>
         )}
-        <button className="btn-primary" disabled={save.isPending} onClick={submit}>
+        <button
+          className="btn-primary"
+          disabled={save.isPending || (genPayable && !manualInstallmentsValid)}
+          onClick={submit}
+        >
           {save.isPending ? 'Salvando...' : 'Registrar compra'}
         </button>
       </div>
