@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   TrendingUp,
@@ -812,7 +813,11 @@ function ProductSearch({ onPick }: { onPick: (v: VariantHit) => void }) {
 }
 
 function ProductPickerModal({ onPick, onClose }: { onPick: (v: VariantHit) => void; onClose: () => void }) {
+  // Busca pesada só dispara no Enter — `searchInput` guarda o texto digitado,
+  // `search` é o valor efetivamente aplicado na query.
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
+  const { onKeyDown: onSearchKeyDown } = useSearchHandler(setSearch);
   const [brand, setBrand] = useState('');
   const [group, setGroup] = useState('');
   const [showFilters, setShowFilters] = useState(false);
@@ -837,53 +842,53 @@ function ProductPickerModal({ onPick, onClose }: { onPick: (v: VariantHit) => vo
     },
   });
 
-  return (
+  return createPortal(
     <div className="modal-overlay">
-      <div className="flex max-h-[92dvh] w-full animate-slide-up flex-col overflow-hidden rounded-t-3xl bg-white shadow-elevated sm:max-h-[90vh] sm:max-w-3xl sm:animate-scale-in sm:rounded-2xl">
-        {/* Cabeçalho */}
-        <div className="flex items-center justify-between gap-3 border-b border-slate-100 p-4">
-          <h3 className="font-display text-lg font-bold">Selecionar produto</h3>
+      <div className="modal-sheet w-full sm:max-w-3xl flex flex-col h-auto max-h-[90dvh] !p-0 overflow-hidden">
+        <header className="shrink-0 flex items-center justify-between border-b border-slate-200 p-4">
+          <h3 className="font-display text-lg font-bold">Selecionar Produto</h3>
           <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
             <X className="h-5 w-5" />
           </button>
-        </div>
+        </header>
 
-        {/* Busca + filtros */}
-        <div className="border-b border-slate-100 p-4 space-y-2">
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                className="input pl-9"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar por nome, marca ou SKU..."
-                autoFocus
-              />
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 bg-slate-50 space-y-4">
+          {/* Busca + filtros */}
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  className="input pl-9"
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  onKeyDown={onSearchKeyDown}
+                  placeholder="Buscar por nome, marca ou SKU... (Enter para buscar)"
+                  autoFocus
+                />
+              </div>
+              <button
+                className={showFilters ? 'btn-primary px-3' : 'btn-ghost px-3'}
+                onClick={() => setShowFilters((v) => !v)}
+              >
+                <Filter className="h-4 w-4" />
+              </button>
             </div>
-            <button
-              className={showFilters ? 'btn-primary px-3' : 'btn-ghost px-3'}
-              onClick={() => setShowFilters((v) => !v)}
-            >
-              <Filter className="h-4 w-4" />
-            </button>
+            {showFilters && (
+              <div className="grid grid-cols-2 gap-2 animate-fade-in">
+                <label className="block">
+                  <span className="label">Marca</span>
+                  <input className="input h-9 text-sm" value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="Todas" />
+                </label>
+                <label className="block">
+                  <span className="label">Grupo</span>
+                  <input className="input h-9 text-sm" value={group} onChange={(e) => setGroup(e.target.value)} placeholder="Todos" />
+                </label>
+              </div>
+            )}
           </div>
-          {showFilters && (
-            <div className="grid grid-cols-2 gap-2 animate-fade-in">
-              <label className="block">
-                <span className="label">Marca</span>
-                <input className="input h-9 text-sm" value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="Todas" />
-              </label>
-              <label className="block">
-                <span className="label">Grupo</span>
-                <input className="input h-9 text-sm" value={group} onChange={(e) => setGroup(e.target.value)} placeholder="Todos" />
-              </label>
-            </div>
-          )}
-        </div>
 
-        {/* Grid de produtos */}
-        <div className="flex-1 overflow-auto p-4">
+          {/* Grid de produtos */}
           {isLoading ? (
             <div className="grid h-32 place-items-center text-slate-500">Carregando...</div>
           ) : (
@@ -922,7 +927,8 @@ function ProductPickerModal({ onPick, onClose }: { onPick: (v: VariantHit) => vo
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
