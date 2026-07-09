@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -15,12 +15,29 @@ import {
   Filter,
   ShoppingCart,
 } from 'lucide-react';
+import {
+  type ProductFormSettings,
+  priceFromMargin,
+  priceFromMarkup,
+  marginFromPrice,
+  markupFromPrice,
+} from '@exodus/shared';
 import { api, ApiError } from '../lib/api';
 import { XmlImport } from '../components/XmlImport';
 import { useSearchHandler } from '../hooks/useSearchHandler';
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+// Padrão BR de vírgula decimal (mesmo helper usado em PDV/Vendas/Produtos/XmlImport).
+function sanitizeBr(s: string): string {
+  let v = s.replace(/\./g, ',');
+  v = v.replace(/[^\d,]/g, '');
+  v = v.replace(/^,/, '');
+  const parts = v.split(',');
+  if (parts.length > 1) v = parts[0] + ',' + parts.slice(1).join('');
+  return v.replace(/^0+(?=\d)/, '');
+}
 
 interface Suggestion {
   variantId: string;
@@ -242,7 +259,24 @@ function ManualPurchase() {
   });
   const { onKeyDown: onSupplierKeyDown } = useSearchHandler(() => setHasSearchedSupplier(true));
 
+  // Configuração global de precificação da loja — mesma fonte usada em
+  // Configurações/Produtos/Etapa 2 do XmlImport.
+  const { data: productFormSettings } = useQuery({
+    queryKey: ['settings', 'product-form'],
+    queryFn: () => api.get<ProductFormSettings>('/api/settings/product-form'),
+  });
+  const pricingMode = productFormSettings?.pricingMode ?? 'margin';
+
   const total = round2(items.reduce((a, it) => a + it.quantity * it.unitCost, 0));
+
+  // Referências estáveis (useCallback) para o React.memo da linha do item
+  // realmente evitar re-render das outras linhas a cada tecla.
+  const handleItemChange = useCallback((variantId: string, patch: Partial<PItem>) => {
+    setItems((prev) => prev.map((it) => (it.variantId === variantId ? { ...it, ...patch } : it)));
+  }, []);
+  const handleItemRemove = useCallback((variantId: string) => {
+    setItems((prev) => prev.filter((p) => p.variantId !== variantId));
+  }, []);
 
   function genInstallments() {
     const n = Math.max(1, Math.floor(parcels));
@@ -257,10 +291,6 @@ function ManualPurchase() {
       parts.push({ dueDate: d.toISOString().slice(0, 10), amount });
     }
     return parts;
-  }
-
-  function setItem(variantId: string, patch: Partial<PItem>) {
-    setItems((prev) => prev.map((it) => (it.variantId === variantId ? { ...it, ...patch } : it)));
   }
 
   const save = useMutation({
@@ -394,58 +424,13 @@ function ManualPurchase() {
       {items.length > 0 && (
         <div className="space-y-2">
           {items.map((it) => (
-            <div key={it.variantId} className="rounded-xl border border-slate-200 p-3">
-              <div className="mb-2 flex items-start justify-between gap-2">
-                <span className="text-sm font-semibold">{it.label}</span>
-                <button
-                  className="text-slate-300 hover:text-rose-500"
-                  onClick={() => setItems((prev) => prev.filter((p) => p.variantId !== it.variantId))}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <Num label="Qtd" value={it.quantity} onChange={(v) => setItem(it.variantId, { quantity: v })} />
-                <Num label="Custo (R$)" value={it.unitCost} step="0.01" onChange={(v) => setItem(it.variantId, { unitCost: v })} />
-                <label className="block">
-                  <span className="label">Novo preço venda</span>
-                  <input
-                    className="input"
-                    type="number"
-                    step="0.01"
-                    value={it.newSalePrice}
-                    onChange={(e) => setItem(it.variantId, { newSalePrice: e.target.value })}
-                    placeholder={`atual ${brl(it.currentSalePrice)}`}
-                  />
-                </label>
-                <label className="flex items-end gap-2 pb-1 text-xs">
-                  <input
-                    type="checkbox"
-                    className="h-5 w-5 accent-brand-600"
-                    checked={it.tracksLot}
-                    onChange={(e) => setItem(it.variantId, { tracksLot: e.target.checked })}
-                  />
-                  Lote/validade
-                </label>
-              </div>
-              {it.tracksLot && (
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  <label className="block">
-                    <span className="label">Lote *</span>
-                    <input className="input" value={it.batch} onChange={(e) => setItem(it.variantId, { batch: e.target.value })} />
-                  </label>
-                  <label className="block">
-                    <span className="label">Validade *</span>
-                    <input
-                      className="input"
-                      type="date"
-                      value={it.validity}
-                      onChange={(e) => setItem(it.variantId, { validity: e.target.value })}
-                    />
-                  </label>
-                </div>
-              )}
-            </div>
+            <ManualPurchaseItemRow
+              key={it.variantId}
+              item={it}
+              pricingMode={pricingMode}
+              onChange={handleItemChange}
+              onRemove={handleItemRemove}
+            />
           ))}
           <div className="flex justify-between rounded-xl bg-slate-50 px-4 py-2 font-semibold">
             <span>Total da compra</span>
@@ -931,6 +916,192 @@ function ProductPickerModal({ onPick, onClose }: { onPick: (v: VariantHit) => vo
     document.body,
   );
 }
+
+/**
+ * Linha de um item da compra manual — extraída em componente próprio
+ * (memoizado) para isolar os estados locais de digitação (rawCost/rawPrice/
+ * rawPct) e evitar que a lista inteira re-renderize a cada tecla. `onChange`/
+ * `onRemove` são referências estáveis (useCallback no pai) recebendo
+ * `variantId` como argumento — só assim o React.memo realmente evita
+ * re-render das outras linhas quando uma muda.
+ */
+const ManualPurchaseItemRow = memo(function ManualPurchaseItemRow({
+  item,
+  pricingMode,
+  onChange,
+  onRemove,
+}: {
+  item: PItem;
+  pricingMode: 'margin' | 'markup';
+  onChange: (variantId: string, patch: Partial<PItem>) => void;
+  onRemove: (variantId: string) => void;
+}) {
+  const toRaw = (n: number) => (n !== 0 ? String(n).replace('.', ',') : '');
+
+  const [rawCost, setRawCost] = useState(() => toRaw(item.unitCost));
+  const skipCostSync = useRef(false);
+  useEffect(() => {
+    if (skipCostSync.current) { skipCostSync.current = false; return; }
+    setRawCost(toRaw(item.unitCost));
+  }, [item.unitCost]);
+
+  const [rawPrice, setRawPrice] = useState(() => (item.newSalePrice ? item.newSalePrice.replace('.', ',') : ''));
+  const skipPriceSync = useRef(false);
+  useEffect(() => {
+    if (skipPriceSync.current) { skipPriceSync.current = false; return; }
+    setRawPrice(item.newSalePrice ? item.newSalePrice.replace('.', ',') : '');
+  }, [item.newSalePrice]);
+
+  // % é apoio de UX puro (nunca vai ao backend sozinho — só via newSalePrice
+  // já calculado); inicializa a partir de um newSalePrice pré-existente, se houver.
+  const [rawPct, setRawPct] = useState(() => {
+    if (!item.newSalePrice) return '';
+    const price = parseFloat(item.newSalePrice);
+    const pct = pricingMode === 'margin' ? marginFromPrice(item.unitCost, price) : markupFromPrice(item.unitCost, price);
+    return pct ? toRaw(pct) : '';
+  });
+  const skipPctSync = useRef(false);
+
+  function commitCost(cleaned: string) {
+    setRawCost(cleaned);
+    skipCostSync.current = true;
+    const newCost = parseFloat(cleaned.replace(',', '.')) || 0;
+    // Se já existe um % ativo nesta linha, preserva-o e recalcula o preço
+    // a partir do novo custo (mesma regra do formulário de Produtos).
+    const pct = parseFloat(rawPct.replace(',', '.'));
+    if (rawPct.trim() && !isNaN(pct)) {
+      const newPrice = pricingMode === 'margin' ? priceFromMargin(newCost, pct) : priceFromMarkup(newCost, pct);
+      skipPriceSync.current = true;
+      setRawPrice(toRaw(newPrice));
+      onChange(item.variantId, { unitCost: newCost, newSalePrice: String(newPrice) });
+    } else {
+      onChange(item.variantId, { unitCost: newCost });
+    }
+  }
+
+  function commitPrice(cleaned: string) {
+    setRawPrice(cleaned);
+    skipPriceSync.current = true;
+    if (!cleaned.trim()) {
+      onChange(item.variantId, { newSalePrice: '' });
+      skipPctSync.current = true;
+      setRawPct('');
+      return;
+    }
+    const price = parseFloat(cleaned.replace(',', '.')) || 0;
+    onChange(item.variantId, { newSalePrice: String(price) });
+    const pct = pricingMode === 'margin' ? marginFromPrice(item.unitCost, price) || 0 : markupFromPrice(item.unitCost, price) || 0;
+    skipPctSync.current = true;
+    setRawPct(pct !== 0 ? toRaw(pct) : '');
+  }
+
+  function commitPct(cleaned: string) {
+    if (!cleaned.trim()) {
+      setRawPct('');
+      skipPriceSync.current = true;
+      setRawPrice('');
+      onChange(item.variantId, { newSalePrice: '' });
+      return;
+    }
+    let pct = parseFloat(cleaned.replace(',', '.')) || 0;
+    if (pricingMode === 'margin' && pct > 99.99) {
+      pct = 99.99;
+      cleaned = '99,99';
+    }
+    setRawPct(cleaned);
+    skipPctSync.current = true;
+    const price = pricingMode === 'margin' ? priceFromMargin(item.unitCost, pct) : priceFromMarkup(item.unitCost, pct);
+    skipPriceSync.current = true;
+    setRawPrice(toRaw(price));
+    onChange(item.variantId, { newSalePrice: String(price) });
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-200 p-3">
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <span className="text-sm font-semibold">{item.label}</span>
+        <button className="text-slate-300 hover:text-rose-500" onClick={() => onRemove(item.variantId)}>
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-5">
+        <Num
+          label="Qtd"
+          value={item.quantity}
+          onChange={(v) => onChange(item.variantId, { quantity: v })}
+        />
+        <label className="block">
+          <span className="label">Custo (R$)</span>
+          <input
+            type="text"
+            inputMode="decimal"
+            className="input"
+            value={rawCost}
+            onKeyDown={(e) => { if (['-', '+', 'e', 'E'].includes(e.key)) e.preventDefault(); }}
+            onChange={(e) => commitCost(sanitizeBr(e.target.value))}
+            onFocus={(e) => e.target.select()}
+          />
+        </label>
+        <label className="block">
+          <span className="label">Novo preço venda</span>
+          <input
+            type="text"
+            inputMode="decimal"
+            className="input"
+            value={rawPrice}
+            placeholder={`atual ${brl(item.currentSalePrice)}`}
+            onKeyDown={(e) => { if (['-', '+', 'e', 'E'].includes(e.key)) e.preventDefault(); }}
+            onChange={(e) => commitPrice(sanitizeBr(e.target.value))}
+            onFocus={(e) => e.target.select()}
+          />
+        </label>
+        <label className="block">
+          <span className="label">{pricingMode === 'margin' ? 'Margem (%)' : 'Markup (%)'}</span>
+          <input
+            type="text"
+            inputMode="decimal"
+            className="input"
+            value={rawPct}
+            placeholder="0,00"
+            onKeyDown={(e) => { if (['-', '+', 'e', 'E'].includes(e.key)) e.preventDefault(); }}
+            onChange={(e) => commitPct(sanitizeBr(e.target.value))}
+            onFocus={(e) => e.target.select()}
+          />
+        </label>
+        <label className="flex items-end gap-2 pb-1 text-xs">
+          <input
+            type="checkbox"
+            className="h-5 w-5 accent-brand-600"
+            checked={item.tracksLot}
+            onChange={(e) => onChange(item.variantId, { tracksLot: e.target.checked })}
+          />
+          Lote/validade
+        </label>
+      </div>
+      {item.tracksLot && (
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <label className="block">
+            <span className="label">Lote *</span>
+            <input
+              className="input"
+              value={item.batch}
+              onChange={(e) => onChange(item.variantId, { batch: e.target.value })}
+            />
+          </label>
+          <label className="block">
+            <span className="label">Validade *</span>
+            <input
+              className="input"
+              type="date"
+              value={item.validity}
+              onChange={(e) => onChange(item.variantId, { validity: e.target.value })}
+            />
+          </label>
+        </div>
+      )}
+    </div>
+  );
+});
 
 function Num({
   label,
