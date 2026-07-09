@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -14,11 +14,28 @@ import {
   Loader2,
   Sparkles,
 } from 'lucide-react';
+import {
+  type ProductFormSettings,
+  priceFromMargin,
+  priceFromMarkup,
+  marginFromPrice,
+  markupFromPrice,
+} from '@exodus/shared';
 import { api, ApiError } from '../lib/api';
 import { useSearchHandler } from '../hooks/useSearchHandler';
 import { maskCpfCnpj } from '../lib/masks';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+// Padrão BR de vírgula decimal (mesmo helper usado em PDV/Vendas/Produtos).
+function sanitizeBr(s: string): string {
+  let v = s.replace(/\./g, ',');
+  v = v.replace(/[^\d,]/g, '');
+  v = v.replace(/^,/, '');
+  const parts = v.split(',');
+  if (parts.length > 1) v = parts[0] + ',' + parts.slice(1).join('');
+  return v.replace(/^0+(?=\d)/, '');
+}
 
 // NFe 3.10 traz `dEmi`/`dVenc` como data pura (YYYY-MM-DD) — precisa do
 // "T00:00:00" para não sofrer shift de fuso. NFe 4.00 traz `dhEmi` como
@@ -93,12 +110,37 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
     };
   }, []);
 
+  // Configuração global de precificação da loja (Margem sobre venda ou
+  // Markup sobre custo) — mesma fonte usada em Configurações/Produtos.
+  const { data: productFormSettings } = useQuery({
+    queryKey: ['settings', 'product-form'],
+    queryFn: () => api.get<ProductFormSettings>('/api/settings/product-form'),
+  });
+  const pricingMode = productFormSettings?.pricingMode ?? 'margin';
+
   // passo 1: De/Para
   const [mapping, setMapping] = useState<Record<number, VariantDetail>>({});
   const [pickerIdx, setPickerIdx] = useState<number | null>(null);
 
-  // passo 2: revisão de preços — keyed by item index
-  const [newPrices, setNewPrices] = useState<Record<number, string>>({});
+  // passo 2: revisão de preços — keyed by item index. `newPct` é só apoio de
+  // UX (nunca vai ao backend); a base de cálculo é sempre o custo da nota
+  // (it.unitCost), não o custo anterior da variante.
+  const [newPrices, setNewPrices] = useState<Record<number, number>>({});
+  const [newPct, setNewPct] = useState<Record<number, number>>({});
+
+  function applyNewPrice(i: number, xmlCost: number, price: number) {
+    setNewPrices((p) => ({ ...p, [i]: price }));
+    const pct =
+      pricingMode === 'margin' ? marginFromPrice(xmlCost, price) || 0 : markupFromPrice(xmlCost, price) || 0;
+    setNewPct((p) => ({ ...p, [i]: pct }));
+  }
+
+  function applyNewPct(i: number, xmlCost: number, pct: number) {
+    const safePct = pricingMode === 'margin' ? Math.min(pct, 99.99) : pct;
+    setNewPct((p) => ({ ...p, [i]: safePct }));
+    const price = pricingMode === 'margin' ? priceFromMargin(xmlCost, safePct) : priceFromMarkup(xmlCost, safePct);
+    setNewPrices((p) => ({ ...p, [i]: price }));
+  }
 
   // passo 3: financeiro
   const [financialMode, setFinancialMode] = useState<FinancialMode>('xml');
@@ -173,16 +215,19 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
         issueDate: parsed.issueDate,
         entryDate,
         totalAmount: parsed.totalAmount,
-        items: parsed.items.map((it, i) => ({
-          variantId: mapping[i]!.id,
-          quantity: it.quantity,
-          unitCost: it.unitCost,
-          cfop: it.cfop,
-          supplierItemCode: it.supplierItemCode,
-          supplierBarcode: it.supplierBarcode,
-          saveMapping: true,
-          newSalePrice: newPrices[i] ? parseFloat(newPrices[i].replace(',', '.')) : undefined,
-        })),
+        items: parsed.items.map((it, i) => {
+          const newPrice = newPrices[i];
+          return {
+            variantId: mapping[i]!.id,
+            quantity: it.quantity,
+            unitCost: it.unitCost,
+            cfop: it.cfop,
+            supplierItemCode: it.supplierItemCode,
+            supplierBarcode: it.supplierBarcode,
+            saveMapping: true,
+            newSalePrice: newPrice != null && newPrice > 0 ? newPrice : undefined,
+          };
+        }),
         duplicates: financialMode === 'xml' ? parsed.duplicates : [],
         customInstallments: financialMode === 'custom' ? customInstallments : undefined,
       });
@@ -203,6 +248,7 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
     setStep('upload');
     setMapping({});
     setNewPrices({});
+    setNewPct({});
     setFinancialMode('xml');
     setCustomInst([{ dueDate: '', amount: '' }]);
     setEntryDate(new Date().toISOString().split('T')[0]);
@@ -404,7 +450,9 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
           <div className="card space-y-3">
             <div className="text-sm font-semibold">Passo 2 — Revise os preços de venda</div>
             <p className="text-xs text-slate-500">
-              Para cada item, veja o custo anterior e o da nota. Se quiser, informe um novo preço de venda. Deixe em branco para manter o atual.
+              Para cada item, veja o custo anterior e o da nota. Informe um novo preço de venda ou a{' '}
+              {pricingMode === 'margin' ? 'margem' : 'markup'} desejada — o outro campo se recalcula sozinho a
+              partir do custo da nota. Deixe em branco para manter o atual.
             </p>
             {parsed.items.map((it, i) => {
               const v = mapping[i];
@@ -414,18 +462,25 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
                     <span className="font-medium">{v?.productName || it.description}</span>
                     {v?.description && <span className="text-slate-500 text-xs">{v.description}</span>}
                   </div>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-3 lg:grid-cols-5">
                     <InfoCell label="Custo anterior" value={v?.costPrice != null && v.costPrice > 0 ? brl(v.costPrice) : '—'} />
                     <InfoCell label="Custo na nota" value={brl(it.unitCost)} highlight />
                     <InfoCell label="P. venda atual" value={v?.salePrice != null && v.salePrice > 0 ? brl(v.salePrice) : '—'} />
                     <div>
                       <div className="text-slate-400 mb-0.5">Novo p. venda</div>
-                      <input
-                        className="input h-8 text-sm w-full"
-                        value={newPrices[i] ?? ''}
-                        onChange={(e) => setNewPrices((p) => ({ ...p, [i]: e.target.value }))}
+                      <NumInput
+                        value={newPrices[i] ?? 0}
+                        onChange={(price) => applyNewPrice(i, it.unitCost, price)}
                         placeholder={v?.salePrice != null && v.salePrice > 0 ? brl(v.salePrice) : 'Manter atual'}
-                        inputMode="decimal"
+                      />
+                    </div>
+                    <div>
+                      <div className="text-slate-400 mb-0.5">{pricingMode === 'margin' ? 'Margem (%)' : 'Markup (%)'}</div>
+                      <NumInput
+                        value={newPct[i] ?? 0}
+                        onChange={(pct) => applyNewPct(i, it.unitCost, pct)}
+                        max={pricingMode === 'margin' ? 99.99 : undefined}
+                        placeholder="0,00"
                       />
                     </div>
                   </div>
@@ -571,6 +626,59 @@ function InfoCell({ label, value, highlight }: { label: string; value: string; h
       <div className="text-slate-400 mb-0.5">{label}</div>
       <div className={`font-semibold ${highlight ? 'text-brand-700' : 'text-slate-800'}`}>{value}</div>
     </div>
+  );
+}
+
+/**
+ * Input numérico blindado (padrão antifraude do projeto): `type="text"` +
+ * `inputMode="decimal"`, bloqueio de `-`/`+`/`e`/`E` no teclado, vírgula BR
+ * via `sanitizeBr`, seleção total no foco e trava opcional de valor máximo
+ * (usada para não deixar a margem passar de 99,99%).
+ */
+function NumInput({
+  value,
+  onChange,
+  max,
+  placeholder,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  max?: number;
+  placeholder?: string;
+}) {
+  const toRaw = (n: number) => (n !== 0 ? String(n).replace('.', ',') : '');
+  const [raw, setRaw] = useState(() => toRaw(value));
+  const skipSync = useRef(false);
+
+  useEffect(() => {
+    if (skipSync.current) { skipSync.current = false; return; }
+    setRaw(toRaw(value));
+  }, [value]);
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      className="input h-8 text-sm w-full"
+      value={raw}
+      placeholder={placeholder}
+      onKeyDown={(e) => { if (['-', '+', 'e', 'E'].includes(e.key)) e.preventDefault(); }}
+      onChange={(e) => {
+        const cleaned = sanitizeBr(e.target.value);
+        let num = parseFloat(cleaned.replace(',', '.')) || 0;
+        if (max !== undefined && num > max) {
+          num = max;
+          skipSync.current = true;
+          setRaw(String(max).replace('.', ','));
+          onChange(max);
+          return;
+        }
+        setRaw(cleaned);
+        skipSync.current = true;
+        onChange(num);
+      }}
+      onFocus={(e) => e.target.select()}
+    />
   );
 }
 
