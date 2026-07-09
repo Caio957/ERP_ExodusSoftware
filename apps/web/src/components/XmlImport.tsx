@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   UploadCloud,
@@ -7,16 +8,43 @@ import {
   X,
   Check,
   ChevronRight,
-  Plus,
-  Trash2,
   AlertCircle,
   Loader2,
   Sparkles,
 } from 'lucide-react';
+import {
+  type ProductFormSettings,
+  priceFromMargin,
+  priceFromMarkup,
+  marginFromPrice,
+  markupFromPrice,
+} from '@exodus/shared';
 import { api, ApiError } from '../lib/api';
+import { useSearchHandler } from '../hooks/useSearchHandler';
+import { maskCpfCnpj } from '../lib/masks';
+import { PurchaseFinancialEngine, type PurchaseInstallment } from './PurchaseFinancialEngine';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-const fmtDate = (s: string) => new Date(s + 'T00:00:00').toLocaleDateString('pt-BR');
+
+// Padrão BR de vírgula decimal (mesmo helper usado em PDV/Vendas/Produtos).
+function sanitizeBr(s: string): string {
+  let v = s.replace(/\./g, ',');
+  v = v.replace(/[^\d,]/g, '');
+  v = v.replace(/^,/, '');
+  const parts = v.split(',');
+  if (parts.length > 1) v = parts[0] + ',' + parts.slice(1).join('');
+  return v.replace(/^0+(?=\d)/, '');
+}
+
+// NFe 3.10 traz `dEmi`/`dVenc` como data pura (YYYY-MM-DD) — precisa do
+// "T00:00:00" para não sofrer shift de fuso. NFe 4.00 traz `dhEmi` como
+// datetime ISO já com offset (ex: 2026-07-09T15:48:32-03:00) — concatenar
+// "T00:00:00" nesse formato gera uma string inválida ("Invalid Date").
+function fmtDate(s: string): string {
+  if (!s) return '—';
+  const date = s.includes('T') ? new Date(s) : new Date(s + 'T00:00:00');
+  return isNaN(date.getTime()) ? '—' : date.toLocaleDateString('pt-BR');
+}
 
 // ---------------------------------------------------------------------------
 // Tipos
@@ -29,6 +57,9 @@ interface ParsedItem {
   unitCost: number;
   cfop: string;
   matchedVariantId: string | null;
+  /** Dados reais do catálogo (nome do produto + variante) já resolvidos pelo
+   *  backend quando o De/Para foi encontrado automaticamente. */
+  matchedVariant: VariantDetail | null;
 }
 interface ParsedNfe {
   accessKey: string;
@@ -64,6 +95,9 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  // Data de entrada/digitação — quando o operador está dando entrada, distinta
+  // da emissão da NFe (parsed.issueDate). Padrão: hoje.
+  const [entryDate, setEntryDate] = useState(() => new Date().toISOString().split('T')[0]);
 
   // Sem isso, soltar o arquivo fora da zona de drop faz o navegador NAVEGAR
   // para o XML (abre o arquivo numa aba, derrubando o app). Bloqueia o
@@ -78,18 +112,43 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
     };
   }, []);
 
+  // Configuração global de precificação da loja (Margem sobre venda ou
+  // Markup sobre custo) — mesma fonte usada em Configurações/Produtos.
+  const { data: productFormSettings } = useQuery({
+    queryKey: ['settings', 'product-form'],
+    queryFn: () => api.get<ProductFormSettings>('/api/settings/product-form'),
+  });
+  const pricingMode = productFormSettings?.pricingMode ?? 'margin';
+
   // passo 1: De/Para
   const [mapping, setMapping] = useState<Record<number, VariantDetail>>({});
   const [pickerIdx, setPickerIdx] = useState<number | null>(null);
 
-  // passo 2: revisão de preços — keyed by item index
-  const [newPrices, setNewPrices] = useState<Record<number, string>>({});
+  // passo 2: revisão de preços — keyed by item index. `newPct` é só apoio de
+  // UX (nunca vai ao backend); a base de cálculo é sempre o custo da nota
+  // (it.unitCost), não o custo anterior da variante.
+  const [newPrices, setNewPrices] = useState<Record<number, number>>({});
+  const [newPct, setNewPct] = useState<Record<number, number>>({});
 
-  // passo 3: financeiro
+  function applyNewPrice(i: number, xmlCost: number, price: number) {
+    setNewPrices((p) => ({ ...p, [i]: price }));
+    const pct =
+      pricingMode === 'margin' ? marginFromPrice(xmlCost, price) || 0 : markupFromPrice(xmlCost, price) || 0;
+    setNewPct((p) => ({ ...p, [i]: pct }));
+  }
+
+  function applyNewPct(i: number, xmlCost: number, pct: number) {
+    const safePct = pricingMode === 'margin' ? Math.min(pct, 99.99) : pct;
+    setNewPct((p) => ({ ...p, [i]: safePct }));
+    const price = pricingMode === 'margin' ? priceFromMargin(xmlCost, safePct) : priceFromMarkup(xmlCost, safePct);
+    setNewPrices((p) => ({ ...p, [i]: price }));
+  }
+
+  // passo 3: financeiro — motor de split/A_PRAZO extraído para
+  // <PurchaseFinancialEngine>, compartilhado com a Compra Manual.
   const [financialMode, setFinancialMode] = useState<FinancialMode>('xml');
-  const [customInst, setCustomInst] = useState<{ dueDate: string; amount: string }[]>([
-    { dueDate: '', amount: '' },
-  ]);
+  const [customInstallments, setCustomInstallments] = useState<PurchaseInstallment[]>([]);
+  const [customInstallmentsValid, setCustomInstallmentsValid] = useState(false);
 
   // ----- Upload -----
   // Núcleo compartilhado entre o clique (input file) e o arrastar-e-soltar.
@@ -108,8 +167,8 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
       setParsed(data);
       const init: Record<number, VariantDetail> = {};
       data.items.forEach((it, i) => {
-        if (it.matchedVariantId) {
-          init[i] = { id: it.matchedVariantId, sku: '', description: it.description, costPrice: 0, salePrice: 0, productName: it.description };
+        if (it.matchedVariant) {
+          init[i] = it.matchedVariant;
         }
       });
       setMapping(init);
@@ -143,30 +202,25 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
         supplierId = created.id;
       }
 
-      // Monta parcelas
-      let customInstallments: { dueDate: string; amount: number }[] | undefined;
-      if (financialMode === 'custom') {
-        customInstallments = customInst.map((i) => ({
-          dueDate: i.dueDate,
-          amount: parseFloat(i.amount.replace(',', '.')),
-        }));
-      }
-
       await api.post('/api/invoices/confirm', {
         supplierId,
         accessKey: parsed.accessKey,
         issueDate: parsed.issueDate,
+        entryDate,
         totalAmount: parsed.totalAmount,
-        items: parsed.items.map((it, i) => ({
-          variantId: mapping[i]!.id,
-          quantity: it.quantity,
-          unitCost: it.unitCost,
-          cfop: it.cfop,
-          supplierItemCode: it.supplierItemCode,
-          supplierBarcode: it.supplierBarcode,
-          saveMapping: true,
-          newSalePrice: newPrices[i] ? parseFloat(newPrices[i].replace(',', '.')) : undefined,
-        })),
+        items: parsed.items.map((it, i) => {
+          const newPrice = newPrices[i];
+          return {
+            variantId: mapping[i]!.id,
+            quantity: it.quantity,
+            unitCost: it.unitCost,
+            cfop: it.cfop,
+            supplierItemCode: it.supplierItemCode,
+            supplierBarcode: it.supplierBarcode,
+            saveMapping: true,
+            newSalePrice: newPrice != null && newPrice > 0 ? newPrice : undefined,
+          };
+        }),
         duplicates: financialMode === 'xml' ? parsed.duplicates : [],
         customInstallments: financialMode === 'custom' ? customInstallments : undefined,
       });
@@ -187,8 +241,11 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
     setStep('upload');
     setMapping({});
     setNewPrices({});
+    setNewPct({});
     setFinancialMode('xml');
-    setCustomInst([{ dueDate: '', amount: '' }]);
+    setCustomInstallments([]);
+    setCustomInstallmentsValid(false);
+    setEntryDate(new Date().toISOString().split('T')[0]);
   }
 
   const allMapped = parsed?.items.every((_, i) => mapping[i]?.id);
@@ -237,7 +294,14 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
               e.preventDefault();
               if (!busy) setDragOver(true);
             }}
-            onDragLeave={() => setDragOver(false)}
+            onDragLeave={(e) => {
+              // Guarda contra bubbling: só reseta se o cursor realmente saiu da
+              // dropzone (não apenas passou de um filho para outro). Combinada
+              // com pointer-events-none nos filhos, evita o flicker/stutter de
+              // dragOver alternando true/false a cada pixel cruzado.
+              if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return;
+              setDragOver(false);
+            }}
             onDrop={(e) => {
               e.preventDefault();
               setDragOver(false);
@@ -247,18 +311,18 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
             }}
             className={`group mt-1 flex cursor-pointer flex-col items-center justify-center gap-3 rounded-3xl border-2 p-12 text-center transition-all duration-300 ${
               dragOver
-                ? 'scale-[1.02] border-solid border-accent-400 bg-gradient-to-br from-brand-50 via-white to-accent-50 shadow-glow-gold'
+                ? 'border-solid border-accent-400 bg-gradient-to-br from-brand-50 via-white to-accent-50 shadow-glow-gold'
                 : 'border-dashed border-brand-200 bg-gradient-to-br from-white to-brand-50/40 hover:border-brand-400 hover:shadow-glow-brand'
             }`}
           >
             <span
-              className={`grid h-16 w-16 place-items-center rounded-2xl transition-all duration-300 ${
+              className={`pointer-events-none grid h-16 w-16 place-items-center rounded-2xl transition-all duration-300 ${
                 dragOver ? 'icon-tile-gold animate-pop' : 'icon-tile group-hover:scale-110'
               }`}
             >
               {busy ? <Loader2 className="h-8 w-8 animate-spin" /> : <UploadCloud className="h-8 w-8" />}
             </span>
-            <span className="font-display text-lg font-bold text-slate-800">
+            <span className="pointer-events-none font-display text-lg font-bold text-slate-800">
               {busy ? (
                 'Lendo e processando a nota…'
               ) : dragOver ? (
@@ -269,7 +333,7 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
                 </>
               )}
             </span>
-            <span className="text-xs text-slate-400">
+            <span className="pointer-events-none text-xs text-slate-400">
               {fileName ? (
                 <span className="inline-flex items-center gap-1 font-semibold text-brand-600">
                   <FileText className="h-3.5 w-3.5" /> {fileName}
@@ -278,7 +342,7 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
                 'O sistema lê os itens, o fornecedor e as duplicatas automaticamente'
               )}
             </span>
-            <div className="mt-1 flex flex-wrap justify-center gap-2">
+            <div className="pointer-events-none mt-1 flex flex-wrap justify-center gap-2">
               <span className="badge-brand">NFe modelo 55</span>
               <span className="badge-gold">
                 <Sparkles className="h-3.5 w-3.5" /> Leitura automática
@@ -297,7 +361,7 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
               <div>
                 <div className="text-xs text-slate-400">Fornecedor</div>
                 <div className="font-semibold">{parsed.supplier.name || '—'}</div>
-                <div className="text-xs text-slate-500">{parsed.supplier.document}</div>
+                <div className="text-xs text-slate-500">{maskCpfCnpj(parsed.supplier.document)}</div>
                 {!parsed.supplier.existingId && (
                   <span className="text-xs text-amber-600">Será cadastrado automaticamente</span>
                 )}
@@ -308,6 +372,15 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
                 <div className="text-xs text-slate-400">Emissão: {fmtDate(parsed.issueDate)}</div>
               </div>
             </div>
+            <label className="mt-3 block max-w-[200px]">
+              <span className="label">Data de entrada</span>
+              <input
+                type="date"
+                className="input"
+                value={entryDate}
+                onChange={(e) => setEntryDate(e.target.value)}
+              />
+            </label>
             {parsed.alreadyImported && (
               <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
                 ⚠️ Esta nota já foi importada anteriormente.
@@ -371,7 +444,9 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
           <div className="card space-y-3">
             <div className="text-sm font-semibold">Passo 2 — Revise os preços de venda</div>
             <p className="text-xs text-slate-500">
-              Para cada item, veja o custo anterior e o da nota. Se quiser, informe um novo preço de venda. Deixe em branco para manter o atual.
+              Para cada item, veja o custo anterior e o da nota. Informe um novo preço de venda ou a{' '}
+              {pricingMode === 'margin' ? 'margem' : 'markup'} desejada — o outro campo se recalcula sozinho a
+              partir do custo da nota. Deixe em branco para manter o atual.
             </p>
             {parsed.items.map((it, i) => {
               const v = mapping[i];
@@ -381,18 +456,25 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
                     <span className="font-medium">{v?.productName || it.description}</span>
                     {v?.description && <span className="text-slate-500 text-xs">{v.description}</span>}
                   </div>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-3 lg:grid-cols-5">
                     <InfoCell label="Custo anterior" value={v?.costPrice != null && v.costPrice > 0 ? brl(v.costPrice) : '—'} />
                     <InfoCell label="Custo na nota" value={brl(it.unitCost)} highlight />
                     <InfoCell label="P. venda atual" value={v?.salePrice != null && v.salePrice > 0 ? brl(v.salePrice) : '—'} />
                     <div>
                       <div className="text-slate-400 mb-0.5">Novo p. venda</div>
-                      <input
-                        className="input h-8 text-sm w-full"
-                        value={newPrices[i] ?? ''}
-                        onChange={(e) => setNewPrices((p) => ({ ...p, [i]: e.target.value }))}
+                      <NumInput
+                        value={newPrices[i] ?? 0}
+                        onChange={(price) => applyNewPrice(i, it.unitCost, price)}
                         placeholder={v?.salePrice != null && v.salePrice > 0 ? brl(v.salePrice) : 'Manter atual'}
-                        inputMode="decimal"
+                      />
+                    </div>
+                    <div>
+                      <div className="text-slate-400 mb-0.5">{pricingMode === 'margin' ? 'Margem (%)' : 'Markup (%)'}</div>
+                      <NumInput
+                        value={newPct[i] ?? 0}
+                        onChange={(pct) => applyNewPct(i, it.unitCost, pct)}
+                        max={pricingMode === 'margin' ? 99.99 : undefined}
+                        placeholder="0,00"
                       />
                     </div>
                   </div>
@@ -431,44 +513,21 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
               </label>
             )}
 
-            {/* opção: parcelamento personalizado */}
+            {/* opção: gerar contas a pagar (split de formas + A_PRAZO, espelho do PDV) */}
             <label className={`flex cursor-pointer gap-3 rounded-xl border p-3 ${financialMode === 'custom' ? 'border-brand-400 bg-brand-50' : 'border-slate-200'}`}>
               <input type="radio" className="mt-0.5 accent-brand-600" checked={financialMode === 'custom'} onChange={() => setFinancialMode('custom')} />
               <div className="flex-1">
-                <div className="font-medium text-sm">Parcelamento personalizado</div>
-                <div className="text-xs text-slate-500">Informe as datas e valores das parcelas.</div>
+                <div className="font-medium text-sm">Gerar contas a pagar</div>
+                <div className="text-xs text-slate-500">Divida entre formas de pagamento e/ou parcele a prazo.</div>
                 {financialMode === 'custom' && (
-                  <div className="mt-2 space-y-2">
-                    {customInst.map((inst, idx) => (
-                      <div key={idx} className="flex items-center gap-2">
-                        <input
-                          type="date"
-                          className="input h-9 flex-1 text-sm"
-                          value={inst.dueDate}
-                          onChange={(e) => setCustomInst((ci) => ci.map((x, j) => j === idx ? { ...x, dueDate: e.target.value } : x))}
-                        />
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          className="input h-9 w-28 text-sm"
-                          placeholder="R$ 0,00"
-                          value={inst.amount}
-                          onChange={(e) => setCustomInst((ci) => ci.map((x, j) => j === idx ? { ...x, amount: e.target.value } : x))}
-                        />
-                        {customInst.length > 1 && (
-                          <button className="text-slate-400 hover:text-rose-600" onClick={() => setCustomInst((ci) => ci.filter((_, j) => j !== idx))}>
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                    <button className="btn-ghost text-sm" onClick={() => setCustomInst((ci) => [...ci, { dueDate: '', amount: '' }])}>
-                      <Plus className="h-4 w-4" /> Adicionar parcela
-                    </button>
-                    <div className="text-xs text-slate-400">
-                      Total informado: {brl(customInst.reduce((s, i) => s + (parseFloat(i.amount.replace(',', '.')) || 0), 0))}
-                      {' '}/ Total da nota: {brl(parsed.totalAmount)}
-                    </div>
+                  <div className="mt-3">
+                    <PurchaseFinancialEngine
+                      totalAmount={parsed.totalAmount}
+                      onChange={(installments, valid) => {
+                        setCustomInstallments(installments);
+                        setCustomInstallmentsValid(valid);
+                      }}
+                    />
                   </div>
                 )}
               </div>
@@ -488,7 +547,7 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
             <button className="btn-ghost" onClick={() => setStep('prices')}>← Voltar</button>
             <button
               className="btn-primary"
-              disabled={busy || parsed.alreadyImported}
+              disabled={busy || parsed.alreadyImported || (financialMode === 'custom' && !customInstallmentsValid)}
               onClick={handleConfirm}
             >
               {busy ? 'Confirmando...' : 'Confirmar entrada'}
@@ -541,6 +600,59 @@ function InfoCell({ label, value, highlight }: { label: string; value: string; h
   );
 }
 
+/**
+ * Input numérico blindado (padrão antifraude do projeto): `type="text"` +
+ * `inputMode="decimal"`, bloqueio de `-`/`+`/`e`/`E` no teclado, vírgula BR
+ * via `sanitizeBr`, seleção total no foco e trava opcional de valor máximo
+ * (usada para não deixar a margem passar de 99,99%).
+ */
+function NumInput({
+  value,
+  onChange,
+  max,
+  placeholder,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  max?: number;
+  placeholder?: string;
+}) {
+  const toRaw = (n: number) => (n !== 0 ? String(n).replace('.', ',') : '');
+  const [raw, setRaw] = useState(() => toRaw(value));
+  const skipSync = useRef(false);
+
+  useEffect(() => {
+    if (skipSync.current) { skipSync.current = false; return; }
+    setRaw(toRaw(value));
+  }, [value]);
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      className="input h-8 text-sm w-full"
+      value={raw}
+      placeholder={placeholder}
+      onKeyDown={(e) => { if (['-', '+', 'e', 'E'].includes(e.key)) e.preventDefault(); }}
+      onChange={(e) => {
+        const cleaned = sanitizeBr(e.target.value);
+        let num = parseFloat(cleaned.replace(',', '.')) || 0;
+        if (max !== undefined && num > max) {
+          num = max;
+          skipSync.current = true;
+          setRaw(String(max).replace('.', ','));
+          onChange(max);
+          return;
+        }
+        setRaw(cleaned);
+        skipSync.current = true;
+        onChange(num);
+      }}
+      onFocus={(e) => e.target.select()}
+    />
+  );
+}
+
 // ---------------------------------------------------------------------------
 // ProductPickerModal — catálogo completo com filtros
 // ---------------------------------------------------------------------------
@@ -566,7 +678,11 @@ function ProductPickerModal({
   onClose: () => void;
   onSelect: (v: VariantDetail) => void;
 }) {
+  // Busca pesada (nome/SKU/EAN) só dispara no Enter — `searchInput` guarda o
+  // texto digitado, `search` é o valor efetivamente aplicado na query.
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
+  const { onKeyDown: onSearchKeyDown } = useSearchHandler(setSearch);
   const [brand, setBrand] = useState('');
   const [group, setGroup] = useState('');
 
@@ -577,7 +693,9 @@ function ProductPickerModal({
       if (search.trim()) params.set('search', search.trim());
       if (brand.trim()) params.set('brand', brand.trim());
       if (group.trim()) params.set('group', group.trim());
-      params.set('pageSize', '200');
+      // Schema compartilhado (paginationQuery) limita pageSize a 100 — pedir
+      // 200 derrubava a request com 400 "Dados inválidos" (lista sempre vazia).
+      params.set('pageSize', '100');
       return api.get<{ items: ProductRow[] }>(`/api/products?${params}`);
     },
     staleTime: 30_000,
@@ -585,78 +703,166 @@ function ProductPickerModal({
 
   const products = data?.items ?? [];
 
-  return (
+  // Sugestões de Marca/Grupo derivadas do resultado já carregado — sem
+  // round-trip extra de rede (não existe endpoint dedicado de valores únicos).
+  const brandOptions = useMemo(
+    () =>
+      Array.from(new Set(products.map((p) => p.brand?.trim()).filter((b): b is string => !!b))).sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [products],
+  );
+  const groupOptions = useMemo(
+    () =>
+      Array.from(new Set(products.map((p) => p.group?.trim()).filter((g): g is string => !!g))).sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [products],
+  );
+
+  return createPortal(
     <div className="modal-overlay">
-      <div className="modal-sheet sm:max-w-xl">
-        {/* Header */}
-        <div className="mb-3 flex items-center justify-between">
+      <div className="modal-sheet w-full sm:max-w-3xl flex h-auto max-h-[90dvh] flex-col overflow-hidden !p-0">
+        <header className="shrink-0 flex items-center justify-between border-b border-slate-200 p-4">
           <h2 className="font-display text-lg font-bold">Selecionar produto</h2>
           <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
             <X className="h-5 w-5" />
           </button>
-        </div>
+        </header>
 
-        {/* Filtros */}
-        <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
-          <label className="relative sm:col-span-3">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              className="input h-10 pl-9"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar por nome, SKU, código de barras..."
-              autoFocus
-            />
-          </label>
-          <input className="input h-9 text-sm" value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="Filtrar marca" />
-          <input className="input h-9 text-sm" value={group} onChange={(e) => setGroup(e.target.value)} placeholder="Filtrar grupo" />
-        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto bg-slate-50 p-4 space-y-4 md:p-6">
+          {/* Filtros */}
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <label className="relative sm:col-span-3">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                className="input h-10 pl-9"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={onSearchKeyDown}
+                placeholder="Buscar por nome, SKU, código de barras... (Enter para buscar)"
+                autoFocus
+              />
+            </label>
+            <SmartFilterInput value={brand} onChange={setBrand} options={brandOptions} placeholder="Filtrar marca" />
+            <SmartFilterInput value={group} onChange={setGroup} options={groupOptions} placeholder="Filtrar grupo" />
+          </div>
 
-        {/* Lista */}
-        <div className="max-h-[55dvh] overflow-y-auto space-y-1 pr-1">
-          {isLoading && <div className="py-8 text-center text-slate-400">Carregando produtos...</div>}
-          {!isLoading && products.length === 0 && (
-            <div className="py-8 text-center text-slate-400">Nenhum produto encontrado.</div>
-          )}
-          {products.map((p) =>
-            p.variants.map((v) => (
-              <button
-                key={v.id}
-                className="w-full rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 text-left hover:border-brand-300 hover:bg-brand-50 transition"
-                onClick={() =>
-                  onSelect({
-                    id: v.id,
-                    sku: v.sku,
-                    description: v.description,
-                    costPrice: v.costPrice,
-                    salePrice: v.salePrice,
-                    productName: p.name,
-                    brand: p.brand,
-                    group: p.group,
-                  })
-                }
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="font-medium text-sm truncate">{p.name}</div>
-                    {v.description && <div className="text-xs text-slate-500 truncate">{v.description}</div>}
-                    <div className="text-xs text-slate-400 mt-0.5">
-                      SKU: {v.sku}
-                      {p.brand && ` · ${p.brand}`}
-                      {p.group && ` · ${p.group}`}
+          {/* Lista */}
+          <div className="space-y-1">
+            {isLoading && <div className="py-8 text-center text-slate-400">Carregando produtos...</div>}
+            {!isLoading && products.length === 0 && (
+              <div className="py-8 text-center text-slate-400">Nenhum produto encontrado.</div>
+            )}
+            {products.map((p) =>
+              p.variants.map((v) => (
+                <button
+                  key={v.id}
+                  className="w-full rounded-xl border border-slate-100 bg-white px-3 py-2.5 text-left hover:border-brand-300 hover:bg-brand-50 transition"
+                  onClick={() =>
+                    onSelect({
+                      id: v.id,
+                      sku: v.sku,
+                      description: v.description,
+                      costPrice: v.costPrice,
+                      salePrice: v.salePrice,
+                      productName: p.name,
+                      brand: p.brand,
+                      group: p.group,
+                    })
+                  }
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-medium text-sm truncate">{p.name}</div>
+                      {v.description && <div className="text-xs text-slate-500 truncate">{v.description}</div>}
+                      <div className="text-xs text-slate-400 mt-0.5">
+                        SKU: {v.sku}
+                        {p.brand && ` · ${p.brand}`}
+                        {p.group && ` · ${p.group}`}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0 text-xs text-slate-500">
+                      <div>Estoque: {v.stockQty}</div>
+                      <div>Custo: {v.costPrice > 0 ? brl(v.costPrice) : '—'}</div>
+                      <div>Venda: {v.salePrice > 0 ? brl(v.salePrice) : '—'}</div>
                     </div>
                   </div>
-                  <div className="text-right shrink-0 text-xs text-slate-500">
-                    <div>Estoque: {v.stockQty}</div>
-                    <div>Custo: {v.costPrice > 0 ? brl(v.costPrice) : '—'}</div>
-                    <div>Venda: {v.salePrice > 0 ? brl(v.salePrice) : '—'}</div>
-                  </div>
-                </div>
-              </button>
-            )),
-          )}
+                </button>
+              )),
+            )}
+          </div>
         </div>
       </div>
+    </div>,
+    document.body,
+  );
+}
+
+/**
+ * Input de filtro com auto-suggest a partir de valores já carregados (marca/
+ * grupo). O dropdown flutuante é `absolute` sobre um wrapper `relative`, então
+ * nunca empurra o layout ao redor. `onBlur` fecha a lista com atraso de 150ms
+ * para dar tempo do `onClick` da sugestão ser registrado antes de sumir.
+ */
+function SmartFilterInput({
+  value,
+  onChange,
+  options,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  placeholder: string;
+}) {
+  const [raw, setRaw] = useState(value);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => setRaw(value), [value]);
+
+  const term = raw.trim().toLowerCase();
+  const filtered = term ? options.filter((o) => o.toLowerCase().includes(term)) : options;
+
+  function commit(v: string) {
+    setRaw(v);
+    onChange(v);
+    setOpen(false);
+  }
+
+  return (
+    <div className="relative">
+      <input
+        className="input h-9 text-sm"
+        value={raw}
+        placeholder={placeholder}
+        onChange={(e) => {
+          setRaw(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => window.setTimeout(() => setOpen(false), 150)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            commit(raw.trim());
+          }
+        }}
+      />
+      {open && filtered.length > 0 && (
+        <div className="absolute z-50 w-full mt-1 bg-white shadow-lg rounded-md border border-slate-200 max-h-48 overflow-y-auto">
+          {filtered.map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              className="block w-full px-3 py-2 text-left text-sm hover:bg-brand-50"
+              onClick={() => commit(opt)}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

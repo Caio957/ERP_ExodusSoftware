@@ -77,7 +77,7 @@ export function parseNfeXml(xml: string): RawNfe {
 
   const duplicates: RawNfeDuplicate[] = toArray(infNFe.cobr?.dup).map((dup: any) => ({
     number: String(dup?.nDup ?? ''),
-    dueDate: String(dup?.dVenc ?? ide.dhEmi ?? ''),
+    dueDate: String(dup?.dVenc ?? ide.dhEmi ?? ide.dEmi ?? ''),
     amount: Number(dup?.vDup ?? 0),
   }));
 

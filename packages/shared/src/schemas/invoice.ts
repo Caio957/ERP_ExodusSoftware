@@ -17,6 +17,20 @@ export const parsedNfeItemSchema = z.object({
   cfop: z.string(), // registrado como veio (flexível) - Requisito 4.3
   /** Resolvido pelo backend via SupplierProductMapping, se já existir. */
   matchedVariantId: z.string().uuid().nullable(),
+  /** Dados reais do catálogo (produto + variante) para o item já mapeado — o
+   *  nome exibido ao usuário deve ser sempre o do ERP, nunca o `xProd` da nota. */
+  matchedVariant: z
+    .object({
+      id: z.string().uuid(),
+      sku: z.string(),
+      description: z.string().nullable(),
+      costPrice: z.number(),
+      salePrice: z.number(),
+      productName: z.string(),
+      brand: z.string().nullable(),
+      group: z.string().nullable(),
+    })
+    .nullable(),
 });
 export type ParsedNfeItem = z.infer<typeof parsedNfeItemSchema>;
 
@@ -61,6 +75,9 @@ export const confirmInvoiceSchema = z.object({
   supplierId: z.string().uuid(),
   accessKey: z.string().min(1, 'Chave de acesso obrigatória'),
   issueDate: z.coerce.date(),
+  /** Data de entrada/digitação — quando o operador deu entrada no sistema
+   *  (distinta da emissão da NFe). Base do StockMovement gerado. */
+  entryDate: z.coerce.date().default(() => new Date()),
   totalAmount: money,
   items: z.array(confirmInvoiceItemSchema).min(1, 'Nota sem itens'),
   /** Duplicatas do XML (mantido para compatibilidade). */
@@ -131,11 +148,21 @@ export const manualPurchaseSchema = z
   });
 export type ManualPurchaseInput = z.infer<typeof manualPurchaseSchema>;
 
-/** Edição de metadados de uma compra (observação, data, nº de documento). */
+/**
+ * Edição de uma compra. Sem `items`: edita só os metadados (observação, data,
+ * nº de documento, fornecedor). Com `items`: edição completa (Mini-PDV de
+ * Compras) — o backend estorna o estoque da nota antiga, recalcula o CMP dos
+ * novos itens e refaz o financeiro (contas a pagar pendentes), da mesma forma
+ * que a edição de vendas.
+ */
 export const updateInvoiceSchema = z.object({
   notes: z.string().trim().max(500).nullish(),
   purchaseDate: z.coerce.date().optional(),
   documentNumber: z.number().int().positive().nullish(),
+  supplierId: z.string().uuid().optional(),
+  items: z.array(manualPurchaseItemSchema).min(1, 'Adicione ao menos um produto').optional(),
+  /** Parcelas do contas a pagar. Só usado quando `items` está presente. */
+  installments: z.array(z.object({ dueDate: z.coerce.date(), amount: money })).optional(),
 });
 export type UpdateInvoiceInput = z.infer<typeof updateInvoiceSchema>;
 
