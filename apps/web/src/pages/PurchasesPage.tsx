@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -14,6 +14,7 @@ import {
   Eye,
   Filter,
   ShoppingCart,
+  RotateCcw,
 } from 'lucide-react';
 import {
   type ProductFormSettings,
@@ -491,6 +492,24 @@ interface InvoiceListItem {
   items: Array<{ id: string }>;
 }
 
+interface PurchaseFilterValues {
+  doc: string;
+  supplier: string;
+  date: string;
+  valueMin: string;
+  valueMax: string;
+  financial: 'ALL' | 'WITH_FINANCIAL' | 'WITHOUT_FINANCIAL';
+}
+
+const EMPTY_PURCHASE_FILTERS: PurchaseFilterValues = {
+  doc: '',
+  supplier: '',
+  date: '',
+  valueMin: '',
+  valueMax: '',
+  financial: 'ALL',
+};
+
 function PurchasesList({ onView }: { onView: (id: string) => void }) {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({
@@ -507,10 +526,143 @@ function PurchasesList({ onView }: { onView: (id: string) => void }) {
     onError: (e) => window.alert(e instanceof ApiError ? e.message : 'Falha ao excluir'),
   });
 
+  const [showFilters, setShowFilters] = useState(false);
+  const [filterValues, setFilterValues] = useState<PurchaseFilterValues>(EMPTY_PURCHASE_FILTERS);
+
+  function updateFilter<K extends keyof PurchaseFilterValues>(key: K, value: PurchaseFilterValues[K]) {
+    setFilterValues((prev) => ({ ...prev, [key]: value }));
+  }
+
+  // Filtro avançado 100% client-side: nº do documento, fornecedor, data da
+  // compra, faixa de valor total e status do financeiro — combinados (mesmo
+  // padrão do filtro de Vendas em SalesPage.tsx).
+  const filteredInvoices = useMemo(() => {
+    const items = data?.items ?? [];
+    const docTerm = filterValues.doc.trim().replace(/^#/, '');
+    const supplierTerm = filterValues.supplier.trim().toLowerCase();
+    const min = filterValues.valueMin.trim() ? parseFloat(filterValues.valueMin.replace(',', '.')) : null;
+    const max = filterValues.valueMax.trim() ? parseFloat(filterValues.valueMax.replace(',', '.')) : null;
+
+    return items.filter((inv) => {
+      if (docTerm && !String(inv.documentNumber ?? '').includes(docTerm)) return false;
+      if (supplierTerm && !inv.supplier.name.toLowerCase().includes(supplierTerm)) return false;
+      if (filterValues.date) {
+        const invDate = new Date(inv.issueDate).toLocaleDateString('en-CA');
+        if (invDate !== filterValues.date) return false;
+      }
+      if (min !== null && !isNaN(min) && inv.totalAmount < min) return false;
+      if (max !== null && !isNaN(max) && inv.totalAmount > max) return false;
+      if (filterValues.financial === 'WITH_FINANCIAL' && !inv.hasFinancial) return false;
+      if (filterValues.financial === 'WITHOUT_FINANCIAL' && inv.hasFinancial) return false;
+      return true;
+    });
+  }, [data, filterValues]);
+
+  const activeFilterCount = [
+    filterValues.doc.trim() !== '',
+    filterValues.supplier.trim() !== '',
+    filterValues.date.trim() !== '',
+    filterValues.valueMin.trim() !== '',
+    filterValues.valueMax.trim() !== '',
+    filterValues.financial !== 'ALL',
+  ].filter(Boolean).length;
+
   if (isLoading) return <div className="grid h-32 place-items-center text-slate-500">Carregando...</div>;
 
   return (
-    <div className="card overflow-x-auto">
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <button
+          className={`relative ${showFilters ? 'btn-primary' : 'btn-ghost'}`}
+          onClick={() => setShowFilters((v) => !v)}
+          title="Filtros avançados"
+        >
+          <Filter className="h-5 w-5" /> Filtros avançados
+          {activeFilterCount > 0 && (
+            <span className="absolute -right-2 -top-2 grid h-5 w-5 place-items-center rounded-full bg-accent-500 text-[11px] font-bold text-white shadow-soft">
+              {activeFilterCount}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {showFilters && (
+        <div className="card animate-fade-in space-y-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3 lg:grid-cols-4">
+            <label className="block">
+              <span className="label">Nº do documento</span>
+              <input
+                className="input"
+                value={filterValues.doc}
+                onChange={(e) => updateFilter('doc', e.target.value)}
+                placeholder="ex: #10"
+              />
+            </label>
+            <label className="block">
+              <span className="label">Fornecedor</span>
+              <input
+                className="input"
+                value={filterValues.supplier}
+                onChange={(e) => updateFilter('supplier', e.target.value)}
+                placeholder="Nome do fornecedor"
+              />
+            </label>
+            <label className="block">
+              <span className="label">Data da compra</span>
+              <input
+                type="date"
+                className="input"
+                value={filterValues.date}
+                onChange={(e) => updateFilter('date', e.target.value)}
+              />
+            </label>
+            <label className="block">
+              <span className="label">Financeiro</span>
+              <select
+                className="input"
+                value={filterValues.financial}
+                onChange={(e) => updateFilter('financial', e.target.value as PurchaseFilterValues['financial'])}
+              >
+                <option value="ALL">Todos</option>
+                <option value="WITH_FINANCIAL">Com financeiro</option>
+                <option value="WITHOUT_FINANCIAL">Sem financeiro</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="label">Valor mínimo (R$)</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                className="input"
+                value={filterValues.valueMin}
+                onChange={(e) => updateFilter('valueMin', sanitizeBr(e.target.value))}
+                placeholder="0,00"
+              />
+            </label>
+            <label className="block">
+              <span className="label">Valor máximo (R$)</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                className="input"
+                value={filterValues.valueMax}
+                onChange={(e) => updateFilter('valueMax', sanitizeBr(e.target.value))}
+                placeholder="Sem limite"
+              />
+            </label>
+          </div>
+          <div className="flex items-center justify-between border-t border-slate-100 pt-3">
+            <span className="text-xs text-slate-400">
+              {filteredInvoices.length} de {data?.items.length ?? 0} compra(s)
+            </span>
+            <button className="btn-ghost text-sm" onClick={() => setFilterValues(EMPTY_PURCHASE_FILTERS)}>
+              <RotateCcw className="h-4 w-4" /> Limpar filtros
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="card overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-slate-400">
@@ -524,7 +676,7 @@ function PurchasesList({ onView }: { onView: (id: string) => void }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {data?.items.map((inv) => (
+          {filteredInvoices.map((inv) => (
             <tr key={inv.id}>
               <td className="py-2 font-medium">{inv.documentNumber ? `#${inv.documentNumber}` : '—'}</td>
               <td>
@@ -574,9 +726,16 @@ function PurchasesList({ onView }: { onView: (id: string) => void }) {
               </td>
             </tr>
           )}
+          {data && data.items.length > 0 && filteredInvoices.length === 0 && (
+            <tr>
+              <td colSpan={7} className="py-10 text-center text-slate-400">
+                Nenhuma compra encontrada com os filtros aplicados.
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
-
+      </div>
     </div>
   );
 }
