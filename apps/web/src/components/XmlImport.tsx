@@ -237,7 +237,14 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
               e.preventDefault();
               if (!busy) setDragOver(true);
             }}
-            onDragLeave={() => setDragOver(false)}
+            onDragLeave={(e) => {
+              // Guarda contra bubbling: só reseta se o cursor realmente saiu da
+              // dropzone (não apenas passou de um filho para outro). Combinada
+              // com pointer-events-none nos filhos, evita o flicker/stutter de
+              // dragOver alternando true/false a cada pixel cruzado.
+              if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return;
+              setDragOver(false);
+            }}
             onDrop={(e) => {
               e.preventDefault();
               setDragOver(false);
@@ -247,18 +254,18 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
             }}
             className={`group mt-1 flex cursor-pointer flex-col items-center justify-center gap-3 rounded-3xl border-2 p-12 text-center transition-all duration-300 ${
               dragOver
-                ? 'scale-[1.02] border-solid border-accent-400 bg-gradient-to-br from-brand-50 via-white to-accent-50 shadow-glow-gold'
+                ? 'border-solid border-accent-400 bg-gradient-to-br from-brand-50 via-white to-accent-50 shadow-glow-gold'
                 : 'border-dashed border-brand-200 bg-gradient-to-br from-white to-brand-50/40 hover:border-brand-400 hover:shadow-glow-brand'
             }`}
           >
             <span
-              className={`grid h-16 w-16 place-items-center rounded-2xl transition-all duration-300 ${
+              className={`pointer-events-none grid h-16 w-16 place-items-center rounded-2xl transition-all duration-300 ${
                 dragOver ? 'icon-tile-gold animate-pop' : 'icon-tile group-hover:scale-110'
               }`}
             >
               {busy ? <Loader2 className="h-8 w-8 animate-spin" /> : <UploadCloud className="h-8 w-8" />}
             </span>
-            <span className="font-display text-lg font-bold text-slate-800">
+            <span className="pointer-events-none font-display text-lg font-bold text-slate-800">
               {busy ? (
                 'Lendo e processando a nota…'
               ) : dragOver ? (
@@ -269,7 +276,7 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
                 </>
               )}
             </span>
-            <span className="text-xs text-slate-400">
+            <span className="pointer-events-none text-xs text-slate-400">
               {fileName ? (
                 <span className="inline-flex items-center gap-1 font-semibold text-brand-600">
                   <FileText className="h-3.5 w-3.5" /> {fileName}
@@ -278,7 +285,7 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
                 'O sistema lê os itens, o fornecedor e as duplicatas automaticamente'
               )}
             </span>
-            <div className="mt-1 flex flex-wrap justify-center gap-2">
+            <div className="pointer-events-none mt-1 flex flex-wrap justify-center gap-2">
               <span className="badge-brand">NFe modelo 55</span>
               <span className="badge-gold">
                 <Sparkles className="h-3.5 w-3.5" /> Leitura automática
