@@ -87,10 +87,15 @@ export async function invoiceRoutes(app: FastifyInstance) {
       if (exists) throw new ConflictError('Nota fiscal já importada', { accessKey });
 
       const invoice = await prisma.$transaction(async (tx) => {
+        // Nº de documento sequencial (mesma lógica de /manual — D4).
+        const last = await tx.invoice.aggregate({ _max: { documentNumber: true } });
+        const documentNumber = (last._max.documentNumber ?? 0) + 1;
+
         const created = await tx.invoice.create({
           data: {
             supplierId,
             accessKey,
+            documentNumber,
             issueDate,
             entryDate,
             totalAmount,
