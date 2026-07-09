@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   UploadCloud,
@@ -592,78 +593,80 @@ function ProductPickerModal({
 
   const products = data?.items ?? [];
 
-  return (
+  return createPortal(
     <div className="modal-overlay">
-      <div className="modal-sheet sm:max-w-xl">
-        {/* Header */}
-        <div className="mb-3 flex items-center justify-between">
+      <div className="modal-sheet w-full sm:max-w-3xl flex h-auto max-h-[90dvh] flex-col overflow-hidden !p-0">
+        <header className="shrink-0 flex items-center justify-between border-b border-slate-200 p-4">
           <h2 className="font-display text-lg font-bold">Selecionar produto</h2>
           <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
             <X className="h-5 w-5" />
           </button>
-        </div>
+        </header>
 
-        {/* Filtros */}
-        <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
-          <label className="relative sm:col-span-3">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              className="input h-10 pl-9"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar por nome, SKU, código de barras..."
-              autoFocus
-            />
-          </label>
-          <input className="input h-9 text-sm" value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="Filtrar marca" />
-          <input className="input h-9 text-sm" value={group} onChange={(e) => setGroup(e.target.value)} placeholder="Filtrar grupo" />
-        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto bg-slate-50 p-4 space-y-4 md:p-6">
+          {/* Filtros */}
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <label className="relative sm:col-span-3">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                className="input h-10 pl-9"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar por nome, SKU, código de barras..."
+                autoFocus
+              />
+            </label>
+            <input className="input h-9 text-sm" value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="Filtrar marca" />
+            <input className="input h-9 text-sm" value={group} onChange={(e) => setGroup(e.target.value)} placeholder="Filtrar grupo" />
+          </div>
 
-        {/* Lista */}
-        <div className="max-h-[55dvh] overflow-y-auto space-y-1 pr-1">
-          {isLoading && <div className="py-8 text-center text-slate-400">Carregando produtos...</div>}
-          {!isLoading && products.length === 0 && (
-            <div className="py-8 text-center text-slate-400">Nenhum produto encontrado.</div>
-          )}
-          {products.map((p) =>
-            p.variants.map((v) => (
-              <button
-                key={v.id}
-                className="w-full rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 text-left hover:border-brand-300 hover:bg-brand-50 transition"
-                onClick={() =>
-                  onSelect({
-                    id: v.id,
-                    sku: v.sku,
-                    description: v.description,
-                    costPrice: v.costPrice,
-                    salePrice: v.salePrice,
-                    productName: p.name,
-                    brand: p.brand,
-                    group: p.group,
-                  })
-                }
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="font-medium text-sm truncate">{p.name}</div>
-                    {v.description && <div className="text-xs text-slate-500 truncate">{v.description}</div>}
-                    <div className="text-xs text-slate-400 mt-0.5">
-                      SKU: {v.sku}
-                      {p.brand && ` · ${p.brand}`}
-                      {p.group && ` · ${p.group}`}
+          {/* Lista */}
+          <div className="space-y-1">
+            {isLoading && <div className="py-8 text-center text-slate-400">Carregando produtos...</div>}
+            {!isLoading && products.length === 0 && (
+              <div className="py-8 text-center text-slate-400">Nenhum produto encontrado.</div>
+            )}
+            {products.map((p) =>
+              p.variants.map((v) => (
+                <button
+                  key={v.id}
+                  className="w-full rounded-xl border border-slate-100 bg-white px-3 py-2.5 text-left hover:border-brand-300 hover:bg-brand-50 transition"
+                  onClick={() =>
+                    onSelect({
+                      id: v.id,
+                      sku: v.sku,
+                      description: v.description,
+                      costPrice: v.costPrice,
+                      salePrice: v.salePrice,
+                      productName: p.name,
+                      brand: p.brand,
+                      group: p.group,
+                    })
+                  }
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-medium text-sm truncate">{p.name}</div>
+                      {v.description && <div className="text-xs text-slate-500 truncate">{v.description}</div>}
+                      <div className="text-xs text-slate-400 mt-0.5">
+                        SKU: {v.sku}
+                        {p.brand && ` · ${p.brand}`}
+                        {p.group && ` · ${p.group}`}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0 text-xs text-slate-500">
+                      <div>Estoque: {v.stockQty}</div>
+                      <div>Custo: {v.costPrice > 0 ? brl(v.costPrice) : '—'}</div>
+                      <div>Venda: {v.salePrice > 0 ? brl(v.salePrice) : '—'}</div>
                     </div>
                   </div>
-                  <div className="text-right shrink-0 text-xs text-slate-500">
-                    <div>Estoque: {v.stockQty}</div>
-                    <div>Custo: {v.costPrice > 0 ? brl(v.costPrice) : '—'}</div>
-                    <div>Venda: {v.salePrice > 0 ? brl(v.salePrice) : '—'}</div>
-                  </div>
-                </div>
-              </button>
-            )),
-          )}
+                </button>
+              )),
+            )}
+          </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
