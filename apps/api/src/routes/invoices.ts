@@ -51,12 +51,48 @@ export async function invoiceRoutes(app: FastifyInstance) {
     const mapByCode = new Map(mappings.map((m) => [m.supplierItemCode, m.variantId]));
     const mapByBarcode = new Map(variantsByBarcode.map((v) => [v.barcode!, v.id]));
 
-    const items = raw.items.map((item) => ({
-      ...item,
+    const matchedVariantIds = raw.items.map((item) => ({
+      supplierItemCode: item.supplierItemCode,
       matchedVariantId:
         mapByCode.get(item.supplierItemCode) ??
         (item.supplierBarcode ? mapByBarcode.get(item.supplierBarcode) : undefined) ??
         null,
+    }));
+
+    // Resolve o catálogo real (nome do produto + variante) para os itens já
+    // mapeados automaticamente — a caixa verde do De/Para deve exibir o nome
+    // cadastrado no ERP, nunca o `xProd` que veio na nota do fornecedor.
+    const uniqueMatchedIds = [
+      ...new Set(matchedVariantIds.map((m) => m.matchedVariantId).filter((id): id is string => !!id)),
+    ];
+    const matchedVariants = uniqueMatchedIds.length
+      ? await prisma.productVariant.findMany({
+          where: { id: { in: uniqueMatchedIds } },
+          include: { product: { select: { name: true, brand: true, group: true } } },
+        })
+      : [];
+    const variantDetailById = new Map(
+      matchedVariants.map((v) => [
+        v.id,
+        {
+          id: v.id,
+          sku: v.sku,
+          description: v.description,
+          costPrice: Number(v.costPrice),
+          salePrice: Number(v.salePrice),
+          productName: v.product.name,
+          brand: v.product.brand,
+          group: v.product.group,
+        },
+      ]),
+    );
+
+    const items = raw.items.map((item, i) => ({
+      ...item,
+      matchedVariantId: matchedVariantIds[i]!.matchedVariantId,
+      matchedVariant: matchedVariantIds[i]!.matchedVariantId
+        ? (variantDetailById.get(matchedVariantIds[i]!.matchedVariantId!) ?? null)
+        : null,
     }));
 
     return {

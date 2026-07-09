@@ -17,6 +17,20 @@ export const parsedNfeItemSchema = z.object({
   cfop: z.string(), // registrado como veio (flexível) - Requisito 4.3
   /** Resolvido pelo backend via SupplierProductMapping, se já existir. */
   matchedVariantId: z.string().uuid().nullable(),
+  /** Dados reais do catálogo (produto + variante) para o item já mapeado — o
+   *  nome exibido ao usuário deve ser sempre o do ERP, nunca o `xProd` da nota. */
+  matchedVariant: z
+    .object({
+      id: z.string().uuid(),
+      sku: z.string(),
+      description: z.string().nullable(),
+      costPrice: z.number(),
+      salePrice: z.number(),
+      productName: z.string(),
+      brand: z.string().nullable(),
+      group: z.string().nullable(),
+    })
+    .nullable(),
 });
 export type ParsedNfeItem = z.infer<typeof parsedNfeItemSchema>;
 

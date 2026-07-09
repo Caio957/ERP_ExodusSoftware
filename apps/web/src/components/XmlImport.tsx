@@ -57,6 +57,9 @@ interface ParsedItem {
   unitCost: number;
   cfop: string;
   matchedVariantId: string | null;
+  /** Dados reais do catálogo (nome do produto + variante) já resolvidos pelo
+   *  backend quando o De/Para foi encontrado automaticamente. */
+  matchedVariant: VariantDetail | null;
 }
 interface ParsedNfe {
   accessKey: string;
@@ -164,8 +167,8 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
       setParsed(data);
       const init: Record<number, VariantDetail> = {};
       data.items.forEach((it, i) => {
-        if (it.matchedVariantId) {
-          init[i] = { id: it.matchedVariantId, sku: '', description: it.description, costPrice: 0, salePrice: 0, productName: it.description };
+        if (it.matchedVariant) {
+          init[i] = it.matchedVariant;
         }
       });
       setMapping(init);
