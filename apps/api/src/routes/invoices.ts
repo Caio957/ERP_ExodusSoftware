@@ -344,20 +344,146 @@ export async function invoiceRoutes(app: FastifyInstance) {
     return serializeDecimals(invoice);
   });
 
-  // Edição de metadados (observação, data, nº de documento). Não altera itens.
+  /**
+   * PUT /api/invoices/:id
+   * Sem `items` no body: edita só metadados (observação, data, nº de
+   * documento, fornecedor) — não mexe em estoque/financeiro.
+   * Com `items`: edição completa (Mini-PDV de Compras), espelhando
+   * `updateSale` (services/sales.ts) — estorna o estoque da nota antiga,
+   * remove itens/financeiro antigos, regrava os novos itens recalculando o
+   * CMP (mesma fórmula de /confirm e /manual) e recria as contas a pagar.
+   * Bloqueada se alguma conta a pagar já tiver baixa registrada.
+   */
   r.put(
     '/:id',
     { preHandler: app.authorize(['ADMIN']), schema: { params: idParam, body: updateInvoiceSchema } },
     async (req) => {
-      const invoice = await prisma.invoice.update({
+      const { notes, purchaseDate, documentNumber, supplierId, items, installments } = req.body;
+
+      if (!items) {
+        const invoice = await prisma.invoice.update({
+          where: { id: req.params.id },
+          data: {
+            ...(notes !== undefined ? { notes } : {}),
+            ...(purchaseDate ? { issueDate: purchaseDate } : {}),
+            ...(documentNumber !== undefined ? { documentNumber } : {}),
+            ...(supplierId ? { supplierId } : {}),
+          },
+        });
+        return serializeDecimals(invoice);
+      }
+
+      const existing = await prisma.invoice.findUnique({
         where: { id: req.params.id },
-        data: {
-          ...(req.body.notes !== undefined ? { notes: req.body.notes } : {}),
-          ...(req.body.purchaseDate ? { issueDate: req.body.purchaseDate } : {}),
-          ...(req.body.documentNumber !== undefined ? { documentNumber: req.body.documentNumber } : {}),
-        },
+        include: { items: true, financialAccounts: { include: { settlements: true } } },
       });
-      return serializeDecimals(invoice);
+      if (!existing) throw new NotFoundError('Compra');
+      const hasSettled = existing.financialAccounts.some(
+        (a) => a.settlements.length > 0 || a.status !== 'PENDING',
+      );
+      if (hasSettled) {
+        throw new BusinessError(
+          'Há contas a pagar desta compra com baixa registrada. Estorne as baixas antes de editar.',
+        );
+      }
+
+      const total = items.reduce((a, it) => a + it.quantity * it.unitCost, 0);
+      if (installments && installments.length) {
+        const instSum = installments.reduce((a, i) => a + i.amount, 0);
+        if (Math.abs(instSum - total) > 0.01) {
+          throw new BusinessError('A soma das parcelas difere do total da compra');
+        }
+      }
+
+      const updated = await prisma.$transaction(async (tx) => {
+        // 1. Estorna o estoque dos itens antigos (mesma simplificação já usada
+        //    no DELETE: não tenta reverter o CMP, só o saldo físico — reverter
+        //    a média ponderada exigiria conhecer o estoque/custo médio de
+        //    antes desta nota, que não é guardado à parte).
+        for (const it of existing.items) {
+          await tx.productVariant.update({
+            where: { id: it.variantId },
+            data: { stockQty: { decrement: it.quantity } },
+          });
+          await tx.stockMovement.create({
+            data: { variantId: it.variantId, type: 'OUT', quantity: -it.quantity, reason: 'INVOICE_EDIT', refId: existing.id },
+          });
+        }
+
+        // 2. Remove itens e financeiro antigos.
+        await tx.invoiceItem.deleteMany({ where: { invoiceId: existing.id } });
+        await tx.financialAccount.deleteMany({ where: { invoiceId: existing.id } });
+
+        // 3. Valida as variantes novas e captura o estoque já estornado (passo 1).
+        const variantIds = [...new Set(items.map((i) => i.variantId))];
+        const variants = await tx.productVariant.findMany({ where: { id: { in: variantIds } } });
+        if (variants.length !== variantIds.length) throw new NotFoundError('Produto');
+        const variantById = new Map(variants.map((v) => [v.id, v]));
+
+        // 4. Atualiza os metadados e regrava os itens.
+        const invoice = await tx.invoice.update({
+          where: { id: existing.id },
+          data: {
+            ...(supplierId ? { supplierId } : {}),
+            ...(notes !== undefined ? { notes } : {}),
+            ...(purchaseDate ? { issueDate: purchaseDate } : {}),
+            ...(documentNumber !== undefined ? { documentNumber } : {}),
+            totalAmount: Number(total.toFixed(2)),
+            items: {
+              create: items.map((it) => ({
+                variantId: it.variantId,
+                quantity: it.quantity,
+                unitCost: it.unitCost,
+                cfop: 'MANUAL',
+              })),
+            },
+          },
+        });
+
+        // 5. Entrada de estoque + custo + CMP + (novo preço de venda) + lote/validade.
+        for (const it of items) {
+          const variant = variantById.get(it.variantId)!;
+          const newAvg = calcWeightedAverageCost(variant.stockQty, Number(variant.averageCost), it.quantity, it.unitCost);
+          await tx.productVariant.update({
+            where: { id: it.variantId },
+            data: {
+              stockQty: { increment: it.quantity },
+              costPrice: it.unitCost,
+              averageCost: newAvg,
+              ...(it.newSalePrice != null ? { salePrice: it.newSalePrice } : {}),
+              ...(it.tracksLotValidity ? { batch: it.batch ?? null, validity: it.validity ?? null } : {}),
+            },
+          });
+          if (it.tracksLotValidity) {
+            await tx.product.update({
+              where: { id: variant.productId },
+              data: { tracksLotValidity: true },
+            });
+          }
+          await tx.stockMovement.create({
+            data: { variantId: it.variantId, type: 'IN', quantity: it.quantity, reason: 'INVOICE', refId: invoice.id },
+          });
+        }
+
+        // 6. Contas a pagar (se enviadas).
+        if (installments && installments.length) {
+          await tx.financialAccount.createMany({
+            data: installments.map((inst, i) => ({
+              type: 'PAYABLE',
+              description: `Compra #${invoice.documentNumber ?? invoice.id.slice(-6)} - parcela ${i + 1}/${installments.length}`,
+              amount: inst.amount,
+              dueDate: inst.dueDate,
+              status: 'PENDING',
+              invoiceId: invoice.id,
+              personId: invoice.supplierId,
+            })),
+          });
+        }
+
+        return invoice;
+      });
+
+      return serializeDecimals(updated);
     },
   );
 

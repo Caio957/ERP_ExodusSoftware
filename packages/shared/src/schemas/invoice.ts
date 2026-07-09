@@ -148,11 +148,21 @@ export const manualPurchaseSchema = z
   });
 export type ManualPurchaseInput = z.infer<typeof manualPurchaseSchema>;
 
-/** Edição de metadados de uma compra (observação, data, nº de documento). */
+/**
+ * Edição de uma compra. Sem `items`: edita só os metadados (observação, data,
+ * nº de documento, fornecedor). Com `items`: edição completa (Mini-PDV de
+ * Compras) — o backend estorna o estoque da nota antiga, recalcula o CMP dos
+ * novos itens e refaz o financeiro (contas a pagar pendentes), da mesma forma
+ * que a edição de vendas.
+ */
 export const updateInvoiceSchema = z.object({
   notes: z.string().trim().max(500).nullish(),
   purchaseDate: z.coerce.date().optional(),
   documentNumber: z.number().int().positive().nullish(),
+  supplierId: z.string().uuid().optional(),
+  items: z.array(manualPurchaseItemSchema).min(1, 'Adicione ao menos um produto').optional(),
+  /** Parcelas do contas a pagar. Só usado quando `items` está presente. */
+  installments: z.array(z.object({ dueDate: z.coerce.date(), amount: money })).optional(),
 });
 export type UpdateInvoiceInput = z.infer<typeof updateInvoiceSchema>;
 
