@@ -61,6 +61,9 @@ export const confirmInvoiceSchema = z.object({
   supplierId: z.string().uuid(),
   accessKey: z.string().min(1, 'Chave de acesso obrigatória'),
   issueDate: z.coerce.date(),
+  /** Data de entrada/digitação — quando o operador deu entrada no sistema
+   *  (distinta da emissão da NFe). Base do StockMovement gerado. */
+  entryDate: z.coerce.date().default(() => new Date()),
   totalAmount: money,
   items: z.array(confirmInvoiceItemSchema).min(1, 'Nota sem itens'),
   /** Duplicatas do XML (mantido para compatibilidade). */

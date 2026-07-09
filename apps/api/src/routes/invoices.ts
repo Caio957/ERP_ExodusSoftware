@@ -80,7 +80,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
     '/confirm',
     { preHandler: app.authenticate, schema: { body: confirmInvoiceSchema } },
     async (req, reply) => {
-      const { supplierId, accessKey, issueDate, totalAmount, items, duplicates, customInstallments } = req.body;
+      const { supplierId, accessKey, issueDate, entryDate, totalAmount, items, duplicates, customInstallments } = req.body;
 
       const exists = await prisma.invoice.findUnique({ where: { accessKey } });
       if (exists) throw new ConflictError('Nota fiscal já importada', { accessKey });
@@ -91,6 +91,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
             supplierId,
             accessKey,
             issueDate,
+            entryDate,
             totalAmount,
             items: {
               create: items.map((it) => ({
@@ -128,6 +129,9 @@ export async function invoiceRoutes(app: FastifyInstance) {
               quantity: it.quantity,
               reason: 'INVOICE',
               refId: created.id,
+              // Ledger reflete quando a mercadoria entrou fisicamente na loja
+              // (entryDate), não a emissão da NFe nem o instante do confirm.
+              createdAt: entryDate,
             },
           });
         }

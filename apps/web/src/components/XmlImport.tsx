@@ -76,6 +76,9 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  // Data de entrada/digitação — quando o operador está dando entrada, distinta
+  // da emissão da NFe (parsed.issueDate). Padrão: hoje.
+  const [entryDate, setEntryDate] = useState(() => new Date().toISOString().split('T')[0]);
 
   // Sem isso, soltar o arquivo fora da zona de drop faz o navegador NAVEGAR
   // para o XML (abre o arquivo numa aba, derrubando o app). Bloqueia o
@@ -168,6 +171,7 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
         supplierId,
         accessKey: parsed.accessKey,
         issueDate: parsed.issueDate,
+        entryDate,
         totalAmount: parsed.totalAmount,
         items: parsed.items.map((it, i) => ({
           variantId: mapping[i]!.id,
@@ -201,6 +205,7 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
     setNewPrices({});
     setFinancialMode('xml');
     setCustomInst([{ dueDate: '', amount: '' }]);
+    setEntryDate(new Date().toISOString().split('T')[0]);
   }
 
   const allMapped = parsed?.items.every((_, i) => mapping[i]?.id);
@@ -327,6 +332,15 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
                 <div className="text-xs text-slate-400">Emissão: {fmtDate(parsed.issueDate)}</div>
               </div>
             </div>
+            <label className="mt-3 block max-w-[200px]">
+              <span className="label">Data de entrada</span>
+              <input
+                type="date"
+                className="input"
+                value={entryDate}
+                onChange={(e) => setEntryDate(e.target.value)}
+              />
+            </label>
             {parsed.alreadyImported && (
               <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
                 ⚠️ Esta nota já foi importada anteriormente.
