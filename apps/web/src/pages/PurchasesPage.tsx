@@ -68,6 +68,7 @@ interface Suggestion {
   variantId: string;
   sku: string;
   description: string;
+  productCode: number;
   productName: string;
   brand: string;
   group: string;
@@ -266,9 +267,9 @@ function PurchaseSuggestion() {
                 {paginatedSuggestions.map((s) => (
                   <tr key={s.variantId} className={s.suggestedQty > 0 ? '' : 'opacity-60'}>
                     <td className="py-2">
-                      <div className="font-medium">{s.productName}</div>
-                      <div className="flex flex-wrap gap-1 text-xs text-slate-400">
-                        {s.brand && <span>{s.brand}</span>}
+                      <div className="font-medium">#{s.productCode} - {s.productName}</div>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-slate-400">
+                        {s.brand && <span className="badge-brand text-[10px]">{s.brand}</span>}
                         {s.group && <span>· {s.group}</span>}
                         {s.subgroup && <span>· {s.subgroup}</span>}
                         <span>· {s.description}</span>
@@ -330,6 +331,8 @@ function PurchaseSuggestion() {
       ) : (
         <p className="py-8 text-center text-slate-400">Nenhum produto encontrado para os filtros selecionados.</p>
       )}
+
+      <ScrollToTopButton />
     </>
   );
 }
