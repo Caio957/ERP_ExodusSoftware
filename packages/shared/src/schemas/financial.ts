@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { money } from './common.js';
-import { FinancialAccountType } from '../enums.js';
+import { money, paginationQuery } from './common.js';
+import { FinancialAccountType, FinancialAccountStatus } from '../enums.js';
 
 export const createFinancialAccountSchema = z.object({
   type: FinancialAccountType, // PAYABLE | RECEIVABLE
@@ -50,6 +50,25 @@ export const updateFinancialAccountSchema = z.object({
   personId: z.string().uuid().nullish(),
 });
 export type UpdateFinancialAccountInput = z.infer<typeof updateFinancialAccountSchema>;
+
+/**
+ * Listagem de contas a pagar/receber com filtros e ordenação avançada.
+ *  - `status`: filtro exato pelo enum de status (compatibilidade).
+ *  - `statusFilter`: filtro semântico usado pela tela (Abertos/Vencidos/A Vencer/
+ *    Quitados parcialmente/Quitados) — quando presente, tem precedência sobre
+ *    `status`/`dueFrom`/`dueTo` no cálculo do `where` (rota `GET /financial`).
+ */
+export const listFinancialQuerySchema = paginationQuery.extend({
+  type: FinancialAccountType.optional(),
+  status: FinancialAccountStatus.optional(),
+  personId: z.string().uuid().optional(),
+  dueFrom: z.coerce.date().optional(),
+  dueTo: z.coerce.date().optional(),
+  orderBy: z.enum(['code', 'description', 'dueDate', 'amount']).default('dueDate'),
+  orderDir: z.enum(['asc', 'desc']).default('asc'),
+  statusFilter: z.enum(['ALL', 'OPEN', 'OVERDUE', 'NOT_OVERDUE', 'PARTIAL', 'PAID']).default('ALL'),
+});
+export type ListFinancialQuery = z.infer<typeof listFinancialQuerySchema>;
 
 /** Parâmetros do endpoint analítico de sugestão de compra (Requisito 4.6). */
 export const purchaseSuggestionQuerySchema = z.object({

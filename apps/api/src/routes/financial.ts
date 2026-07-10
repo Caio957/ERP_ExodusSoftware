@@ -7,9 +7,7 @@ import {
   createInstallmentsSchema,
   updateFinancialAccountSchema,
   settleAccountSchema,
-  paginationQuery,
-  FinancialAccountType,
-  FinancialAccountStatus,
+  listFinancialQuerySchema,
 } from '@exodus/shared';
 import { prisma } from '../lib/prisma.js';
 import { serializeDecimals } from '../lib/serialize.js';
@@ -17,6 +15,17 @@ import { BusinessError, NotFoundError } from '../lib/errors.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+/**
+ * Meia-noite de hoje no horário da loja (America/Sao_Paulo, UTC-3) — não usa
+ * `new Date().setHours(0,0,0,0)` porque em produção (Railway) o processo roda
+ * em UTC, não no fuso da loja; mesmo raciocínio já documentado em
+ * `routes/cash.ts` (relatório periódico).
+ */
+function todayStartBr(): Date {
+  const localDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+  return new Date(`${localDateStr}T00:00:00.000-03:00`);
+}
 
 export async function financialRoutes(app: FastifyInstance) {
   const r = app.withTypeProvider<ZodTypeProvider>();
@@ -48,18 +57,28 @@ export async function financialRoutes(app: FastifyInstance) {
     '/',
     {
       preHandler: app.authorize(['ADMIN']),
-      schema: {
-        querystring: paginationQuery.extend({
-          type: FinancialAccountType.optional(),
-          status: FinancialAccountStatus.optional(),
-          personId: z.string().uuid().optional(),
-          dueFrom: z.coerce.date().optional(),
-          dueTo: z.coerce.date().optional(),
-        }),
-      },
+      schema: { querystring: listFinancialQuerySchema },
     },
     async (req) => {
-      const { page, pageSize, type, status, personId, search, dueFrom, dueTo } = req.query;
+      const { page, pageSize, type, status, personId, search, dueFrom, dueTo, orderBy, orderDir, statusFilter } =
+        req.query;
+
+      // `statusFilter` é semântico (Abertos/Vencidos/A Vencer/Parcial/Quitado) e,
+      // quando diferente de 'ALL', tem precedência sobre `status`/dueFrom/dueTo
+      // simples no cálculo do status/vencimento.
+      const statusFilterWhere: Prisma.FinancialAccountWhereInput =
+        statusFilter === 'PAID'
+          ? { status: 'PAID' }
+          : statusFilter === 'PARTIAL'
+            ? { status: 'PARTIAL' }
+            : statusFilter === 'OPEN'
+              ? { status: { in: ['PENDING', 'PARTIAL'] } }
+              : statusFilter === 'OVERDUE'
+                ? { status: { in: ['PENDING', 'PARTIAL'] }, dueDate: { lt: todayStartBr() } }
+                : statusFilter === 'NOT_OVERDUE'
+                  ? { status: { in: ['PENDING', 'PARTIAL'] }, dueDate: { gte: todayStartBr() } }
+                  : {};
+
       const where: Prisma.FinancialAccountWhereInput = {
         ...(type ? { type } : {}),
         ...(status ? { status } : {}),
@@ -75,15 +94,28 @@ export async function financialRoutes(app: FastifyInstance) {
         ...(dueFrom || dueTo
           ? { dueDate: { ...(dueFrom ? { gte: dueFrom } : {}), ...(dueTo ? { lte: dueTo } : {}) } }
           : {}),
+        ...statusFilterWhere,
         // Oculta contas a receber de vendas com o financeiro excluído.
         AND: [{ OR: [{ saleId: null }, { sale: { financialGenerated: true } }] }],
       };
+
+      // Mapeia o campo de ordenação pedido pela tela para a coluna real do
+      // banco; desempate por código quando a ordenação não é pelo próprio código.
+      const orderByMap: Record<typeof orderBy, Prisma.FinancialAccountOrderByWithRelationInput> = {
+        code: { code: orderDir },
+        description: { description: orderDir },
+        dueDate: { dueDate: orderDir },
+        amount: { amount: orderDir },
+      };
+      const orderByClauses: Prisma.FinancialAccountOrderByWithRelationInput[] = [orderByMap[orderBy]];
+      if (orderBy !== 'code') orderByClauses.push({ code: 'asc' });
+
       const [total, items] = await Promise.all([
         prisma.financialAccount.count({ where }),
         prisma.financialAccount.findMany({
           where,
           include: { person: true, settlements: true },
-          orderBy: [{ dueDate: 'asc' }, { code: 'asc' }],
+          orderBy: orderByClauses,
           skip: (page - 1) * pageSize,
           take: pageSize,
         }),

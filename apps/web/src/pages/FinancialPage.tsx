@@ -25,6 +25,9 @@ const today0 = () => {
 };
 
 type AccountType = 'PAYABLE' | 'RECEIVABLE';
+type StatusFilter = 'ALL' | 'OPEN' | 'OVERDUE' | 'NOT_OVERDUE' | 'PARTIAL' | 'PAID';
+type OrderBy = 'code' | 'description' | 'dueDate' | 'amount';
+type OrderDir = 'asc' | 'desc';
 
 interface Account {
   id: string;
@@ -48,22 +51,35 @@ export function FinancialPage() {
   const [search, setSearch] = useState('');
   const [dueFrom, setDueFrom] = useState('');
   const [dueTo, setDueTo] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
+  const [orderBy, setOrderBy] = useState<OrderBy>('dueDate');
+  const [orderDir, setOrderDir] = useState<OrderDir>('asc');
   const [showFilters, setShowFilters] = useState(false);
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Account | null>(null);
   const [settling, setSettling] = useState<Account | null>(null);
 
-  // Troca de filtro/tipo volta para a primeira página.
+  // Troca de filtro/tipo/ordenação volta para a primeira página.
   const changeType = (t: AccountType) => { setType(t); setPage(1); };
   const changeSearch = (v: string) => { setSearch(v); setPage(1); };
   const changeDueFrom = (v: string) => { setDueFrom(v); setPage(1); };
   const changeDueTo = (v: string) => { setDueTo(v); setPage(1); };
+  const changeStatusFilter = (v: StatusFilter) => { setStatusFilter(v); setPage(1); };
+  const changeOrderBy = (v: OrderBy) => { setOrderBy(v); setPage(1); };
+  const changeOrderDir = (v: OrderDir) => { setOrderDir(v); setPage(1); };
 
   const { data, isLoading } = useQuery({
-    queryKey: ['financial', type, search, dueFrom, dueTo, page],
+    queryKey: ['financial', type, search, dueFrom, dueTo, statusFilter, orderBy, orderDir, page],
     queryFn: () => {
-      const qs = new URLSearchParams({ type, page: String(page), pageSize: String(PAGE_SIZE) });
+      const qs = new URLSearchParams({
+        type,
+        page: String(page),
+        pageSize: String(PAGE_SIZE),
+        statusFilter,
+        orderBy,
+        orderDir,
+      });
       if (search.trim()) qs.set('search', search.trim());
       if (dueFrom) qs.set('dueFrom', dueFrom);
       if (dueTo) qs.set('dueTo', dueTo);
@@ -140,7 +156,7 @@ export function FinancialPage() {
       </div>
 
       {showFilters && (
-        <div className="card grid animate-fade-in gap-3 sm:grid-cols-3">
+        <div className="card grid animate-fade-in gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
           <label className="block">
             <span className="label">Buscar (descrição/pessoa)</span>
             <div className="relative">
@@ -155,6 +171,33 @@ export function FinancialPage() {
           <label className="block">
             <span className="label">Vencimento até</span>
             <input className="input" type="date" value={dueTo} onChange={(e) => changeDueTo(e.target.value)} />
+          </label>
+          <label className="block">
+            <span className="label">Status</span>
+            <select className="input" value={statusFilter} onChange={(e) => changeStatusFilter(e.target.value as StatusFilter)}>
+              <option value="ALL">Todos</option>
+              <option value="OPEN">Abertos</option>
+              <option value="OVERDUE">Vencidos</option>
+              <option value="NOT_OVERDUE">A Vencer</option>
+              <option value="PARTIAL">Quitados Parcialmente</option>
+              <option value="PAID">Quitados</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="label">Ordenar por</span>
+            <select className="input" value={orderBy} onChange={(e) => changeOrderBy(e.target.value as OrderBy)}>
+              <option value="code">Código</option>
+              <option value="description">Descrição</option>
+              <option value="dueDate">Vencimento</option>
+              <option value="amount">Valor</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="label">Ordem</span>
+            <select className="input" value={orderDir} onChange={(e) => changeOrderDir(e.target.value as OrderDir)}>
+              <option value="asc">Crescente</option>
+              <option value="desc">Decrescente</option>
+            </select>
           </label>
         </div>
       )}
