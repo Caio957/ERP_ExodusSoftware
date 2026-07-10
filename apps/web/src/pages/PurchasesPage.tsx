@@ -987,8 +987,8 @@ function ViewPurchaseModal({
             </button>
             <button
               className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={hasPaid}
-              title={hasPaid ? 'Há parcelas já baixadas — estorne antes de editar' : 'Editar compra'}
+              disabled={hasFinancial}
+              title={hasFinancial ? 'Exclua o financeiro antes de editar a compra' : 'Editar compra'}
               onClick={() => onEdit(id)}
             >
               <Pencil className="h-4 w-4" /> Editar
@@ -1118,12 +1118,15 @@ function EditPurchaseModal({
     }
   }
 
-  const hasPaid = invoice?.financialAccounts.some((a) => a.status !== 'PENDING') ?? false;
+  const hasFinancial = (invoice?.financialAccounts.length ?? 0) > 0;
 
-  // Guarda de segurança: bloqueia a edição se já houver parcela baixada — o
-  // operador deve estornar a baixa antes, para ter consciência do impacto no
-  // financeiro (mesmo padrão do guard de financialGenerated em EditSaleModal).
-  if (invoice && hasPaid) {
+  // Guarda de segurança: bloqueia a edição se a compra já tiver financeiro
+  // (contas a pagar) vinculado — o operador deve excluir o financeiro
+  // manualmente na tela de visualização primeiro, para ter consciência do
+  // impacto no caixa/contas a pagar (mesmo padrão do guard de
+  // financialGenerated em EditSaleModal — bloqueia por existência do
+  // financeiro, não só por parcela já baixada).
+  if (invoice && hasFinancial) {
     return createPortal(
       <div className="modal-overlay">
         <div className="modal-sheet w-full sm:max-w-md flex flex-col overflow-hidden !p-0">
@@ -1139,8 +1142,8 @@ function EditPurchaseModal({
             <div className="flex flex-col items-center gap-3 py-6 text-center">
               <ShieldAlert className="h-12 w-12 text-rose-500" />
               <p className="text-sm font-medium text-slate-700">
-                Acesso Negado: esta compra possui parcelas de contas a pagar já baixadas. Estorne
-                as baixas antes de editar.
+                Acesso Negado: esta compra possui financeiro (contas a pagar) vinculado. Exclua o
+                financeiro na tela de visualização antes de editar.
               </p>
             </div>
           </div>
