@@ -28,6 +28,16 @@ const today0 = () => {
   return d;
 };
 
+// Padrão BR de vírgula decimal (mesmo helper usado em PDV/Vendas/Produtos/Compras).
+function sanitizeBr(s: string): string {
+  let v = s.replace(/\./g, ',');
+  v = v.replace(/[^\d,]/g, '');
+  v = v.replace(/^,/, '');
+  const parts = v.split(',');
+  if (parts.length > 1) v = parts[0] + ',' + parts.slice(1).join('');
+  return v.replace(/^0+(?=\d)/, '');
+}
+
 type AccountType = 'PAYABLE' | 'RECEIVABLE';
 type StatusFilter = 'ALL' | 'OPEN' | 'OVERDUE' | 'NOT_OVERDUE' | 'PARTIAL' | 'PAID';
 type OrderBy = 'code' | 'description' | 'dueDate' | 'amount';
@@ -529,9 +539,9 @@ function NewEntryModal({
 // ---------------------------------------------------------------------------
 function SettleModal({ account, onClose, onDone }: { account: Account; onClose: () => void; onDone: () => void }) {
   const saldo = round2(account.amount - account.paidAmount);
-  const [amount, setAmount] = useState(String(saldo));
+  const [amount, setAmount] = useState(() => String(saldo).replace('.', ','));
   const [settleInFull, setSettleInFull] = useState(false);
-  const val = Number(amount) || 0;
+  const val = parseFloat(amount.replace(',', '.')) || 0;
   const isPartial = val > 0 && val < saldo;
 
   const settle = useMutation({
@@ -540,40 +550,61 @@ function SettleModal({ account, onClose, onDone }: { account: Account; onClose: 
     onError: (e) => window.alert(e instanceof ApiError ? e.message : 'Falha na baixa'),
   });
 
-  return (
-    <Modal title="Baixar título" onClose={onClose}>
-      <div className="mb-3 rounded-xl bg-slate-50 px-3 py-2 text-sm">
-        <div className="flex justify-between"><span className="text-slate-500">Valor do título</span><span>{brl(account.amount)}</span></div>
-        {account.paidAmount > 0 && (
-          <div className="flex justify-between"><span className="text-slate-500">Já baixado</span><span>{brl(account.paidAmount)}</span></div>
-        )}
-        <div className="flex justify-between font-semibold"><span>Saldo</span><span>{brl(saldo)}</span></div>
+  return createPortal(
+    <div className="modal-overlay">
+      <div className="modal-sheet w-full sm:max-w-md flex flex-col max-h-[90dvh] !p-0 overflow-hidden">
+        <header className="shrink-0 flex items-center justify-between border-b border-slate-200 p-4">
+          <h2 className="font-display text-lg font-bold">Baixar título</h2>
+          <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
+            <X className="h-5 w-5" />
+          </button>
+        </header>
+
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 space-y-4">
+          <div className="rounded-xl bg-slate-50 px-3 py-2 text-sm">
+            <div className="flex justify-between"><span className="text-slate-500">Valor do título</span><span>{brl(account.amount)}</span></div>
+            {account.paidAmount > 0 && (
+              <div className="flex justify-between"><span className="text-slate-500">Já baixado</span><span>{brl(account.paidAmount)}</span></div>
+            )}
+            <div className="flex justify-between font-semibold"><span>Saldo</span><span>{brl(saldo)}</span></div>
+          </div>
+
+          <label className="block">
+            <span className="label">Valor a baixar (R$)</span>
+            <input
+              className="input"
+              type="text"
+              inputMode="decimal"
+              value={amount}
+              onKeyDown={(e) => { if (['-', '+', 'e', 'E'].includes(e.key)) e.preventDefault(); }}
+              onChange={(e) => setAmount(sanitizeBr(e.target.value))}
+              onFocus={(e) => e.target.select()}
+              autoFocus
+            />
+          </label>
+
+          {isPartial && (
+            <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/60 p-3 text-sm">
+              <input type="checkbox" className="mt-0.5 h-5 w-5 accent-brand-600" checked={settleInFull} onChange={(e) => setSettleInFull(e.target.checked)} />
+              <span>
+                <span className="font-semibold text-amber-700">Quitar integralmente</span>
+                <span className="block text-xs text-amber-600">
+                  Valor menor que o saldo. Marque para quitar o título mesmo assim (perdoa {brl(round2(saldo - val))}). Sem marcar, fica baixa parcial.
+                </span>
+              </span>
+            </label>
+          )}
+        </div>
+
+        <footer className="shrink-0 flex items-center justify-end gap-2 border-t border-slate-200 p-4 bg-slate-50">
+          <button className="btn-ghost" onClick={onClose}>Cancelar</button>
+          <button className="btn-primary" disabled={settle.isPending || val <= 0 || val > saldo + 0.001} onClick={() => settle.mutate()}>
+            {settle.isPending ? 'Baixando...' : isPartial && !settleInFull ? 'Baixar parcial' : 'Confirmar baixa'}
+          </button>
+        </footer>
       </div>
-
-      <label className="block">
-        <span className="label">Valor a baixar (R$)</span>
-        <input className="input" type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus />
-      </label>
-
-      {isPartial && (
-        <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/60 p-3 text-sm">
-          <input type="checkbox" className="mt-0.5 h-5 w-5 accent-brand-600" checked={settleInFull} onChange={(e) => setSettleInFull(e.target.checked)} />
-          <span>
-            <span className="font-semibold text-amber-700">Quitar integralmente</span>
-            <span className="block text-xs text-amber-600">
-              Valor menor que o saldo. Marque para quitar o título mesmo assim (perdoa {brl(round2(saldo - val))}). Sem marcar, fica baixa parcial.
-            </span>
-          </span>
-        </label>
-      )}
-
-      <div className="mt-5 flex justify-end gap-2">
-        <button className="btn-ghost" onClick={onClose}>Cancelar</button>
-        <button className="btn-primary" disabled={settle.isPending || val <= 0 || val > saldo + 0.001} onClick={() => settle.mutate()}>
-          {settle.isPending ? 'Baixando...' : isPartial && !settleInFull ? 'Baixar parcial' : 'Confirmar baixa'}
-        </button>
-      </div>
-    </Modal>
+    </div>,
+    document.body,
   );
 }
 
