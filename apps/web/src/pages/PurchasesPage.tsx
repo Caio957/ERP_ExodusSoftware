@@ -17,6 +17,9 @@ import {
   RotateCcw,
   ShieldAlert,
   Pencil,
+  ChevronLeft,
+  ChevronRight,
+  ArrowUp,
 } from 'lucide-react';
 import {
   type ProductFormSettings,
@@ -61,10 +64,18 @@ function toDateInputValue(iso: string): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
 }
 
+// Vender "0,37 unidades por dia" é abstrato demais cru ("0.37") para quem só
+// vende produto inteiro — formata em vírgula BR + sufixo "un/dia" (Sugestão
+// de compra). Zero exato não carrega casas decimais (nada vendido no período).
+function fmtAvgPerDay(n: number): string {
+  return n === 0 ? '0 un/dia' : `${n.toFixed(2).replace('.', ',')} un/dia`;
+}
+
 interface Suggestion {
   variantId: string;
   sku: string;
   description: string;
+  productCode: number;
   productName: string;
   brand: string;
   group: string;
@@ -81,25 +92,8 @@ type Tab = 'sugestao' | 'xml' | 'manual' | 'lancadas';
 export function PurchasesPage() {
   const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>('sugestao');
-  const [windowDays, setWindowDays] = useState(30);
-  const [leadTimeDays, setLeadTimeDays] = useState(15);
-  const [suggBrand, setSuggBrand] = useState('');
-  const [suggGroup, setSuggGroup] = useState('');
-  const [suggSubgroup, setSuggSubgroup] = useState('');
   const [viewInvoiceId, setViewInvoiceId] = useState<string | null>(null);
   const [editInvoiceId, setEditInvoiceId] = useState<string | null>(null);
-
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['suggestions', windowDays, leadTimeDays, suggBrand, suggGroup, suggSubgroup],
-    queryFn: () => {
-      const qs = new URLSearchParams({ windowDays: String(windowDays), leadTimeDays: String(leadTimeDays) });
-      if (suggBrand.trim()) qs.set('brand', suggBrand.trim());
-      if (suggGroup.trim()) qs.set('group', suggGroup.trim());
-      if (suggSubgroup.trim()) qs.set('subgroup', suggSubgroup.trim());
-      return api.get<{ suggestions: Suggestion[] }>(`/api/purchase-suggestions?${qs.toString()}`);
-    },
-    enabled: tab === 'sugestao',
-  });
 
   const tabBtn = (id: Tab) => (tab === id ? 'btn-primary' : 'btn-ghost');
 
@@ -130,96 +124,7 @@ export function PurchasesPage() {
         </button>
       </div>
 
-      {tab === 'sugestao' && (
-        <>
-          <div className="card space-y-3">
-            <div className="flex flex-wrap items-end gap-4">
-              <label className="text-sm">
-                <span className="mb-1 block font-medium text-slate-500">Janela de vendas</span>
-                <select className="input" value={windowDays} onChange={(e) => setWindowDays(Number(e.target.value))}>
-                  <option value={30}>30 dias</option>
-                  <option value={60}>60 dias</option>
-                  <option value={90}>90 dias</option>
-                </select>
-              </label>
-              <label className="text-sm">
-                <span className="mb-1 block font-medium text-slate-500">Tempo de reposição (dias)</span>
-                <input
-                  className="input"
-                  type="number"
-                  value={leadTimeDays === 0 ? '' : leadTimeDays}
-                  onFocus={(e) => e.target.select()}
-                  onChange={(e) => {
-                    const val = e.target.value.replace(/^0+/, '');
-                    setLeadTimeDays(val === '' ? 0 : Number(val));
-                  }}
-                />
-              </label>
-            </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <label className="block">
-                <span className="label">Marca (filtro)</span>
-                <input className="input h-10 text-sm" value={suggBrand} onChange={(e) => setSuggBrand(e.target.value)} placeholder="Todas" />
-              </label>
-              <label className="block">
-                <span className="label">Grupo (filtro)</span>
-                <input className="input h-10 text-sm" value={suggGroup} onChange={(e) => setSuggGroup(e.target.value)} placeholder="Todos" />
-              </label>
-              <label className="block">
-                <span className="label">Subgrupo (filtro)</span>
-                <input className="input h-10 text-sm" value={suggSubgroup} onChange={(e) => setSuggSubgroup(e.target.value)} placeholder="Todos" />
-              </label>
-            </div>
-          </div>
-
-          {error instanceof ApiError && (
-            <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error.message}</div>
-          )}
-
-          {isLoading ? (
-            <div className="p-8 text-center text-slate-500">Calculando...</div>
-          ) : data && data.suggestions.length > 0 ? (
-            <div className="card overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-slate-400">
-                    <th className="py-2">Produto</th>
-                    <th>SKU</th>
-                    <th className="text-right">Estoque</th>
-                    <th className="text-right">Vendas</th>
-                    <th className="text-right">Média/dia</th>
-                    <th className="text-right text-brand-700">Sugerido</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {data.suggestions.map((s) => (
-                    <tr key={s.variantId} className={s.suggestedQty > 0 ? '' : 'opacity-60'}>
-                      <td className="py-2">
-                        <div className="font-medium">{s.productName}</div>
-                        <div className="flex flex-wrap gap-1 text-xs text-slate-400">
-                          {s.brand && <span>{s.brand}</span>}
-                          {s.group && <span>· {s.group}</span>}
-                          {s.subgroup && <span>· {s.subgroup}</span>}
-                          <span>· {s.description}</span>
-                        </div>
-                      </td>
-                      <td className="text-slate-500">{s.sku}</td>
-                      <td className="text-right">{s.stockQty}</td>
-                      <td className="text-right">{s.soldInWindow}</td>
-                      <td className="text-right">{s.avgPerDay}</td>
-                      <td className={`text-right text-base font-bold ${s.suggestedQty > 0 ? 'text-brand-700' : 'text-slate-400'}`}>
-                        {s.suggestedQty > 0 ? `+${s.suggestedQty}` : '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="py-8 text-center text-slate-400">Nenhum produto encontrado para os filtros selecionados.</p>
-          )}
-        </>
-      )}
+      {tab === 'sugestao' && <PurchaseSuggestion />}
 
       {tab === 'xml' && <XmlImport onSuccess={() => { qc.invalidateQueries({ queryKey: ['invoices'] }); qc.invalidateQueries({ queryKey: ['products'] }); }} />}
       {tab === 'manual' && <ManualPurchase />}
@@ -252,6 +157,197 @@ export function PurchasesPage() {
         />
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sugestão de compra
+// ---------------------------------------------------------------------------
+function PurchaseSuggestion() {
+  const [windowDays, setWindowDays] = useState(30);
+  const [leadTimeDays, setLeadTimeDays] = useState(15);
+  const [suggBrand, setSuggBrand] = useState('');
+  const [suggGroup, setSuggGroup] = useState('');
+  const [suggSubgroup, setSuggSubgroup] = useState('');
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['suggestions', windowDays, leadTimeDays, suggBrand, suggGroup, suggSubgroup],
+    queryFn: () => {
+      const qs = new URLSearchParams({ windowDays: String(windowDays), leadTimeDays: String(leadTimeDays) });
+      if (suggBrand.trim()) qs.set('brand', suggBrand.trim());
+      if (suggGroup.trim()) qs.set('group', suggGroup.trim());
+      if (suggSubgroup.trim()) qs.set('subgroup', suggSubgroup.trim());
+      return api.get<{ suggestions: Suggestion[] }>(`/api/purchase-suggestions?${qs.toString()}`);
+    },
+  });
+
+  // Filtros (marca/grupo/subgrupo/janela/reposição) já disparam nova busca no
+  // servidor via queryKey — `suggestions` memoizado garante referência estável
+  // entre re-renders que não mudam `data` (troca de página, p.ex.), para o
+  // efeito de reset abaixo só disparar quando o resultado realmente mudar.
+  const suggestions = useMemo(() => data?.suggestions ?? [], [data]);
+
+  // Paginação client-side (padrão Tray) — mesmo motor de Compras Lançadas/Vendas.
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
+
+  // Resultado mudou (novo filtro) → volta pra primeira página.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [suggestions]);
+
+  const totalPages = Math.max(1, Math.ceil(suggestions.length / itemsPerPage));
+
+  // Rede de segurança: se totalPages encolher (novo filtro/pageSize), evita página fantasma.
+  useEffect(() => {
+    setCurrentPage((p) => Math.min(p, totalPages));
+  }, [totalPages]);
+
+  const paginatedSuggestions = useMemo(
+    () => suggestions.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage),
+    [suggestions, currentPage, itemsPerPage],
+  );
+
+  return (
+    <>
+      <div className="card space-y-3">
+        <div className="flex flex-wrap items-end gap-4">
+          <label className="text-sm">
+            <span className="mb-1 block font-medium text-slate-500">Janela de vendas</span>
+            <select className="input" value={windowDays} onChange={(e) => setWindowDays(Number(e.target.value))}>
+              <option value={30}>30 dias</option>
+              <option value={60}>60 dias</option>
+              <option value={90}>90 dias</option>
+            </select>
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block font-medium text-slate-500">Tempo de reposição (dias)</span>
+            <input
+              className="input"
+              type="number"
+              value={leadTimeDays === 0 ? '' : leadTimeDays}
+              onFocus={(e) => e.target.select()}
+              onChange={(e) => {
+                const val = e.target.value.replace(/^0+/, '');
+                setLeadTimeDays(val === '' ? 0 : Number(val));
+              }}
+            />
+          </label>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <label className="block">
+            <span className="label">Marca (filtro)</span>
+            <input className="input h-10 text-sm" value={suggBrand} onChange={(e) => setSuggBrand(e.target.value)} placeholder="Todas" />
+          </label>
+          <label className="block">
+            <span className="label">Grupo (filtro)</span>
+            <input className="input h-10 text-sm" value={suggGroup} onChange={(e) => setSuggGroup(e.target.value)} placeholder="Todos" />
+          </label>
+          <label className="block">
+            <span className="label">Subgrupo (filtro)</span>
+            <input className="input h-10 text-sm" value={suggSubgroup} onChange={(e) => setSuggSubgroup(e.target.value)} placeholder="Todos" />
+          </label>
+        </div>
+      </div>
+
+      {error instanceof ApiError && (
+        <div className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error.message}</div>
+      )}
+
+      {isLoading ? (
+        <div className="p-8 text-center text-slate-500">Calculando...</div>
+      ) : suggestions.length > 0 ? (
+        <div className="card mt-4">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-slate-400">
+                  <th className="py-2">Produto</th>
+                  <th>SKU</th>
+                  <th className="text-right">Estoque</th>
+                  <th className="text-right">Vendas</th>
+                  <th className="text-right">Média/dia</th>
+                  <th className="text-right text-brand-700">Sugerido</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {paginatedSuggestions.map((s) => (
+                  <tr key={s.variantId} className={s.suggestedQty > 0 ? '' : 'opacity-60'}>
+                    <td className="py-2">
+                      <div className="font-medium">#{s.productCode} - {s.productName}</div>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-slate-400">
+                        {s.brand && <span className="badge-brand text-[10px]">{s.brand}</span>}
+                        {s.group && <span>· {s.group}</span>}
+                        {s.subgroup && <span>· {s.subgroup}</span>}
+                        <span>· {s.description}</span>
+                      </div>
+                    </td>
+                    <td className="text-slate-500">{s.sku}</td>
+                    <td className="text-right">{s.stockQty}</td>
+                    <td className="text-right">{s.soldInWindow}</td>
+                    <td
+                      className="text-right"
+                      title={`Velocidade média de saída: vende aprox. ${
+                        s.avgPerDay === 0 ? '0' : s.avgPerDay.toFixed(2).replace('.', ',')
+                      } unidades por dia neste período`}
+                    >
+                      {fmtAvgPerDay(s.avgPerDay)}
+                    </td>
+                    <td className={`text-right text-base font-bold ${s.suggestedQty > 0 ? 'text-brand-700' : 'text-slate-400'}`}>
+                      {s.suggestedQty > 0 ? `+${s.suggestedQty}` : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <label className="flex items-center gap-2 text-sm text-slate-500">
+              Linhas por página
+              <select
+                className="input h-9 w-auto py-1"
+                value={String(itemsPerPage)}
+                onChange={(e) => {
+                  setItemsPerPage(Number(e.target.value));
+                  setCurrentPage(1);
+                }}
+              >
+                <option value="10">10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </label>
+
+            <div className="flex items-center gap-3 text-sm">
+              <button
+                className="btn-ghost h-9 px-3"
+                disabled={currentPage <= 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              >
+                <ChevronLeft className="h-4 w-4" /> Anterior
+              </button>
+              <span className="text-slate-500">
+                Página <span className="font-semibold text-slate-700">{currentPage}</span> de{' '}
+                <span className="font-semibold text-slate-700">{totalPages}</span>
+              </span>
+              <button
+                className="btn-ghost h-9 px-3"
+                disabled={currentPage >= totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              >
+                Próximo <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <p className="py-8 text-center text-slate-400">Nenhum produto encontrado para os filtros selecionados.</p>
+      )}
+
+      <ScrollToTopButton />
+    </>
   );
 }
 
@@ -520,8 +616,10 @@ function ManualPurchase() {
 interface InvoiceListItem {
   id: string;
   documentNumber: number | null;
+  nfeNumber: string | null;
   notes: string | null;
   issueDate: string;
+  entryDate: string;
   totalAmount: number;
   hasFinancial: boolean;
   supplier: { name: string };
@@ -602,6 +700,27 @@ function PurchasesList({ onView }: { onView: (id: string) => void }) {
     filterValues.valueMax.trim() !== '',
     filterValues.financial !== 'ALL',
   ].filter(Boolean).length;
+
+  // Paginação client-side (padrão Tray) — evita DOM overload em listas grandes.
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
+
+  // Filtro mudou → volta pra primeira página (o recorte antigo pode não existir mais).
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterValues]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredInvoices.length / itemsPerPage));
+
+  // Rede de segurança: se totalPages encolher (novo filtro/pageSize), evita página fantasma.
+  useEffect(() => {
+    setCurrentPage((p) => Math.min(p, totalPages));
+  }, [totalPages]);
+
+  const paginatedInvoices = useMemo(
+    () => filteredInvoices.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage),
+    [filteredInvoices, currentPage, itemsPerPage],
+  );
 
   if (isLoading) return <div className="grid h-32 place-items-center text-slate-500">Carregando...</div>;
 
@@ -698,13 +817,16 @@ function PurchasesList({ onView }: { onView: (id: string) => void }) {
         </div>
       )}
 
-      <div className="card overflow-x-auto">
+      <div className="card">
+      <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-slate-400">
-            <th className="py-2">Doc.</th>
+            <th className="py-2 whitespace-nowrap">Doc.</th>
+            <th className="whitespace-nowrap">Nº NF</th>
             <th>Fornecedor</th>
-            <th>Data</th>
+            <th className="whitespace-nowrap">Emissão</th>
+            <th className="whitespace-nowrap">Entrada</th>
             <th className="text-center">Itens</th>
             <th className="text-right">Total</th>
             <th>Financeiro</th>
@@ -712,14 +834,16 @@ function PurchasesList({ onView }: { onView: (id: string) => void }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {filteredInvoices.map((inv) => (
+          {paginatedInvoices.map((inv) => (
             <tr key={inv.id}>
-              <td className="py-2 font-medium">{inv.documentNumber ? `#${inv.documentNumber}` : '—'}</td>
+              <td className="py-2 font-medium whitespace-nowrap">{inv.documentNumber ? `#${inv.documentNumber}` : '—'}</td>
+              <td className="whitespace-nowrap text-slate-500">{inv.nfeNumber || '—'}</td>
               <td>
                 {inv.supplier.name}
                 {inv.notes && <div className="text-xs text-slate-400">{inv.notes}</div>}
               </td>
-              <td>{new Date(inv.issueDate).toLocaleDateString('pt-BR')}</td>
+              <td className="whitespace-nowrap">{new Date(inv.issueDate).toLocaleDateString('pt-BR')}</td>
+              <td className="whitespace-nowrap">{new Date(inv.entryDate).toLocaleDateString('pt-BR')}</td>
               <td className="text-center">{inv.items.length}</td>
               <td className="text-right font-semibold">{brl(inv.totalAmount)}</td>
               <td>
@@ -757,14 +881,14 @@ function PurchasesList({ onView }: { onView: (id: string) => void }) {
           ))}
           {data?.items.length === 0 && (
             <tr>
-              <td colSpan={7} className="py-10 text-center text-slate-400">
+              <td colSpan={9} className="py-10 text-center text-slate-400">
                 Nenhuma compra lançada.
               </td>
             </tr>
           )}
           {data && data.items.length > 0 && filteredInvoices.length === 0 && (
             <tr>
-              <td colSpan={7} className="py-10 text-center text-slate-400">
+              <td colSpan={9} className="py-10 text-center text-slate-400">
                 Nenhuma compra encontrada com os filtros aplicados.
               </td>
             </tr>
@@ -772,7 +896,85 @@ function PurchasesList({ onView }: { onView: (id: string) => void }) {
         </tbody>
       </table>
       </div>
+
+      {filteredInvoices.length > 0 && (
+        <div className="mt-4 flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <label className="flex items-center gap-2 text-sm text-slate-500">
+            Linhas por página
+            <select
+              className="input h-9 w-auto py-1"
+              value={String(itemsPerPage)}
+              onChange={(e) => {
+                setItemsPerPage(Number(e.target.value));
+                setCurrentPage(1);
+              }}
+            >
+              <option value="10">10</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </label>
+
+          <div className="flex items-center gap-3 text-sm">
+            <button
+              className="btn-ghost h-9 px-3"
+              disabled={currentPage <= 1}
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            >
+              <ChevronLeft className="h-4 w-4" /> Anterior
+            </button>
+            <span className="text-slate-500">
+              Página <span className="font-semibold text-slate-700">{currentPage}</span> de{' '}
+              <span className="font-semibold text-slate-700">{totalPages}</span>
+            </span>
+            <button
+              className="btn-ghost h-9 px-3"
+              disabled={currentPage >= totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Próximo <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+      </div>
+
+      <ScrollToTopButton />
     </div>
+  );
+}
+
+// Botão flutuante "Voltar ao topo" — mesmo padrão validado em Cadastros/Vendas.
+// Ejetado via createPortal(..., document.body): o `animate-fade-in` do
+// Layout.tsx deixa um `transform` persistente no wrapper de rota, virando
+// containing block e quebrando `position: fixed` em descendentes. A rolagem
+// desta página é a do documento (Layout usa scroll natural), então o
+// listener é no `window`.
+function ScrollToTopButton() {
+  const [showScrollTop, setShowScrollTop] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setShowScrollTop(window.scrollY > 300);
+    window.addEventListener('scroll', onScroll);
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  function scrollToTop() {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  return createPortal(
+    <button
+      className={`fixed right-4 bottom-24 md:bottom-8 md:right-8 z-50 grid h-12 w-12 place-items-center rounded-full bg-brand-gradient text-white shadow-lg transition-all duration-300 hover:shadow-brand-lg hover:-translate-y-0.5 ${
+        showScrollTop ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-4 opacity-0'
+      }`}
+      onClick={scrollToTop}
+      title="Voltar ao topo"
+    >
+      <ArrowUp className="h-6 w-6" />
+    </button>,
+    document.body,
   );
 }
 
@@ -987,8 +1189,8 @@ function ViewPurchaseModal({
             </button>
             <button
               className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={hasPaid}
-              title={hasPaid ? 'Há parcelas já baixadas — estorne antes de editar' : 'Editar compra'}
+              disabled={hasFinancial}
+              title={hasFinancial ? 'Exclua o financeiro antes de editar a compra' : 'Editar compra'}
               onClick={() => onEdit(id)}
             >
               <Pencil className="h-4 w-4" /> Editar
@@ -1118,12 +1320,15 @@ function EditPurchaseModal({
     }
   }
 
-  const hasPaid = invoice?.financialAccounts.some((a) => a.status !== 'PENDING') ?? false;
+  const hasFinancial = (invoice?.financialAccounts.length ?? 0) > 0;
 
-  // Guarda de segurança: bloqueia a edição se já houver parcela baixada — o
-  // operador deve estornar a baixa antes, para ter consciência do impacto no
-  // financeiro (mesmo padrão do guard de financialGenerated em EditSaleModal).
-  if (invoice && hasPaid) {
+  // Guarda de segurança: bloqueia a edição se a compra já tiver financeiro
+  // (contas a pagar) vinculado — o operador deve excluir o financeiro
+  // manualmente na tela de visualização primeiro, para ter consciência do
+  // impacto no caixa/contas a pagar (mesmo padrão do guard de
+  // financialGenerated em EditSaleModal — bloqueia por existência do
+  // financeiro, não só por parcela já baixada).
+  if (invoice && hasFinancial) {
     return createPortal(
       <div className="modal-overlay">
         <div className="modal-sheet w-full sm:max-w-md flex flex-col overflow-hidden !p-0">
@@ -1139,8 +1344,8 @@ function EditPurchaseModal({
             <div className="flex flex-col items-center gap-3 py-6 text-center">
               <ShieldAlert className="h-12 w-12 text-rose-500" />
               <p className="text-sm font-medium text-slate-700">
-                Acesso Negado: esta compra possui parcelas de contas a pagar já baixadas. Estorne
-                as baixas antes de editar.
+                Acesso Negado: esta compra possui financeiro (contas a pagar) vinculado. Exclua o
+                financeiro na tela de visualização antes de editar.
               </p>
             </div>
           </div>

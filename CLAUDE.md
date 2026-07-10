@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-07-08
+- **Última atualização:** 2026-07-10
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -22,17 +22,21 @@
   commits são empurrados para o GitHub nessas branches; o **merge para `main` é feito
   manualmente via PR no GitHub** (o merge dispara o auto-deploy no Railway). A IA
   trabalha sempre na branch ativa indicada — nunca commita direto na `main` sem
-  instrução explícita. Branch ativa no momento: **`refinamento-vendas`** (criada a
-  partir da `main` pós-merge de `feature/refinamento-pdv` via PR #9, em `199f3b1`).
-  **Enviada ao GitHub** (`199f3b1`→`faa3616`, 8 commits — filtros/paginação/scroll-to-top
-  em Vendas + unificação e correção da impressão PDV↔Vendas), **pronta para PR/merge**
-  — aguardando revisão do Comandante; ver §11 para o histórico completo de commits.
+  instrução explícita. ✅ **`refinamento-vendas` mesclada via PR #10** (`8458271`) e
+  ✅ **`refinamento-compras` mesclada via PR #11** (`4049233`, 2026-07-09) — ver §11
+  para o histórico completo de commits de ambas. **`main` e `origin/main` estão em
+  sincronia em `4049233`.** Branch ativa no momento: **`feature/bloqueio-edicao-compras`**
+  (criada a partir da `main` pós-merge da `refinamento-compras`) — 6 commits
+  (`33fd0c0`→`eff63de`, fechamento tático da aba de Compras: trava de edição com
+  financeiro ativo, paginação em Compras Lançadas e Sugestão de Compra, scroll-to-top,
+  código/marca do produto e formatação da média diária, Nº NF + Data de Entrada na
+  grade), **enviada ao GitHub, pronta para PR/merge** — ver §11 para o histórico
+  completo.
   ✅ **Divergência anterior resolvida (2026-07-03)**: as três branches em
   paralelo (`feature/tela-produtos-caio`, `feature/estoque-tipo-movimentacao`
   e `feature/refinamento-cadastros`), incluindo os marcadores de conflito
   Git não resolvidos que haviam ficado no `CLAUDE.md` da `main`, foram todas
-  reconciliadas e mescladas via PR #5. `main` e `origin/main` estão em
-  sincronia em `2992176`.
+  reconciliadas e mescladas via PR #5.
 - **Fase atual:** Sistema em **produção no Railway** (projeto `exodus-software`,
   conta helomramos40@gmail.com). Banco PostgreSQL gerenciado, seed do ADMIN executado,
   interface redesenhada (design system "beauty"). **Todo o backlog de funcionalidades
@@ -147,10 +151,26 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   **`POST /products/adjust-stock`** (acerto de estoque → `StockMovement ADJUST`).
 - ✅ **Pessoas**: CRUD cliente/fornecedor (document opcional); **`DELETE`** com proteção
   (bloqueia se houver vendas/notas/títulos vinculados).
-- ✅ **Entrada de XML/NFe** (§4.3): `/invoices/parse`, `/invoices/confirm`,
-  `/invoices/mappings`; **`/invoices/manual`** (compra multi-produto: nº de documento
-  sequencial, novo preço de venda por item, lote por item, contas a pagar parceladas);
-  **`GET/PUT/DELETE /invoices/:id`** (detalhe/editar/excluir com estorno de estoque).
+- ✅ **Entrada de XML/NFe** (§4.3): `/invoices/parse` (resolve o De/Para e já retorna
+  `matchedVariant` com os dados reais do catálogo — nome do produto, SKU, preços —
+  para o item auto-mapeado nunca exibir o `xProd` da nota como se fosse o nome
+  cadastrado), `/invoices/confirm`, `/invoices/mappings`; **`/invoices/manual`** (compra
+  multi-produto: **nº de documento sequencial** — agora gerado também no `/confirm`,
+  que antes deixava `documentNumber` nulo nas notas de XML —, novo preço de venda por
+  item, lote por item, contas a pagar parceladas). **Custo Médio Ponderado (CMP)**
+  centralizado em `lib/inventory.ts` (`calcWeightedAverageCost`), única fonte de
+  verdade usada por `/confirm`, `/manual` e pela edição completa (evita as duas rotas
+  divergirem e reintroduzirem o bug de sobrescrever o custo médio com o custo da
+  entrada). `Invoice.nfeNumber` (nº da NF, `ide.nNF` do XML — nulo em compra manual)
+  salvo em `/confirm`, junto com `entryDate` (data de entrada, distinta da emissão),
+  ambos expostos na listagem para a grade de Compras Lançadas. **`GET/PUT/DELETE
+  /invoices/:id`**: `PUT` sem `items` só edita metadados (observação/data/nº doc/
+  fornecedor); `PUT` **com `items`** dispara **edição completa** (Mini-PDV de
+  Compras) — estorna o estoque físico da nota antiga, remove itens/financeiro
+  antigos, recalcula o CMP dos novos itens e recria as contas a pagar em uma única
+  transação (espelha `updateSale`); bloqueada com erro de negócio se alguma parcela
+  já tiver sido baixada. `DELETE` estorna estoque + remove contas a pagar pendentes
+  (bloqueado se houver título já baixado).
 - ✅ **Vendas**: `/sales` e `/sales/sync` (lote offline) com **idempotência por
   `clientRef`**; **split de pagamento** (tabela `SalePayment`) e **"A prazo"** (gera
   contas a receber); **`PUT/DELETE /sales/:id`** (editar/excluir com estorno de estoque
@@ -327,12 +347,27 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   mês corrente), cards de resumo (Total de vendas, Dinheiro em gaveta,
   Suprimentos, Sangrias, Fechamentos/Recolhido) e timeline consolidada de
   todos os caixas do período (ícone + operador + valor com sinal).
-- ✅ **Compras**: sugestão de compra; importação de XML por **upload de arquivo .xml**;
+- ✅ **Compras**: **aba "Sugestão de compra"** (`PurchaseSuggestion`, componente
+  próprio) com filtros (marca/grupo/subgrupo/janela/reposição), **paginação
+  client-side** + **scroll-to-top**, produto exibido como `#código - nome` com a
+  marca em `badge-brand`, e "Média/dia" formatada em vírgula BR + sufixo (`0,37
+  un/dia`, com `title` explicativo); importação de XML por **upload de arquivo .xml**
+  (item auto-mapeado exibe o **nome real do catálogo**, não o `xProd` da nota);
   **compra manual multi-produto** (vários itens, observação, **nº de documento
   sequencial**, **novo preço de venda por item** mostrando o atual, **lote/validade por
-  item**, e **contas a pagar parceladas** opcionais do total); **aba "Compras lançadas"**
-  para consultar, editar (observação) e **excluir** (estorna estoque + remove contas a
-  pagar pendentes; bloqueado se houver título já baixado).
+  item**, precificação bidirecional margem/markup, e **contas a pagar parceladas**
+  opcionais do total via `<PurchaseFinancialEngine>` — motor compartilhado com a
+  Etapa 3 do XML). **Aba "Compras lançadas"**: **filtros avançados** (nº de documento,
+  fornecedor, data, faixa de valor, status do financeiro — 100% client-side, mesmo
+  padrão de Vendas) + **paginação client-side** + **scroll-to-top**; grade com colunas
+  **"Nº NF"** (nulo em compra manual) e **"Entrada"** (além da renomeada "Emissão") +
+  **modal de visualização em Padrão Ouro** (`ViewPurchaseModal`, `createPortal`,
+  header com fornecedor/emissão/entrada/nº doc, contas a pagar com datas corrigidas —
+  fim do bug "Invalid Date" nas parcelas) + **`EditPurchaseModal`** (Mini-PDV de
+  Compras: troca fornecedor, data, itens e contas a pagar; bloqueado com tela de
+  acesso negado se a compra tiver **qualquer financeiro vinculado** — simetria com
+  `Sale.financialGenerated`, não só parcela já baixada) + **excluir** (estorna
+  estoque + remove contas a pagar pendentes; bloqueado se houver título já baixado).
 - ✅ **Financeiro**: lançamento manual a pagar/receber com **N parcelas** e
   **fornecedor/cliente obrigatório**; cada título tem **código sequencial** (`code`);
   **baixa parcial** (registra liquidações em `AccountSettlement`, mostra saldo restante)
@@ -1233,6 +1268,104 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
     Empresa.
   `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros** em
   todos os commits.
+
+- ✅ **Onda 2026-07-09 — Refinamento de Compras (QA + Padrão Ouro + Mini-PDV)**
+  (2026-07-09): Branch `refinamento-compras` (criada a partir da `main` pós-merge de
+  `refinamento-vendas` via PR #10, em `8458271`) — **mesclada na `main` via PR #11**
+  (`4049233`). 15 commits (`4a7f8e3`→`d9394fa`), incluindo os já registrados de
+  estabilização de UI/UX do XML/picker de produto e o ciclo de dívida técnica abaixo:
+  - **`b4b17ab`** (blindagem do CMP): mission alegava que `/confirm`/`/manual`
+    sobrescreviam o custo médio com o custo da nota — **premissa falsa**, comprovada
+    via round-trip real contra o Postgres local (variante teste stock=100/avg=10 →
+    `/manual` qty=50 custo=16 → avg=12 exato; `/confirm` qty=50 custo=20 → avg=14
+    exato). Como não havia bug mas a fórmula estava **duplicada** entre as duas rotas
+    (risco real de regressão futura), extraída para `apps/api/src/lib/inventory.ts`
+    (`calcWeightedAverageCost`), única fonte de verdade agora usada por `/confirm`,
+    `/manual` e pela edição completa.
+  - **`8684586`** (fix nº de documento no XML): `Invoice.documentNumber` é `Int?` sem
+    default no banco — `/manual` sempre calculava `aggregate max+1` antes de criar a
+    nota, mas `/confirm` nunca fazia isso, deixando toda compra vinda de XML com
+    `documentNumber: null` (coluna "Doc." mostrava "—"). Fix: mesma lógica de
+    sequenciamento replicada dentro da transação do `/confirm`. Validado com chamada
+    real ao endpoint (nota criada recebeu `documentNumber: 6`, sequenciado
+    corretamente com as notas existentes).
+  - **`cc91fd6`** (fix nome do produto no De/Para automático): item do XML já resolvido
+    via `SupplierProductMapping` mostrava o `xProd` (nome do fornecedor) em vez do
+    nome cadastrado no ERP — `/invoices/parse` só retornava o `matchedVariantId` (um
+    UUID), e o frontend (`XmlImport.tsx`) forjava `productName: it.description` (o
+    próprio `xProd`) para preencher a caixa verde. Fix: `/parse` agora resolve
+    `ProductVariant` + `Product` para todos os IDs auto-mapeados e retorna
+    `matchedVariant` completo (nome, SKU, preços); frontend consome o dado real em vez
+    de inventar um. Validado com XML de teste (`xProd` ≠ nome do catálogo na resposta).
+  - **`0a67a85`** (filtros avançados em "Compras lançadas"): painel expansível
+    (nº de documento — ignora `#` —, fornecedor, data exata, faixa de valor, status do
+    financeiro), 100% client-side via `useMemo`, espelhando exatamente o padrão já
+    usado em Vendas (`SalesPage.tsx`).
+  - **`d9394fa`** (Padrão Ouro + Mini-PDV de Compras): `PurchaseDetail` (modal antigo,
+    fora do padrão portal) virou **`ViewPurchaseModal`** (`createPortal`, casca
+    header/body/footer) — corrige também o bug **"Invalid Date"** nas parcelas
+    financeiras (`new Date(a.dueDate + 'T00:00:00')` concatenava sufixo de hora num
+    ISO **já completo**, gerando string inválida; novo helper `fmtDate()` detecta se a
+    string já tem `'T'` antes de concatenar). Novo **`EditPurchaseModal`**
+    (`sm:max-w-5xl`, mesma arquitetura de `EditSaleModal`): reaproveita
+    `ManualPurchaseItemRow`/`ProductSearch`/`PurchaseFinancialEngine` já existentes;
+    bloqueado com tela "Acesso Negado" se alguma parcela já tiver sido baixada.
+    Backend `PUT /api/invoices/:id` upgradado: sem `items` no body, só edita metadados
+    (comportamento anterior); **com `items`**, dispara edição completa numa única
+    transação — estorna o estoque físico da nota antiga (`StockMovement OUT reason
+    'INVOICE_EDIT'`, mesma simplificação já aceita no `DELETE`: não tenta reverter o
+    CMP, só o saldo físico), remove itens/financeiro antigos, recalcula o CMP dos
+    novos itens (`calcWeightedAverageCost`) e recria as contas a pagar — espelha
+    `updateSale` (`services/sales.ts`). Validado com round-trip real: compra criada
+    (variante A stock=50/avg=10, item qty=10 custo=12 → avg=10,33), editada trocando
+    fornecedor + item para uma variante B (stock=20/avg=5, qty=5 custo=8) — variante A
+    voltou a stock=50 (estorno), variante B foi a stock=25/avg=5,6 (CMP correto),
+    financeiro antigo (2 parcelas) substituído por 1 nova parcela; e o guard testado
+    de verdade (baixa registrada numa parcela → `PUT` com `items` retornou 422 com a
+    mensagem de bloqueio).
+  `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros** em todos os
+  commits.
+
+- ✅ **Onda 2026-07-10 — Fechamento tático de Compras (trava de edição, paginação,
+  UX e Nº NF/Data de Entrada)** (2026-07-09 a 2026-07-10): Branch
+  `feature/bloqueio-edicao-compras` (criada a partir da `main` pós-merge da
+  `refinamento-compras`) — **enviada ao GitHub, pronta para PR/merge**. 6 commits
+  (`33fd0c0`→`eff63de`).
+  - **`33fd0c0`** (trava de edição com financeiro ativo): guard do `ViewPurchaseModal`
+    (botão Editar) e do `EditPurchaseModal` trocado de `hasPaid` (só parcela já
+    baixada) para `hasFinancial` (qualquer conta a pagar vinculada) — simetria exata
+    com `Sale.financialGenerated`/`EditSaleModal`; força o operador a excluir o
+    financeiro na visualização antes de editar a compra.
+  - **`3f4233b`** (paginação + scroll-to-top em Compras Lançadas): mesmo motor de
+    `SalesPage.tsx` (`currentPage`/`itemsPerPage`, rodapé Anterior/Próximo,
+    `ScrollToTopButton` via `createPortal`).
+  - **`92805cb`** (paginação na Sugestão de Compra): a aba (antes inline em
+    `PurchasesPage()`) virou o componente próprio `PurchaseSuggestion` — mesmo
+    padrão arquitetural dos irmãos `ManualPurchase`/`PurchasesList`/`XmlImport`;
+    `suggestions` memoizado (`useMemo`) para o `useEffect` de reset de página não
+    disparar a cada clique em "Próximo".
+  - **`db396aa`** (código/marca do produto + scroll-to-top na Sugestão): backend
+    (`purchase-suggestions.ts`) passou a retornar `productCode` (`variant.product.code`
+    — `brand` já vinha, só não tinha essa formatação); célula da tabela exibe
+    `#{productCode} - {productName}` + `badge-brand` para a marca. Reaproveitado o
+    `ScrollToTopButton` já existente no arquivo (decisão de manter consistência visual
+    entre as abas da mesma página, em vez do variant "Dark Glassmorphism" do
+    Cadastros).
+  - **`e670aba`** (UX da média diária): `0.37` cru virou `0,37 un/dia` (vírgula BR +
+    sufixo, zero exato sem casas decimais) + `title` explicativo por célula.
+  - **`eff63de`** (Nº NF + Data de Entrada na grade): `Invoice.nfeNumber String?`
+    (schema + migração aditiva `20260710011551_add_invoice_nfe_number`); `nfe-parser.ts`
+    extrai `ide.nNF`; `/invoices/parse` retorna e `/invoices/confirm` persiste
+    `nfeNumber` (nulo em compra manual). Grade de Compras Lançadas ganhou colunas
+    "Nº NF" e "Entrada" (`entryDate`), e "Data" foi renomeada para "Emissão"
+    (`issueDate`) — `entryDate` já era salvo corretamente em ambas as rotas antes
+    desta onda (só não era exibido). Validado com round-trip real (XML de teste com
+    `<nNF>456</nNF>` → `/parse` → `/confirm` → `GET /invoices`, todos os campos
+    conferidos). Regeneração do Prisma Client exigiu encerrar e reiniciar o
+    `dev:api` local (mesmo bug de lock de DLL do Windows já documentado nesta
+    doc) — confirmado com o Comandante antes de encerrar o processo.
+  `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros** em todos os
+  commits.
 
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 

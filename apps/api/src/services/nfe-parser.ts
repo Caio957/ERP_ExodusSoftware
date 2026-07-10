@@ -26,6 +26,7 @@ export interface RawNfeDuplicate {
 export interface RawNfe {
   accessKey: string;
   issueDate: string;
+  nfeNumber: string;
   supplier: { document: string; name: string };
   totalAmount: number;
   items: RawNfeItem[];
@@ -84,6 +85,7 @@ export function parseNfeXml(xml: string): RawNfe {
   return {
     accessKey,
     issueDate: String(ide.dhEmi ?? ide.dEmi ?? ''),
+    nfeNumber: String(ide.nNF ?? ''),
     supplier: {
       document: onlyDigits(emit.CNPJ ?? emit.CPF),
       name: String(emit.xNome ?? ''),

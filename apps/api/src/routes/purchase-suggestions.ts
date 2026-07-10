@@ -57,6 +57,7 @@ export async function purchaseSuggestionRoutes(app: FastifyInstance) {
           variantId: variant.id,
           sku: variant.sku,
           description: variant.description,
+          productCode: variant.product.code,
           productName: variant.product.name,
           brand: variant.product.brand,
           group: variant.product.group,

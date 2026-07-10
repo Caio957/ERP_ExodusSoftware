@@ -98,6 +98,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
     return {
       accessKey: raw.accessKey,
       issueDate: raw.issueDate,
+      nfeNumber: raw.nfeNumber,
       supplier: { ...raw.supplier, existingId: supplier?.id ?? null },
       totalAmount: raw.totalAmount,
       items,
@@ -117,7 +118,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
     '/confirm',
     { preHandler: app.authenticate, schema: { body: confirmInvoiceSchema } },
     async (req, reply) => {
-      const { supplierId, accessKey, issueDate, entryDate, totalAmount, items, duplicates, customInstallments } = req.body;
+      const { supplierId, accessKey, nfeNumber, issueDate, entryDate, totalAmount, items, duplicates, customInstallments } = req.body;
 
       const exists = await prisma.invoice.findUnique({ where: { accessKey } });
       if (exists) throw new ConflictError('Nota fiscal já importada', { accessKey });
@@ -132,6 +133,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
             supplierId,
             accessKey,
             documentNumber,
+            nfeNumber: nfeNumber?.trim() || null,
             issueDate,
             entryDate,
             totalAmount,
