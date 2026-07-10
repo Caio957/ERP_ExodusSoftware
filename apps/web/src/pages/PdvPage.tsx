@@ -765,15 +765,21 @@ export function PdvPage() {
             </div>
 
             <footer className="shrink-0 space-y-2 border-t border-slate-200 bg-slate-50 p-4 rounded-b-xl">
+              {/* Botões travados enquanto uma impressão está em curso
+                  (`printMode !== null`) — a janela assíncrona de medição +
+                  window.print() (dois timeouts de 50ms) permitia cliques
+                  repetidos que engasgam o navegador do celular. */}
               <div className="grid grid-cols-2 gap-2">
                 <button
-                  className="btn-primary flex items-center justify-center gap-1.5 text-sm"
+                  className="btn-primary flex items-center justify-center gap-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={printMode !== null}
                   onClick={() => handlePrint('thermal')}
                 >
                   🖨️ Bobina (80mm)
                 </button>
                 <button
-                  className="btn-primary flex items-center justify-center gap-1.5 text-sm"
+                  className="btn-primary flex items-center justify-center gap-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={printMode !== null}
                   onClick={() => handlePrint('a4')}
                 >
                   📄 Papel A4
@@ -825,7 +831,12 @@ export function PdvPage() {
     )}
 
     {receiptData && printMode === 'a4' && createPortal(
-      <div id="a4-print-root" className="fixed top-[-9999px] left-[-9999px] w-full bg-white text-black">
+      // Largura fixa de 210mm (não `w-full`): no celular, `w-full` = largura do
+      // viewport (~360px) esmagava a folha A4 (o `maxWidth:100%` do template
+      // clampava a 210mm para a largura do celular), e o `@page A4` depois
+      // escalava esse layout esmagado — cupom quebrado. Ancorar em 210mm torna
+      // a renderização off-screen imune ao viewport.
+      <div id="a4-print-root" className="fixed top-[-9999px] left-[-9999px] w-[210mm] bg-white text-black">
         <div className="w-full max-w-[210mm] mx-auto bg-white">
           <SaleReceipt company={company ?? {}} sale={receiptData} format="a4" />
         </div>

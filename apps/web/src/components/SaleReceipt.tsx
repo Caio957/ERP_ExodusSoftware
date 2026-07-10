@@ -72,7 +72,12 @@ function ThermalSaleReceipt({
   return (
     <div
       className="print-area mx-auto bg-white font-mono text-[12px] leading-tight text-black"
-      style={{ width }}
+      // Largura física fixa (80mm ≈ 302px) já é imune ao viewport, mas o
+      // `minWidth: 300px` é uma trava extra (blindagem) para o cupom de 80mm
+      // nunca refluir/esmagar caso o motor de impressão leia o DOM numa tela
+      // estreita de celular durante a medição off-screen. Não aplicado ao
+      // 58mm (variante mais estreita, hoje não usada).
+      style={{ width, minWidth: width === '80mm' ? '300px' : undefined }}
     >
       <div className="px-2 py-2">
         <div className="text-center">

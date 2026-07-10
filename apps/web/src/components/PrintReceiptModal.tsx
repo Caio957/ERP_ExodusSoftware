@@ -95,11 +95,18 @@ export function PrintReceiptModal({
               </div>
               <button
                 className="btn-primary shrink-0 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={companyLoading}
+                // `printMode !== null` mantém o botão travado durante a janela
+                // assíncrona de medição + window.print() (dois timeouts de 50ms),
+                // evitando cliques repetidos que engasgam o navegador do celular.
+                disabled={companyLoading || printMode !== null}
                 onClick={() => setPrintMode(format)}
               >
                 <Printer className="h-4 w-4" />
-                {companyLoading ? 'Carregando dados da empresa...' : 'Imprimir'}
+                {companyLoading
+                  ? 'Carregando dados da empresa...'
+                  : printMode !== null
+                    ? 'Preparando impressão...'
+                    : 'Imprimir'}
               </button>
             </div>
 
@@ -135,7 +142,15 @@ export function PrintReceiptModal({
       )}
 
       {printMode && createPortal(
-        <div id={PRINT_ROOT_ID} className="fixed top-[-9999px] left-[-9999px] w-full bg-white text-black">
+        // A4 ancora em 210mm (não `w-full`): no celular, `w-full` = largura do
+        // viewport esmagava a folha (o `maxWidth:100%` do template A4 clampava
+        // 210mm à largura do celular) e o `@page A4` escalava o layout quebrado.
+        // O cupom térmico já é imune (largura física fixa de 80mm), então
+        // mantém `w-full`.
+        <div
+          id={PRINT_ROOT_ID}
+          className={`fixed top-[-9999px] left-[-9999px] bg-white text-black ${printMode === 'a4' ? 'w-[210mm]' : 'w-full'}`}
+        >
           <div ref={receiptRef} className="mx-auto flex w-full justify-center">
             <SaleReceipt company={company} sale={sale} format={printMode} />
           </div>
