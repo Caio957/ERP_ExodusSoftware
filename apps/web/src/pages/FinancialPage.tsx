@@ -452,65 +452,77 @@ function NewEntryModal({
     create.mutate();
   }
 
-  return (
-    <Modal title="Novo lançamento" onClose={onClose} wide>
-      <div className="mb-3 grid grid-cols-2 gap-2">
-        <button className={type === 'PAYABLE' ? 'btn-primary' : 'btn-ghost'} onClick={() => { setType('PAYABLE'); setPerson(null); }}>
-          <ArrowUpCircle className="h-5 w-5" /> A Pagar
-        </button>
-        <button className={type === 'RECEIVABLE' ? 'btn-primary' : 'btn-ghost'} onClick={() => { setType('RECEIVABLE'); setPerson(null); }}>
-          <ArrowDownCircle className="h-5 w-5" /> A Receber
-        </button>
-      </div>
+  return createPortal(
+    <div className="modal-overlay">
+      <div className="modal-sheet w-full sm:max-w-md flex flex-col max-h-[90dvh] !p-0 overflow-hidden">
+        <header className="shrink-0 flex items-center justify-between border-b border-slate-200 p-4">
+          <h2 className="font-display text-lg font-bold">Novo lançamento</h2>
+          <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
+            <X className="h-5 w-5" />
+          </button>
+        </header>
 
-      <label className="block">
-        <span className="label">{personType === 'SUPPLIER' ? 'Fornecedor' : 'Cliente'} *</span>
-        <PersonPicker type={personType} value={person} onChange={setPerson} />
-      </label>
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 space-y-4">
+          <div className="grid grid-cols-2 gap-2">
+            <button className={type === 'PAYABLE' ? 'btn-primary' : 'btn-ghost'} onClick={() => { setType('PAYABLE'); setPerson(null); }}>
+              <ArrowUpCircle className="h-5 w-5" /> A Pagar
+            </button>
+            <button className={type === 'RECEIVABLE' ? 'btn-primary' : 'btn-ghost'} onClick={() => { setType('RECEIVABLE'); setPerson(null); }}>
+              <ArrowDownCircle className="h-5 w-5" /> A Receber
+            </button>
+          </div>
 
-      <label className="mt-3 block">
-        <span className="label">Descrição *</span>
-        <input className="input" value={description} onChange={(e) => setDescription(e.target.value)} />
-      </label>
+          <label className="block">
+            <span className="label">{personType === 'SUPPLIER' ? 'Fornecedor' : 'Cliente'} *</span>
+            <PersonPicker type={personType} value={person} onChange={setPerson} />
+          </label>
 
-      <div className="mt-3 grid grid-cols-2 gap-3">
-        <label className="block">
-          <span className="label">Valor total (R$) *</span>
-          <input className="input" type="number" inputMode="decimal" value={totalAmount} onChange={(e) => setTotalAmount(e.target.value)} />
-        </label>
-        <label className="block">
-          <span className="label">1º vencimento *</span>
-          <input className="input" type="date" value={firstDueDate} onChange={(e) => setFirstDueDate(e.target.value)} />
-        </label>
-        <label className="block">
-          <span className="label">Nº de parcelas *</span>
-          <input className="input" type="number" min={1} value={installments} onChange={(e) => setInstallments(e.target.value)} />
-        </label>
-        <label className="block">
-          <span className="label">Intervalo (dias)</span>
-          <input className="input" type="number" value={intervalDays} onChange={(e) => setIntervalDays(e.target.value)} />
-        </label>
-      </div>
+          <label className="block">
+            <span className="label">Descrição *</span>
+            <input className="input" value={description} onChange={(e) => setDescription(e.target.value)} />
+          </label>
 
-      {nParcelas > 1 && (
-        <div className="mt-3 rounded-xl bg-brand-50/60 px-3 py-2 text-sm text-brand-700">
-          {nParcelas}× de aprox. <strong>{brl(valorParcela)}</strong> (a cada {intervalDays || 30} dias)
+          <div className="grid grid-cols-2 gap-4">
+            <label className="block">
+              <span className="label">Valor total (R$) *</span>
+              <input className="input" type="number" inputMode="decimal" value={totalAmount} onChange={(e) => setTotalAmount(e.target.value)} />
+            </label>
+            <label className="block">
+              <span className="label">1º vencimento *</span>
+              <input className="input" type="date" value={firstDueDate} onChange={(e) => setFirstDueDate(e.target.value)} />
+            </label>
+            <label className="block">
+              <span className="label">Nº de parcelas *</span>
+              <input className="input" type="number" min={1} value={installments} onChange={(e) => setInstallments(e.target.value)} />
+            </label>
+            <label className="block">
+              <span className="label">Intervalo (dias)</span>
+              <input className="input" type="number" value={intervalDays} onChange={(e) => setIntervalDays(e.target.value)} />
+            </label>
+          </div>
+
+          {nParcelas > 1 && (
+            <div className="rounded-xl bg-brand-50/60 px-3 py-2 text-sm text-brand-700">
+              {nParcelas}× de aprox. <strong>{brl(valorParcela)}</strong> (a cada {intervalDays || 30} dias)
+            </div>
+          )}
+
+          {(localError || create.error instanceof ApiError) && (
+            <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              {localError ?? (create.error as ApiError).message}
+            </div>
+          )}
         </div>
-      )}
 
-      {(localError || create.error instanceof ApiError) && (
-        <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
-          {localError ?? (create.error as ApiError).message}
-        </div>
-      )}
-
-      <div className="mt-5 flex justify-end gap-2">
-        <button className="btn-ghost" onClick={onClose}>Cancelar</button>
-        <button className="btn-primary" disabled={create.isPending} onClick={submit}>
-          {create.isPending ? 'Salvando...' : 'Lançar'}
-        </button>
+        <footer className="shrink-0 flex items-center justify-end gap-2 border-t border-slate-200 p-4 bg-slate-50">
+          <button className="btn-ghost" onClick={onClose}>Cancelar</button>
+          <button className="btn-primary" disabled={create.isPending} onClick={submit}>
+            {create.isPending ? 'Salvando...' : 'Lançar'}
+          </button>
+        </footer>
       </div>
-    </Modal>
+    </div>,
+    document.body,
   );
 }
 
