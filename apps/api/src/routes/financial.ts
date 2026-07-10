@@ -11,7 +11,7 @@ import {
 } from '@exodus/shared';
 import { prisma } from '../lib/prisma.js';
 import { serializeDecimals } from '../lib/serialize.js';
-import { BusinessError, NotFoundError } from '../lib/errors.js';
+import { AppError, BusinessError, NotFoundError } from '../lib/errors.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -25,6 +25,19 @@ const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 function todayStartBr(): Date {
   const localDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
   return new Date(`${localDateStr}T00:00:00.000-03:00`);
+}
+
+/**
+ * Garante que o operador logado tem um caixa aberto antes de mexer em dinheiro
+ * (baixa/estorno) — sem caixa aberto não há onde registrar a `CashTransaction`
+ * de compensação.
+ */
+async function requireOpenRegister(tx: Prisma.TransactionClient, userId: string) {
+  const register = await tx.cashRegister.findFirst({ where: { userId, status: 'OPEN' } });
+  if (!register) {
+    throw new AppError(400, 'É necessário ter um caixa aberto para realizar baixas financeiras.');
+  }
+  return register;
 }
 
 export async function financialRoutes(app: FastifyInstance) {
@@ -178,6 +191,8 @@ export async function financialRoutes(app: FastifyInstance) {
     { preHandler: app.authorize(['ADMIN']), schema: { params: idParam, body: settleAccountSchema } },
     async (req) => {
       return prisma.$transaction(async (tx) => {
+        const openRegister = await requireOpenRegister(tx, req.user.sub);
+
         const account = await tx.financialAccount.findUnique({
           where: { id: req.params.id },
           include: { settlements: true },
@@ -194,6 +209,17 @@ export async function financialRoutes(app: FastifyInstance) {
 
         await tx.accountSettlement.create({
           data: { financialAccountId: account.id, amount: valor, paidAt: req.body.paidAt },
+        });
+
+        // Reflete a baixa no caixa aberto: recebimento (RECEIVABLE) entra como
+        // suprimento; pagamento (PAYABLE) sai como sangria.
+        await tx.cashTransaction.create({
+          data: {
+            cashRegisterId: openRegister.id,
+            type: account.type === 'RECEIVABLE' ? 'SUPPLY' : 'BLEED',
+            amount: valor,
+            description: `Baixa: ${account.description}`,
+          },
         });
 
         const newPaid = round2(paid + valor);
@@ -214,6 +240,8 @@ export async function financialRoutes(app: FastifyInstance) {
     { preHandler: app.authorize(['ADMIN']), schema: { params: idParam } },
     async (req) => {
       return prisma.$transaction(async (tx) => {
+        const openRegister = await requireOpenRegister(tx, req.user.sub);
+
         const account = await tx.financialAccount.findUnique({
           where: { id: req.params.id },
           include: { settlements: { orderBy: { createdAt: 'desc' } } },
@@ -223,6 +251,19 @@ export async function financialRoutes(app: FastifyInstance) {
         if (!last) throw new BusinessError('Não há baixa para estornar');
 
         await tx.accountSettlement.delete({ where: { id: last.id } });
+
+        // Compensação inversa da baixa: estornar um recebimento (RECEIVABLE)
+        // tira o dinheiro do caixa (sangria); estornar um pagamento (PAYABLE)
+        // devolve o dinheiro ao caixa (suprimento).
+        await tx.cashTransaction.create({
+          data: {
+            cashRegisterId: openRegister.id,
+            type: account.type === 'RECEIVABLE' ? 'BLEED' : 'SUPPLY',
+            amount: Number(last.amount),
+            description: `Estorno de Baixa: ${account.description}`,
+          },
+        });
+
         const remaining = account.settlements.slice(1).reduce((a, s) => a + Number(s.amount), 0);
         const updated = await tx.financialAccount.update({
           where: { id: account.id },
