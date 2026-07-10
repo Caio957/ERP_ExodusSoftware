@@ -404,10 +404,18 @@ function ProductSearch({ onPick }: { onPick: (v: VariantHit) => void }) {
   const { onKeyDown } = useSearchHandler(setSearchTerm);
 
   return (
-    <div className="relative">
+    <form
+      className="relative"
+      onSubmit={(e) => {
+        e.preventDefault(); // Impede o reload da página
+        setSearchTerm(term.trim());
+      }}
+    >
       <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
       <input
         className="input pl-9"
+        type="search"
+        enterKeyHint="search"
         value={term}
         onChange={(e) => setTerm(e.target.value)}
         onKeyDown={onKeyDown}
@@ -419,6 +427,7 @@ function ProductSearch({ onPick }: { onPick: (v: VariantHit) => void }) {
             p.variants.map((v) => (
               <button
                 key={v.id}
+                type="button"
                 className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-slate-50"
                 onClick={() => onPick({ id: v.id, label: `${p.name} — ${v.description}`, stockQty: v.stockQty })}
               >
@@ -432,6 +441,6 @@ function ProductSearch({ onPick }: { onPick: (v: VariantHit) => void }) {
           {data.items.length === 0 && <div className="px-3 py-2 text-sm text-slate-400">Nenhum produto encontrado.</div>}
         </div>
       )}
-    </div>
+    </form>
   );
 }
