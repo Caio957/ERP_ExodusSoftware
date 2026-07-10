@@ -633,6 +633,8 @@ interface PurchaseFilterValues {
   valueMin: string;
   valueMax: string;
   financial: 'ALL' | 'WITH_FINANCIAL' | 'WITHOUT_FINANCIAL';
+  sortField: 'doc' | 'nfe' | 'issuedAt' | 'entryDate' | 'amount' | 'items';
+  sortDir: 'asc' | 'desc';
 }
 
 const EMPTY_PURCHASE_FILTERS: PurchaseFilterValues = {
@@ -642,6 +644,8 @@ const EMPTY_PURCHASE_FILTERS: PurchaseFilterValues = {
   valueMin: '',
   valueMax: '',
   financial: 'ALL',
+  sortField: 'issuedAt',
+  sortDir: 'desc',
 };
 
 function PurchasesList({ onView }: { onView: (id: string) => void }) {
@@ -667,9 +671,10 @@ function PurchasesList({ onView }: { onView: (id: string) => void }) {
     setFilterValues((prev) => ({ ...prev, [key]: value }));
   }
 
-  // Filtro avançado 100% client-side: nº do documento, fornecedor, data da
-  // compra, faixa de valor total e status do financeiro — combinados (mesmo
-  // padrão do filtro de Vendas em SalesPage.tsx).
+  // Filtro avançado 100% client-side: nº do documento, fornecedor, data de
+  // emissão, faixa de valor total e status do financeiro — combinados (mesmo
+  // padrão do filtro de Vendas em SalesPage.tsx). Ao final, ordenação por
+  // documento/NF/emissão/entrada/valor/qtd. de itens.
   const filteredInvoices = useMemo(() => {
     const items = data?.items ?? [];
     const docTerm = filterValues.doc.trim().replace(/^#/, '');
@@ -677,7 +682,7 @@ function PurchasesList({ onView }: { onView: (id: string) => void }) {
     const min = filterValues.valueMin.trim() ? parseFloat(filterValues.valueMin.replace(',', '.')) : null;
     const max = filterValues.valueMax.trim() ? parseFloat(filterValues.valueMax.replace(',', '.')) : null;
 
-    return items.filter((inv) => {
+    const filtered = items.filter((inv) => {
       if (docTerm && !String(inv.documentNumber ?? '').includes(docTerm)) return false;
       if (supplierTerm && !inv.supplier.name.toLowerCase().includes(supplierTerm)) return false;
       if (filterValues.date) {
@@ -689,6 +694,30 @@ function PurchasesList({ onView }: { onView: (id: string) => void }) {
       if (filterValues.financial === 'WITH_FINANCIAL' && !inv.hasFinancial) return false;
       if (filterValues.financial === 'WITHOUT_FINANCIAL' && inv.hasFinancial) return false;
       return true;
+    });
+
+    return filtered.sort((a, b) => {
+      let cmp = 0;
+      switch (filterValues.sortField) {
+        case 'doc':
+          cmp = (a.documentNumber ?? 0) - (b.documentNumber ?? 0);
+          break;
+        case 'nfe':
+          cmp = (a.nfeNumber ?? '').localeCompare(b.nfeNumber ?? '');
+          break;
+        case 'entryDate':
+          cmp = new Date(a.entryDate).getTime() - new Date(b.entryDate).getTime();
+          break;
+        case 'amount':
+          cmp = a.totalAmount - b.totalAmount;
+          break;
+        case 'items':
+          cmp = a.items.length - b.items.length;
+          break;
+        default:
+          cmp = new Date(a.issueDate).getTime() - new Date(b.issueDate).getTime();
+      }
+      return filterValues.sortDir === 'desc' ? -cmp : cmp;
     });
   }, [data, filterValues]);
 
@@ -763,7 +792,7 @@ function PurchasesList({ onView }: { onView: (id: string) => void }) {
               />
             </label>
             <label className="block">
-              <span className="label">Data da compra</span>
+              <span className="label">Data de emissão</span>
               <input
                 type="date"
                 className="input"
@@ -804,6 +833,32 @@ function PurchasesList({ onView }: { onView: (id: string) => void }) {
                 onChange={(e) => updateFilter('valueMax', sanitizeBr(e.target.value))}
                 placeholder="Sem limite"
               />
+            </label>
+            <label className="block">
+              <span className="label">Ordenar por</span>
+              <select
+                className="input"
+                value={filterValues.sortField}
+                onChange={(e) => updateFilter('sortField', e.target.value as PurchaseFilterValues['sortField'])}
+              >
+                <option value="doc">Doc.</option>
+                <option value="nfe">Nº NF</option>
+                <option value="issuedAt">Emissão</option>
+                <option value="entryDate">Entrada</option>
+                <option value="amount">Valor</option>
+                <option value="items">Itens</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="label">Ordem</span>
+              <select
+                className="input"
+                value={filterValues.sortDir}
+                onChange={(e) => updateFilter('sortDir', e.target.value as PurchaseFilterValues['sortDir'])}
+              >
+                <option value="asc">Crescente</option>
+                <option value="desc">Decrescente</option>
+              </select>
             </label>
           </div>
           <div className="flex items-center justify-between border-t border-slate-100 pt-3">
