@@ -265,60 +265,78 @@ function RegisterMovements({
         <p className="py-4 text-center text-sm text-slate-400">Nenhuma movimentação ainda.</p>
       ) : (
         <ul className="space-y-1">
-          {data.movements.map((m) => (
-            <li
-              key={`${m.kind}-${m.id}`}
-              className="flex items-center justify-between rounded-lg px-3 py-2 text-sm odd:bg-slate-50"
-            >
-              {m.kind === 'SALE' ? (
-                <>
-                  <span className="flex items-center gap-2 text-slate-600">
-                    <Receipt className="h-4 w-4 text-brand-500" />
-                    Venda · {methodLabel[m.paymentMethod ?? ''] ?? m.paymentMethod}
-                    {m.client && <span className="text-slate-400">· {m.client}</span>}
-                  </span>
-                  <span className="font-semibold text-emerald-600">+{brl(m.amount)}</span>
-                </>
-              ) : (
-                <>
-                  <span className="flex items-center gap-2">
-                    {m.type === 'SUPPLY' ? (
-                      <PlusCircle className="h-4 w-4 text-emerald-600" />
-                    ) : (
-                      <MinusCircle className="h-4 w-4 text-rose-600" />
-                    )}
-                    {m.description}
-                  </span>
-                  <span className="flex items-center gap-2">
-                    <span className={`font-semibold ${m.type === 'SUPPLY' ? 'text-emerald-600' : 'text-rose-600'}`}>
-                      {m.type === 'SUPPLY' ? '+' : '−'}
-                      {brl(m.amount)}
+          {data.movements.map((m) => {
+            // Movimentações geradas por baixa/estorno do Financeiro (ver
+            // routes/financial.ts) não podem ser editadas/excluídas por aqui —
+            // apagar a CashTransaction sem reabrir o título quebraria a
+            // conciliação entre Caixa e Financeiro. O backend já bloqueia
+            // (PUT/DELETE /cash/transactions/:id); isso só esconde os ícones.
+            const isSystemic =
+              m.kind === 'TRANSACTION' &&
+              (m.description?.startsWith('Baixa:') || m.description?.startsWith('Estorno'));
+            return (
+              <li
+                key={`${m.kind}-${m.id}`}
+                className="flex items-center justify-between rounded-lg px-3 py-2 text-sm odd:bg-slate-50"
+              >
+                {m.kind === 'SALE' ? (
+                  <>
+                    <span className="flex items-center gap-2 text-slate-600">
+                      <Receipt className="h-4 w-4 text-brand-500" />
+                      Venda · {methodLabel[m.paymentMethod ?? ''] ?? m.paymentMethod}
+                      {m.client && <span className="text-slate-400">· {m.client}</span>}
                     </span>
-                    {canEdit && (
-                      <span className="flex gap-0.5">
-                        <button
-                          className="grid h-7 w-7 place-items-center rounded text-slate-400 hover:bg-brand-50 hover:text-brand-600"
-                          onClick={() => setEditing(m)}
-                          title="Editar"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          className="grid h-7 w-7 place-items-center rounded text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-                          onClick={() => {
-                            if (window.confirm('Excluir esta movimentação?')) remove.mutate(m.id);
-                          }}
-                          title="Excluir"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                    <span className="font-semibold text-emerald-600">+{brl(m.amount)}</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="flex items-center gap-2">
+                      {m.type === 'SUPPLY' ? (
+                        <PlusCircle className="h-4 w-4 text-emerald-600" />
+                      ) : (
+                        <MinusCircle className="h-4 w-4 text-rose-600" />
+                      )}
+                      {m.description}
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <span className={`font-semibold ${m.type === 'SUPPLY' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        {m.type === 'SUPPLY' ? '+' : '−'}
+                        {brl(m.amount)}
                       </span>
-                    )}
-                  </span>
-                </>
-              )}
-            </li>
-          ))}
+                      {canEdit && isSystemic && (
+                        <span
+                          className="grid h-7 w-7 place-items-center text-slate-300"
+                          title="Estorno deve ser feito pelo módulo Financeiro"
+                        >
+                          <Lock className="h-3.5 w-3.5" />
+                        </span>
+                      )}
+                      {canEdit && !isSystemic && (
+                        <span className="flex gap-0.5">
+                          <button
+                            className="grid h-7 w-7 place-items-center rounded text-slate-400 hover:bg-brand-50 hover:text-brand-600"
+                            onClick={() => setEditing(m)}
+                            title="Editar"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            className="grid h-7 w-7 place-items-center rounded text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                            onClick={() => {
+                              if (window.confirm('Excluir esta movimentação?')) remove.mutate(m.id);
+                            }}
+                            title="Excluir"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </span>
+                      )}
+                    </span>
+                  </>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
 

@@ -9,7 +9,7 @@ import {
 } from '@exodus/shared';
 import { prisma } from '../lib/prisma.js';
 import { serializeDecimals, toMoney } from '../lib/serialize.js';
-import { BusinessError, ForbiddenError, NotFoundError } from '../lib/errors.js';
+import { AppError, BusinessError, ForbiddenError, NotFoundError } from '../lib/errors.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 
@@ -331,6 +331,12 @@ export async function cashRoutes(app: FastifyInstance) {
         include: { cashRegister: true },
       });
       if (!tx) throw new NotFoundError('Movimentação');
+      if (tx.description.startsWith('Baixa:') || tx.description.startsWith('Estorno')) {
+        throw new AppError(
+          400,
+          'Movimentações geradas por Vendas ou pelo Financeiro não podem ser alteradas no Caixa. Realize o estorno no módulo de origem.',
+        );
+      }
       if (tx.cashRegister.status !== 'OPEN') {
         throw new BusinessError('Caixa fechado não pode ser alterado');
       }
@@ -349,6 +355,12 @@ export async function cashRoutes(app: FastifyInstance) {
         include: { cashRegister: true },
       });
       if (!tx) throw new NotFoundError('Movimentação');
+      if (tx.description.startsWith('Baixa:') || tx.description.startsWith('Estorno')) {
+        throw new AppError(
+          400,
+          'Movimentações geradas por Vendas ou pelo Financeiro não podem ser alteradas no Caixa. Realize o estorno no módulo de origem.',
+        );
+      }
       if (tx.cashRegister.status !== 'OPEN') {
         throw new BusinessError('Caixa fechado não pode ser alterado');
       }
