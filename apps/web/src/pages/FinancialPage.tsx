@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowDownCircle,
@@ -13,6 +14,9 @@ import {
   RotateCcw,
   Filter,
   Landmark,
+  ChevronLeft,
+  ChevronRight,
+  ArrowUp,
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 
@@ -43,8 +47,6 @@ interface Account {
   person?: { name: string } | null;
 }
 
-const PAGE_SIZE = 50;
-
 export function FinancialPage() {
   const qc = useQueryClient();
   const [type, setType] = useState<AccountType>('PAYABLE');
@@ -56,11 +58,12 @@ export function FinancialPage() {
   const [orderDir, setOrderDir] = useState<OrderDir>('asc');
   const [showFilters, setShowFilters] = useState(false);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Account | null>(null);
   const [settling, setSettling] = useState<Account | null>(null);
 
-  // Troca de filtro/tipo/ordenação volta para a primeira página.
+  // Troca de filtro/tipo/ordenação/tamanho de página volta para a primeira página.
   const changeType = (t: AccountType) => { setType(t); setPage(1); };
   const changeSearch = (v: string) => { setSearch(v); setPage(1); };
   const changeDueFrom = (v: string) => { setDueFrom(v); setPage(1); };
@@ -68,14 +71,15 @@ export function FinancialPage() {
   const changeStatusFilter = (v: StatusFilter) => { setStatusFilter(v); setPage(1); };
   const changeOrderBy = (v: OrderBy) => { setOrderBy(v); setPage(1); };
   const changeOrderDir = (v: OrderDir) => { setOrderDir(v); setPage(1); };
+  const changePageSize = (v: number) => { setPageSize(v); setPage(1); };
 
   const { data, isLoading } = useQuery({
-    queryKey: ['financial', type, search, dueFrom, dueTo, statusFilter, orderBy, orderDir, page],
+    queryKey: ['financial', type, search, dueFrom, dueTo, statusFilter, orderBy, orderDir, page, pageSize],
     queryFn: () => {
       const qs = new URLSearchParams({
         type,
         page: String(page),
-        pageSize: String(PAGE_SIZE),
+        pageSize: String(pageSize),
         statusFilter,
         orderBy,
         orderDir,
@@ -88,7 +92,7 @@ export function FinancialPage() {
   });
 
   const total = data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['financial'] });
 
@@ -313,21 +317,40 @@ export function FinancialPage() {
             </tbody>
           </table>
         </div>
-        {total > PAGE_SIZE && (
-          <div className="mt-3 flex items-center justify-between text-sm">
-            <span className="text-slate-500">
-              {total} título(s) · página {page} de {totalPages}
-            </span>
-            <div className="flex gap-2">
-              <button className="btn-ghost" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
-                Anterior
-              </button>
+        {data && data.items.length > 0 && (
+          <div className="mt-4 flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <label className="flex items-center gap-2 text-sm text-slate-500">
+              Linhas por página
+              <select
+                className="input h-9 w-auto py-1"
+                value={String(pageSize)}
+                onChange={(e) => changePageSize(Number(e.target.value))}
+              >
+                <option value="10">10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </label>
+
+            <div className="flex items-center gap-3 text-sm">
               <button
-                className="btn-ghost"
+                className="btn-ghost h-9 px-3"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                <ChevronLeft className="h-4 w-4" /> Anterior
+              </button>
+              <span className="text-slate-500">
+                Página <span className="font-semibold text-slate-700">{page}</span> de{' '}
+                <span className="font-semibold text-slate-700">{totalPages}</span>
+              </span>
+              <button
+                className="btn-ghost h-9 px-3"
                 disabled={page >= totalPages}
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               >
-                Próxima
+                Próximo <ChevronRight className="h-4 w-4" />
               </button>
             </div>
           </div>
@@ -344,7 +367,42 @@ export function FinancialPage() {
       {settling && (
         <SettleModal account={settling} onClose={() => setSettling(null)} onDone={() => { setSettling(null); invalidate(); }} />
       )}
+
+      <ScrollToTopButton />
     </div>
+  );
+}
+
+// Botão flutuante "Voltar ao topo" — Dark Glassmorphism (mesmo padrão de
+// RegistrationsPage.tsx). Ejetado via createPortal(..., document.body): o
+// `animate-fade-in` do Layout.tsx deixa um `transform` persistente no wrapper
+// de rota, virando containing block e quebrando `position: fixed` em
+// descendentes (o botão desceria junto com a lista em vez de ficar ancorado
+// no viewport).
+function ScrollToTopButton() {
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const [hover, setHover] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setShowScrollTop(window.scrollY > 300);
+    window.addEventListener('scroll', onScroll);
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  return createPortal(
+    <button
+      className={`fixed right-4 bottom-24 md:bottom-8 md:right-8 z-50 backdrop-blur-md transition-all duration-500 shadow-xl rounded-full p-3 flex items-center justify-center ${
+        showScrollTop ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 -translate-y-12 pointer-events-none'
+      }`}
+      style={{ backgroundColor: hover ? 'rgba(30, 41, 59, 0.9)' : 'rgba(30, 41, 59, 0.6)', color: 'white' }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+      title="Voltar ao topo"
+    >
+      <ArrowUp className="w-6 h-6" />
+    </button>,
+    document.body,
   );
 }
 
