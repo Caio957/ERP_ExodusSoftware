@@ -87,6 +87,10 @@ interface SalesFilterValues {
   financeStatus: 'ALL' | 'GENERATED' | 'NOT_GENERATED';
   hasDiscount: 'ALL' | 'YES' | 'NO';
   hasAddition: 'ALL' | 'YES' | 'NO';
+  startDate: string;
+  endDate: string;
+  sortField: 'code' | 'date' | 'items';
+  sortDir: 'asc' | 'desc';
 }
 
 const EMPTY_SALES_FILTERS: SalesFilterValues = {
@@ -97,6 +101,10 @@ const EMPTY_SALES_FILTERS: SalesFilterValues = {
   financeStatus: 'ALL',
   hasDiscount: 'ALL',
   hasAddition: 'ALL',
+  startDate: '',
+  endDate: '',
+  sortField: 'date',
+  sortDir: 'desc',
 };
 
 export function SalesPage() {
@@ -117,14 +125,18 @@ export function SalesPage() {
   });
 
   // Filtro avançado 100% client-side: código/cliente, forma de pagamento, faixa de
-  // valor, status do financeiro, presença de desconto e de acréscimo — combinados.
+  // valor, status do financeiro, presença de desconto e de acréscimo, período de
+  // data — combinados; ao final, ordenação por código/data/qtd. de itens.
   const filteredSales = useMemo(() => {
     const items = data?.items ?? [];
     const term = filterValues.search.trim().replace(/^#/, '').toLowerCase();
     const min = filterValues.minTotal.trim() ? parseFloat(filterValues.minTotal.replace(',', '.')) : null;
     const max = filterValues.maxTotal.trim() ? parseFloat(filterValues.maxTotal.replace(',', '.')) : null;
+    // T23:59:59 no fim garante cobrir o dia inteiro da data final selecionada.
+    const startTs = filterValues.startDate ? new Date(`${filterValues.startDate}T00:00:00`).getTime() : null;
+    const endTs = filterValues.endDate ? new Date(`${filterValues.endDate}T23:59:59`).getTime() : null;
 
-    return items.filter((s) => {
+    const filtered = items.filter((s) => {
       if (term) {
         const matchesCode = String(s.code).includes(term);
         const matchesClient = (s.client?.name ?? 'Balcão').toLowerCase().includes(term);
@@ -139,7 +151,17 @@ export function SalesPage() {
       if (filterValues.hasDiscount === 'NO' && s.discount > 0) return false;
       if (filterValues.hasAddition === 'YES' && !(s.surcharge > 0)) return false;
       if (filterValues.hasAddition === 'NO' && s.surcharge > 0) return false;
+      if (startTs !== null && new Date(s.soldAt).getTime() < startTs) return false;
+      if (endTs !== null && new Date(s.soldAt).getTime() > endTs) return false;
       return true;
+    });
+
+    return filtered.sort((a, b) => {
+      let cmp = 0;
+      if (filterValues.sortField === 'code') cmp = a.code - b.code;
+      else if (filterValues.sortField === 'items') cmp = a.items.length - b.items.length;
+      else cmp = new Date(a.soldAt).getTime() - new Date(b.soldAt).getTime();
+      return filterValues.sortDir === 'desc' ? -cmp : cmp;
     });
   }, [data, filterValues]);
 
@@ -150,6 +172,8 @@ export function SalesPage() {
     filterValues.financeStatus !== 'ALL',
     filterValues.hasDiscount !== 'ALL',
     filterValues.hasAddition !== 'ALL',
+    filterValues.startDate.trim() !== '',
+    filterValues.endDate.trim() !== '',
   ].filter(Boolean).length;
 
   // Paginação client-side (padrão Tray) — evita DOM overload em listas grandes.
@@ -304,6 +328,47 @@ export function SalesPage() {
                 <option value="ALL">Todos</option>
                 <option value="YES">Com acréscimo</option>
                 <option value="NO">Sem acréscimo</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="label">Data inicial</span>
+              <input
+                type="date"
+                className="input"
+                value={filterValues.startDate}
+                onChange={(e) => updateFilter('startDate', e.target.value)}
+              />
+            </label>
+            <label className="block">
+              <span className="label">Data final</span>
+              <input
+                type="date"
+                className="input"
+                value={filterValues.endDate}
+                onChange={(e) => updateFilter('endDate', e.target.value)}
+              />
+            </label>
+            <label className="block">
+              <span className="label">Ordenar por</span>
+              <select
+                className="input"
+                value={filterValues.sortField}
+                onChange={(e) => updateFilter('sortField', e.target.value as SalesFilterValues['sortField'])}
+              >
+                <option value="code">Nº DOC</option>
+                <option value="date">Data</option>
+                <option value="items">Itens</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="label">Ordem</span>
+              <select
+                className="input"
+                value={filterValues.sortDir}
+                onChange={(e) => updateFilter('sortDir', e.target.value as SalesFilterValues['sortDir'])}
+              >
+                <option value="asc">Crescente</option>
+                <option value="desc">Decrescente</option>
               </select>
             </label>
           </div>
