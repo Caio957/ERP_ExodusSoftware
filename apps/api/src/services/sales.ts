@@ -105,7 +105,7 @@ export async function createSale(input: CreateSaleInput, userId: string) {
         await tx.financialAccount.createMany({
           data: installments.map((inst, i) => ({
             type: 'RECEIVABLE',
-            description: `Venda a prazo ${i + 1}/${installments.length}`,
+            description: `Venda #${created.code} - Parcela ${i + 1}/${installments.length}`,
             amount: inst.amount,
             dueDate: inst.dueDate,
             status: 'PENDING',
@@ -236,7 +236,7 @@ export async function updateSale(saleId: string, input: UpdateSaleInput) {
       await tx.financialAccount.createMany({
         data: installments.map((inst, i) => ({
           type: 'RECEIVABLE',
-          description: `Venda a prazo ${i + 1}/${installments.length}`,
+          description: `Venda #${old.code} - Parcela ${i + 1}/${installments.length}`,
           amount: inst.amount,
           dueDate: inst.dueDate,
           status: 'PENDING',

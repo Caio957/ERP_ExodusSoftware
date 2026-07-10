@@ -200,7 +200,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
         const financialRows = customInstallments?.length
           ? customInstallments.map((inst, i) => ({
               type: 'PAYABLE' as const,
-              description: `NF ${accessKey.slice(-6)} - parcela ${i + 1}/${customInstallments.length}`,
+              description: `Compra #${documentNumber} - Parcela ${i + 1}/${customInstallments.length}`,
               amount: inst.amount,
               dueDate: inst.dueDate,
               status: 'PENDING',
@@ -209,7 +209,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
             }))
           : duplicates.map((d) => ({
               type: 'PAYABLE' as const,
-              description: `NF ${accessKey.slice(-6)} - dup ${d.number ?? ''}`.trim(),
+              description: `Compra #${documentNumber} - Dup ${d.number ?? ''}`.trim(),
               amount: d.amount,
               dueDate: d.dueDate,
               status: 'PENDING',
@@ -315,7 +315,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
           await tx.financialAccount.createMany({
             data: installments.map((inst, i) => ({
               type: 'PAYABLE',
-              description: `Compra #${documentNumber} - parcela ${i + 1}/${installments.length}`,
+              description: `Compra #${documentNumber} - Parcela ${i + 1}/${installments.length}`,
               amount: inst.amount,
               dueDate: inst.dueDate,
               status: 'PENDING',
@@ -472,7 +472,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
           await tx.financialAccount.createMany({
             data: installments.map((inst, i) => ({
               type: 'PAYABLE',
-              description: `Compra #${invoice.documentNumber ?? invoice.id.slice(-6)} - parcela ${i + 1}/${installments.length}`,
+              description: `Compra #${invoice.documentNumber ?? invoice.id.slice(-6)} - Parcela ${i + 1}/${installments.length}`,
               amount: inst.amount,
               dueDate: inst.dueDate,
               status: 'PENDING',
@@ -588,7 +588,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
       await prisma.financialAccount.createMany({
         data: installments.map((inst, i) => ({
           type: 'PAYABLE',
-          description: `Compra #${invoice.documentNumber ?? invoice.id.slice(-6)} - parcela ${i + 1}/${installments.length}`,
+          description: `Compra #${invoice.documentNumber ?? invoice.id.slice(-6)} - Parcela ${i + 1}/${installments.length}`,
           amount: inst.amount,
           dueDate: inst.dueDate,
           status: 'PENDING',

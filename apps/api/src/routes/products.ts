@@ -211,8 +211,16 @@ export async function productRoutes(app: FastifyInstance) {
           data: { stockQty: newQuantity },
         });
         if (diff !== 0) {
+          // Código sequencial só dos acertos (type='ADJUST') — StockMovement é
+          // um razão compartilhado com vendas/notas, então não dá pra usar um
+          // autoincrement de banco sem misturar a numeração com outros tipos.
+          const last = await tx.stockMovement.aggregate({
+            _max: { code: true },
+            where: { type: 'ADJUST' },
+          });
+          const code = (last._max.code ?? 0) + 1;
           await tx.stockMovement.create({
-            data: { variantId, type: 'ADJUST', quantity: diff, reason: `ADJUST: ${reason}` },
+            data: { variantId, type: 'ADJUST', quantity: diff, reason: `ADJUST: ${reason}`, code },
           });
         }
         return v;
@@ -231,6 +239,7 @@ export async function productRoutes(app: FastifyInstance) {
     });
     return movements.map((m) => ({
       id: m.id,
+      code: m.code,
       variantId: m.variantId,
       quantity: m.quantity, // diferença aplicada (+/-)
       reason: m.reason.replace(/^ADJUST:\s*/, ''),

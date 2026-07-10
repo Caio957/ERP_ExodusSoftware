@@ -9,7 +9,20 @@ import {
   priceFromMarkup,
   type ProductFormSettings,
 } from '@exodus/shared';
-import { Plus, Search, Package, Tag, Pencil, Trash2, X, ShieldCheck, Filter } from 'lucide-react';
+import {
+  Plus,
+  Search,
+  Package,
+  Tag,
+  Pencil,
+  Trash2,
+  X,
+  ShieldCheck,
+  Filter,
+  ChevronLeft,
+  ChevronRight,
+  ArrowUp,
+} from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -38,6 +51,7 @@ interface Product {
 }
 interface ProductList {
   items: Product[];
+  total: number;
 }
 
 export function ProductsPage() {
@@ -52,10 +66,21 @@ export function ProductsPage() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
 
+  // Paginação client-driven (padrão Tray, mesmo motor de Vendas/Financeiro/
+  // Compras) — o backend já pagina de verdade (skip/take + total), só faltava
+  // o front pedir a página certa em vez do pageSize fixo em 100.
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
+
   const { data, isLoading } = useQuery({
-    queryKey: ['products', search, brand, group, subgroup, orderBy, orderDir],
+    queryKey: ['products', search, brand, group, subgroup, orderBy, orderDir, currentPage, itemsPerPage],
     queryFn: () => {
-      const qs = new URLSearchParams({ pageSize: '100', orderBy, orderDir });
+      const qs = new URLSearchParams({
+        page: String(currentPage),
+        pageSize: String(itemsPerPage),
+        orderBy,
+        orderDir,
+      });
       if (search.trim()) qs.set('search', search.trim());
       if (brand.trim()) qs.set('brand', brand.trim());
       if (group.trim()) qs.set('group', group.trim());
@@ -63,6 +88,19 @@ export function ProductsPage() {
       return api.get<ProductList>(`/api/products?${qs.toString()}`);
     },
   });
+
+  // Filtro/ordenação/tamanho de página mudou → volta pra primeira página (o
+  // recorte antigo pode não existir mais).
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, brand, group, subgroup, orderBy, orderDir, itemsPerPage]);
+
+  const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / itemsPerPage));
+
+  // Rede de segurança: se totalPages encolher (novo filtro/pageSize), evita página fantasma.
+  useEffect(() => {
+    setCurrentPage((p) => Math.min(p, totalPages));
+  }, [totalPages]);
 
   const remove = useMutation({
     mutationFn: (id: string) => api.del(`/api/products/${id}`),
@@ -222,6 +260,45 @@ export function ProductsPage() {
         </div>
       )}
 
+      {data && data.items.length > 0 && (
+        <div className="flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <label className="flex items-center gap-2 text-sm text-slate-500">
+            Linhas por página
+            <select
+              className="input h-9 w-auto py-1"
+              value={String(itemsPerPage)}
+              onChange={(e) => setItemsPerPage(Number(e.target.value))}
+            >
+              <option value="10">10</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </label>
+
+          <div className="flex items-center gap-3 text-sm">
+            <button
+              className="btn-ghost h-9 px-3"
+              disabled={currentPage <= 1}
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            >
+              <ChevronLeft className="h-4 w-4" /> Anterior
+            </button>
+            <span className="text-slate-500">
+              Página <span className="font-semibold text-slate-700">{currentPage}</span> de{' '}
+              <span className="font-semibold text-slate-700">{totalPages}</span>
+            </span>
+            <button
+              className="btn-ghost h-9 px-3"
+              disabled={currentPage >= totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Próximo <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {showForm && (
         <ProductForm
           onClose={() => setShowForm(false)}
@@ -242,7 +319,41 @@ export function ProductsPage() {
           }}
         />
       )}
+
+      <ScrollToTopButton />
     </div>
+  );
+}
+
+// Botão flutuante "Voltar ao topo" — Dark Glassmorphism (mesmo padrão de
+// RegistrationsPage.tsx/FinancialPage.tsx). Ejetado via createPortal(...,
+// document.body): o `animate-fade-in` do Layout.tsx deixa um `transform`
+// persistente no wrapper de rota, virando containing block e quebrando
+// `position: fixed` em descendentes.
+function ScrollToTopButton() {
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const [hover, setHover] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setShowScrollTop(window.scrollY > 300);
+    window.addEventListener('scroll', onScroll);
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  return createPortal(
+    <button
+      className={`fixed right-4 bottom-24 md:bottom-8 md:right-8 z-50 backdrop-blur-md transition-all duration-500 shadow-xl rounded-full p-3 flex items-center justify-center ${
+        showScrollTop ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 -translate-y-12 pointer-events-none'
+      }`}
+      style={{ backgroundColor: hover ? 'rgba(30, 41, 59, 0.9)' : 'rgba(30, 41, 59, 0.6)', color: 'white' }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+      title="Voltar ao topo"
+    >
+      <ArrowUp className="w-6 h-6" />
+    </button>,
+    document.body,
   );
 }
 

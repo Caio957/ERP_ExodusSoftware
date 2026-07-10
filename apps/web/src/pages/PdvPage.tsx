@@ -155,6 +155,52 @@ export function PdvPage() {
   const discountPct = subtotal > 0 ? round2((discount / subtotal) * 100) : 0;
   const surchargePct = subtotal > 0 ? round2((surcharge / subtotal) * 100) : 0;
 
+  // Trava de navegação: carrinho com item pendente não pode ser perdido por
+  // acidente. `resetSale()` já zera o carrinho após finalizar a venda, então
+  // isso nunca bloqueia a navegação pós-venda.
+  const hasUnsavedChanges = cart.length > 0;
+
+  // Refresh / fechar aba / digitar outra URL — prompt nativo do navegador.
+  useEffect(() => {
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  // Navegação interna (menu lateral, bottom nav, drawer): este projeto usa
+  // <BrowserRouter> "clássico" (App.tsx), não createBrowserRouter/RouterProvider
+  // — o hook useBlocker do react-router-dom só funciona com um "data router"
+  // e lançaria em runtime ("useBlocker must be used within a data router").
+  // Migrar o roteamento do app inteiro para desbloquear um hook está fora do
+  // escopo desta trava, então interceptamos o clique nos links de navegação
+  // (todos renderizados como <a href> pelo <NavLink> em Layout.tsx) em fase de
+  // captura do document — chega antes do handler de clique do próprio React
+  // Router, então cancelar o evento aqui impede a navegação.
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    function handleClick(e: MouseEvent) {
+      const anchor = (e.target as HTMLElement | null)?.closest?.('a[href]');
+      if (!anchor) return;
+      const href = anchor.getAttribute('href');
+      if (!href || href.startsWith('#') || anchor.getAttribute('target') === '_blank') return;
+      if (href === window.location.pathname) return;
+      const confirmed = window.confirm(
+        'Você tem uma venda em andamento. Tem certeza que deseja sair e perder os dados?',
+      );
+      if (!confirmed) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }
+    document.addEventListener('click', handleClick, true);
+    return () => document.removeEventListener('click', handleClick, true);
+  }, [hasUnsavedChanges]);
+
   function flash(msg: string) {
     setToast(msg);
     window.setTimeout(() => setToast(null), 2200);
@@ -719,15 +765,21 @@ export function PdvPage() {
             </div>
 
             <footer className="shrink-0 space-y-2 border-t border-slate-200 bg-slate-50 p-4 rounded-b-xl">
+              {/* Botões travados enquanto uma impressão está em curso
+                  (`printMode !== null`) — a janela assíncrona de medição +
+                  window.print() (dois timeouts de 50ms) permitia cliques
+                  repetidos que engasgam o navegador do celular. */}
               <div className="grid grid-cols-2 gap-2">
                 <button
-                  className="btn-primary flex items-center justify-center gap-1.5 text-sm"
+                  className="btn-primary flex items-center justify-center gap-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={printMode !== null}
                   onClick={() => handlePrint('thermal')}
                 >
                   🖨️ Bobina (80mm)
                 </button>
                 <button
-                  className="btn-primary flex items-center justify-center gap-1.5 text-sm"
+                  className="btn-primary flex items-center justify-center gap-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={printMode !== null}
                   onClick={() => handlePrint('a4')}
                 >
                   📄 Papel A4
@@ -779,7 +831,12 @@ export function PdvPage() {
     )}
 
     {receiptData && printMode === 'a4' && createPortal(
-      <div id="a4-print-root" className="fixed top-[-9999px] left-[-9999px] w-full bg-white text-black">
+      // Largura fixa de 210mm (não `w-full`): no celular, `w-full` = largura do
+      // viewport (~360px) esmagava a folha A4 (o `maxWidth:100%` do template
+      // clampava a 210mm para a largura do celular), e o `@page A4` depois
+      // escalava esse layout esmagado — cupom quebrado. Ancorar em 210mm torna
+      // a renderização off-screen imune ao viewport.
+      <div id="a4-print-root" className="fixed top-[-9999px] left-[-9999px] w-[210mm] bg-white text-black">
         <div className="w-full max-w-[210mm] mx-auto bg-white">
           <SaleReceipt company={company ?? {}} sale={receiptData} format="a4" />
         </div>

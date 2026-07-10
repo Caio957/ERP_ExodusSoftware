@@ -7,16 +7,38 @@ import {
   createInstallmentsSchema,
   updateFinancialAccountSchema,
   settleAccountSchema,
-  paginationQuery,
-  FinancialAccountType,
-  FinancialAccountStatus,
+  listFinancialQuerySchema,
 } from '@exodus/shared';
 import { prisma } from '../lib/prisma.js';
 import { serializeDecimals } from '../lib/serialize.js';
-import { BusinessError, NotFoundError } from '../lib/errors.js';
+import { AppError, BusinessError, NotFoundError } from '../lib/errors.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+/**
+ * Meia-noite de hoje no horário da loja (America/Sao_Paulo, UTC-3) — não usa
+ * `new Date().setHours(0,0,0,0)` porque em produção (Railway) o processo roda
+ * em UTC, não no fuso da loja; mesmo raciocínio já documentado em
+ * `routes/cash.ts` (relatório periódico).
+ */
+function todayStartBr(): Date {
+  const localDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+  return new Date(`${localDateStr}T00:00:00.000-03:00`);
+}
+
+/**
+ * Garante que o operador logado tem um caixa aberto antes de mexer em dinheiro
+ * (baixa/estorno) — sem caixa aberto não há onde registrar a `CashTransaction`
+ * de compensação.
+ */
+async function requireOpenRegister(tx: Prisma.TransactionClient, userId: string) {
+  const register = await tx.cashRegister.findFirst({ where: { userId, status: 'OPEN' } });
+  if (!register) {
+    throw new AppError(400, 'É necessário ter um caixa aberto para realizar baixas financeiras.');
+  }
+  return register;
+}
 
 export async function financialRoutes(app: FastifyInstance) {
   const r = app.withTypeProvider<ZodTypeProvider>();
@@ -48,18 +70,28 @@ export async function financialRoutes(app: FastifyInstance) {
     '/',
     {
       preHandler: app.authorize(['ADMIN']),
-      schema: {
-        querystring: paginationQuery.extend({
-          type: FinancialAccountType.optional(),
-          status: FinancialAccountStatus.optional(),
-          personId: z.string().uuid().optional(),
-          dueFrom: z.coerce.date().optional(),
-          dueTo: z.coerce.date().optional(),
-        }),
-      },
+      schema: { querystring: listFinancialQuerySchema },
     },
     async (req) => {
-      const { page, pageSize, type, status, personId, search, dueFrom, dueTo } = req.query;
+      const { page, pageSize, type, status, personId, search, dueFrom, dueTo, orderBy, orderDir, statusFilter } =
+        req.query;
+
+      // `statusFilter` é semântico (Abertos/Vencidos/A Vencer/Parcial/Quitado) e,
+      // quando diferente de 'ALL', tem precedência sobre `status`/dueFrom/dueTo
+      // simples no cálculo do status/vencimento.
+      const statusFilterWhere: Prisma.FinancialAccountWhereInput =
+        statusFilter === 'PAID'
+          ? { status: 'PAID' }
+          : statusFilter === 'PARTIAL'
+            ? { status: 'PARTIAL' }
+            : statusFilter === 'OPEN'
+              ? { status: { in: ['PENDING', 'PARTIAL'] } }
+              : statusFilter === 'OVERDUE'
+                ? { status: { in: ['PENDING', 'PARTIAL'] }, dueDate: { lt: todayStartBr() } }
+                : statusFilter === 'NOT_OVERDUE'
+                  ? { status: { in: ['PENDING', 'PARTIAL'] }, dueDate: { gte: todayStartBr() } }
+                  : {};
+
       const where: Prisma.FinancialAccountWhereInput = {
         ...(type ? { type } : {}),
         ...(status ? { status } : {}),
@@ -75,15 +107,28 @@ export async function financialRoutes(app: FastifyInstance) {
         ...(dueFrom || dueTo
           ? { dueDate: { ...(dueFrom ? { gte: dueFrom } : {}), ...(dueTo ? { lte: dueTo } : {}) } }
           : {}),
+        ...statusFilterWhere,
         // Oculta contas a receber de vendas com o financeiro excluído.
         AND: [{ OR: [{ saleId: null }, { sale: { financialGenerated: true } }] }],
       };
+
+      // Mapeia o campo de ordenação pedido pela tela para a coluna real do
+      // banco; desempate por código quando a ordenação não é pelo próprio código.
+      const orderByMap: Record<typeof orderBy, Prisma.FinancialAccountOrderByWithRelationInput> = {
+        code: { code: orderDir },
+        description: { description: orderDir },
+        dueDate: { dueDate: orderDir },
+        amount: { amount: orderDir },
+      };
+      const orderByClauses: Prisma.FinancialAccountOrderByWithRelationInput[] = [orderByMap[orderBy]];
+      if (orderBy !== 'code') orderByClauses.push({ code: 'asc' });
+
       const [total, items] = await Promise.all([
         prisma.financialAccount.count({ where }),
         prisma.financialAccount.findMany({
           where,
           include: { person: true, settlements: true },
-          orderBy: [{ dueDate: 'asc' }, { code: 'asc' }],
+          orderBy: orderByClauses,
           skip: (page - 1) * pageSize,
           take: pageSize,
         }),
@@ -146,6 +191,8 @@ export async function financialRoutes(app: FastifyInstance) {
     { preHandler: app.authorize(['ADMIN']), schema: { params: idParam, body: settleAccountSchema } },
     async (req) => {
       return prisma.$transaction(async (tx) => {
+        const openRegister = await requireOpenRegister(tx, req.user.sub);
+
         const account = await tx.financialAccount.findUnique({
           where: { id: req.params.id },
           include: { settlements: true },
@@ -162,6 +209,17 @@ export async function financialRoutes(app: FastifyInstance) {
 
         await tx.accountSettlement.create({
           data: { financialAccountId: account.id, amount: valor, paidAt: req.body.paidAt },
+        });
+
+        // Reflete a baixa no caixa aberto: recebimento (RECEIVABLE) entra como
+        // suprimento; pagamento (PAYABLE) sai como sangria.
+        await tx.cashTransaction.create({
+          data: {
+            cashRegisterId: openRegister.id,
+            type: account.type === 'RECEIVABLE' ? 'SUPPLY' : 'BLEED',
+            amount: valor,
+            description: `Baixa: ${account.description}`,
+          },
         });
 
         const newPaid = round2(paid + valor);
@@ -182,6 +240,8 @@ export async function financialRoutes(app: FastifyInstance) {
     { preHandler: app.authorize(['ADMIN']), schema: { params: idParam } },
     async (req) => {
       return prisma.$transaction(async (tx) => {
+        const openRegister = await requireOpenRegister(tx, req.user.sub);
+
         const account = await tx.financialAccount.findUnique({
           where: { id: req.params.id },
           include: { settlements: { orderBy: { createdAt: 'desc' } } },
@@ -191,6 +251,19 @@ export async function financialRoutes(app: FastifyInstance) {
         if (!last) throw new BusinessError('Não há baixa para estornar');
 
         await tx.accountSettlement.delete({ where: { id: last.id } });
+
+        // Compensação inversa da baixa: estornar um recebimento (RECEIVABLE)
+        // tira o dinheiro do caixa (sangria); estornar um pagamento (PAYABLE)
+        // devolve o dinheiro ao caixa (suprimento).
+        await tx.cashTransaction.create({
+          data: {
+            cashRegisterId: openRegister.id,
+            type: account.type === 'RECEIVABLE' ? 'BLEED' : 'SUPPLY',
+            amount: Number(last.amount),
+            description: `Estorno de Baixa: ${account.description}`,
+          },
+        });
+
         const remaining = account.settlements.slice(1).reduce((a, s) => a + Number(s.amount), 0);
         const updated = await tx.financialAccount.update({
           where: { id: account.id },

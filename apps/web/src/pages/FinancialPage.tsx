@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowDownCircle,
@@ -13,6 +14,9 @@ import {
   RotateCcw,
   Filter,
   Landmark,
+  ChevronLeft,
+  ChevronRight,
+  ArrowUp,
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 
@@ -24,7 +28,20 @@ const today0 = () => {
   return d;
 };
 
+// Padrão BR de vírgula decimal (mesmo helper usado em PDV/Vendas/Produtos/Compras).
+function sanitizeBr(s: string): string {
+  let v = s.replace(/\./g, ',');
+  v = v.replace(/[^\d,]/g, '');
+  v = v.replace(/^,/, '');
+  const parts = v.split(',');
+  if (parts.length > 1) v = parts[0] + ',' + parts.slice(1).join('');
+  return v.replace(/^0+(?=\d)/, '');
+}
+
 type AccountType = 'PAYABLE' | 'RECEIVABLE';
+type StatusFilter = 'ALL' | 'OPEN' | 'OVERDUE' | 'NOT_OVERDUE' | 'PARTIAL' | 'PAID';
+type OrderBy = 'code' | 'description' | 'dueDate' | 'amount';
+type OrderDir = 'asc' | 'desc';
 
 interface Account {
   id: string;
@@ -40,30 +57,43 @@ interface Account {
   person?: { name: string } | null;
 }
 
-const PAGE_SIZE = 50;
-
 export function FinancialPage() {
   const qc = useQueryClient();
   const [type, setType] = useState<AccountType>('PAYABLE');
   const [search, setSearch] = useState('');
   const [dueFrom, setDueFrom] = useState('');
   const [dueTo, setDueTo] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
+  const [orderBy, setOrderBy] = useState<OrderBy>('dueDate');
+  const [orderDir, setOrderDir] = useState<OrderDir>('asc');
   const [showFilters, setShowFilters] = useState(false);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Account | null>(null);
   const [settling, setSettling] = useState<Account | null>(null);
 
-  // Troca de filtro/tipo volta para a primeira página.
+  // Troca de filtro/tipo/ordenação/tamanho de página volta para a primeira página.
   const changeType = (t: AccountType) => { setType(t); setPage(1); };
   const changeSearch = (v: string) => { setSearch(v); setPage(1); };
   const changeDueFrom = (v: string) => { setDueFrom(v); setPage(1); };
   const changeDueTo = (v: string) => { setDueTo(v); setPage(1); };
+  const changeStatusFilter = (v: StatusFilter) => { setStatusFilter(v); setPage(1); };
+  const changeOrderBy = (v: OrderBy) => { setOrderBy(v); setPage(1); };
+  const changeOrderDir = (v: OrderDir) => { setOrderDir(v); setPage(1); };
+  const changePageSize = (v: number) => { setPageSize(v); setPage(1); };
 
   const { data, isLoading } = useQuery({
-    queryKey: ['financial', type, search, dueFrom, dueTo, page],
+    queryKey: ['financial', type, search, dueFrom, dueTo, statusFilter, orderBy, orderDir, page, pageSize],
     queryFn: () => {
-      const qs = new URLSearchParams({ type, page: String(page), pageSize: String(PAGE_SIZE) });
+      const qs = new URLSearchParams({
+        type,
+        page: String(page),
+        pageSize: String(pageSize),
+        statusFilter,
+        orderBy,
+        orderDir,
+      });
       if (search.trim()) qs.set('search', search.trim());
       if (dueFrom) qs.set('dueFrom', dueFrom);
       if (dueTo) qs.set('dueTo', dueTo);
@@ -72,7 +102,7 @@ export function FinancialPage() {
   });
 
   const total = data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['financial'] });
 
@@ -140,7 +170,7 @@ export function FinancialPage() {
       </div>
 
       {showFilters && (
-        <div className="card grid animate-fade-in gap-3 sm:grid-cols-3">
+        <div className="card grid animate-fade-in gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
           <label className="block">
             <span className="label">Buscar (descrição/pessoa)</span>
             <div className="relative">
@@ -155,6 +185,33 @@ export function FinancialPage() {
           <label className="block">
             <span className="label">Vencimento até</span>
             <input className="input" type="date" value={dueTo} onChange={(e) => changeDueTo(e.target.value)} />
+          </label>
+          <label className="block">
+            <span className="label">Status</span>
+            <select className="input" value={statusFilter} onChange={(e) => changeStatusFilter(e.target.value as StatusFilter)}>
+              <option value="ALL">Todos</option>
+              <option value="OPEN">Abertos</option>
+              <option value="OVERDUE">Vencidos</option>
+              <option value="NOT_OVERDUE">A Vencer</option>
+              <option value="PARTIAL">Quitados Parcialmente</option>
+              <option value="PAID">Quitados</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="label">Ordenar por</span>
+            <select className="input" value={orderBy} onChange={(e) => changeOrderBy(e.target.value as OrderBy)}>
+              <option value="code">Código</option>
+              <option value="description">Descrição</option>
+              <option value="dueDate">Vencimento</option>
+              <option value="amount">Valor</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="label">Ordem</span>
+            <select className="input" value={orderDir} onChange={(e) => changeOrderDir(e.target.value as OrderDir)}>
+              <option value="asc">Crescente</option>
+              <option value="desc">Decrescente</option>
+            </select>
           </label>
         </div>
       )}
@@ -270,21 +327,40 @@ export function FinancialPage() {
             </tbody>
           </table>
         </div>
-        {total > PAGE_SIZE && (
-          <div className="mt-3 flex items-center justify-between text-sm">
-            <span className="text-slate-500">
-              {total} título(s) · página {page} de {totalPages}
-            </span>
-            <div className="flex gap-2">
-              <button className="btn-ghost" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
-                Anterior
-              </button>
+        {data && data.items.length > 0 && (
+          <div className="mt-4 flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <label className="flex items-center gap-2 text-sm text-slate-500">
+              Linhas por página
+              <select
+                className="input h-9 w-auto py-1"
+                value={String(pageSize)}
+                onChange={(e) => changePageSize(Number(e.target.value))}
+              >
+                <option value="10">10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </label>
+
+            <div className="flex items-center gap-3 text-sm">
               <button
-                className="btn-ghost"
+                className="btn-ghost h-9 px-3"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                <ChevronLeft className="h-4 w-4" /> Anterior
+              </button>
+              <span className="text-slate-500">
+                Página <span className="font-semibold text-slate-700">{page}</span> de{' '}
+                <span className="font-semibold text-slate-700">{totalPages}</span>
+              </span>
+              <button
+                className="btn-ghost h-9 px-3"
                 disabled={page >= totalPages}
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               >
-                Próxima
+                Próximo <ChevronRight className="h-4 w-4" />
               </button>
             </div>
           </div>
@@ -301,7 +377,42 @@ export function FinancialPage() {
       {settling && (
         <SettleModal account={settling} onClose={() => setSettling(null)} onDone={() => { setSettling(null); invalidate(); }} />
       )}
+
+      <ScrollToTopButton />
     </div>
+  );
+}
+
+// Botão flutuante "Voltar ao topo" — Dark Glassmorphism (mesmo padrão de
+// RegistrationsPage.tsx). Ejetado via createPortal(..., document.body): o
+// `animate-fade-in` do Layout.tsx deixa um `transform` persistente no wrapper
+// de rota, virando containing block e quebrando `position: fixed` em
+// descendentes (o botão desceria junto com a lista em vez de ficar ancorado
+// no viewport).
+function ScrollToTopButton() {
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const [hover, setHover] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setShowScrollTop(window.scrollY > 300);
+    window.addEventListener('scroll', onScroll);
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  return createPortal(
+    <button
+      className={`fixed right-4 bottom-24 md:bottom-8 md:right-8 z-50 backdrop-blur-md transition-all duration-500 shadow-xl rounded-full p-3 flex items-center justify-center ${
+        showScrollTop ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 -translate-y-12 pointer-events-none'
+      }`}
+      style={{ backgroundColor: hover ? 'rgba(30, 41, 59, 0.9)' : 'rgba(30, 41, 59, 0.6)', color: 'white' }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+      title="Voltar ao topo"
+    >
+      <ArrowUp className="w-6 h-6" />
+    </button>,
+    document.body,
   );
 }
 
@@ -351,74 +462,86 @@ function NewEntryModal({
     create.mutate();
   }
 
-  return (
-    <Modal title="Novo lançamento" onClose={onClose} wide>
-      <div className="mb-3 grid grid-cols-2 gap-2">
-        <button className={type === 'PAYABLE' ? 'btn-primary' : 'btn-ghost'} onClick={() => { setType('PAYABLE'); setPerson(null); }}>
-          <ArrowUpCircle className="h-5 w-5" /> A Pagar
-        </button>
-        <button className={type === 'RECEIVABLE' ? 'btn-primary' : 'btn-ghost'} onClick={() => { setType('RECEIVABLE'); setPerson(null); }}>
-          <ArrowDownCircle className="h-5 w-5" /> A Receber
-        </button>
-      </div>
+  return createPortal(
+    <div className="modal-overlay">
+      <div className="modal-sheet w-full sm:max-w-md flex flex-col max-h-[90dvh] !p-0 overflow-hidden">
+        <header className="shrink-0 flex items-center justify-between border-b border-slate-200 p-4">
+          <h2 className="font-display text-lg font-bold">Novo lançamento</h2>
+          <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
+            <X className="h-5 w-5" />
+          </button>
+        </header>
 
-      <label className="block">
-        <span className="label">{personType === 'SUPPLIER' ? 'Fornecedor' : 'Cliente'} *</span>
-        <PersonPicker type={personType} value={person} onChange={setPerson} />
-      </label>
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 space-y-4">
+          <div className="grid grid-cols-2 gap-2">
+            <button className={type === 'PAYABLE' ? 'btn-primary' : 'btn-ghost'} onClick={() => { setType('PAYABLE'); setPerson(null); }}>
+              <ArrowUpCircle className="h-5 w-5" /> A Pagar
+            </button>
+            <button className={type === 'RECEIVABLE' ? 'btn-primary' : 'btn-ghost'} onClick={() => { setType('RECEIVABLE'); setPerson(null); }}>
+              <ArrowDownCircle className="h-5 w-5" /> A Receber
+            </button>
+          </div>
 
-      <label className="mt-3 block">
-        <span className="label">Descrição *</span>
-        <input className="input" value={description} onChange={(e) => setDescription(e.target.value)} />
-      </label>
+          <label className="block">
+            <span className="label">{personType === 'SUPPLIER' ? 'Fornecedor' : 'Cliente'} *</span>
+            <PersonPicker type={personType} value={person} onChange={setPerson} />
+          </label>
 
-      <div className="mt-3 grid grid-cols-2 gap-3">
-        <label className="block">
-          <span className="label">Valor total (R$) *</span>
-          <input className="input" type="number" inputMode="decimal" value={totalAmount} onChange={(e) => setTotalAmount(e.target.value)} />
-        </label>
-        <label className="block">
-          <span className="label">1º vencimento *</span>
-          <input className="input" type="date" value={firstDueDate} onChange={(e) => setFirstDueDate(e.target.value)} />
-        </label>
-        <label className="block">
-          <span className="label">Nº de parcelas *</span>
-          <input className="input" type="number" min={1} value={installments} onChange={(e) => setInstallments(e.target.value)} />
-        </label>
-        <label className="block">
-          <span className="label">Intervalo (dias)</span>
-          <input className="input" type="number" value={intervalDays} onChange={(e) => setIntervalDays(e.target.value)} />
-        </label>
-      </div>
+          <label className="block">
+            <span className="label">Descrição *</span>
+            <input className="input" value={description} onChange={(e) => setDescription(e.target.value)} />
+          </label>
 
-      {nParcelas > 1 && (
-        <div className="mt-3 rounded-xl bg-brand-50/60 px-3 py-2 text-sm text-brand-700">
-          {nParcelas}× de aprox. <strong>{brl(valorParcela)}</strong> (a cada {intervalDays || 30} dias)
+          <div className="grid grid-cols-2 gap-4">
+            <label className="block">
+              <span className="label">Valor total (R$) *</span>
+              <input className="input" type="number" inputMode="decimal" value={totalAmount} onChange={(e) => setTotalAmount(e.target.value)} />
+            </label>
+            <label className="block">
+              <span className="label">1º vencimento *</span>
+              <input className="input" type="date" value={firstDueDate} onChange={(e) => setFirstDueDate(e.target.value)} />
+            </label>
+            <label className="block">
+              <span className="label">Nº de parcelas *</span>
+              <input className="input" type="number" min={1} value={installments} onChange={(e) => setInstallments(e.target.value)} />
+            </label>
+            <label className="block">
+              <span className="label">Intervalo (dias)</span>
+              <input className="input" type="number" value={intervalDays} onChange={(e) => setIntervalDays(e.target.value)} />
+            </label>
+          </div>
+
+          {nParcelas > 1 && (
+            <div className="rounded-xl bg-brand-50/60 px-3 py-2 text-sm text-brand-700">
+              {nParcelas}× de aprox. <strong>{brl(valorParcela)}</strong> (a cada {intervalDays || 30} dias)
+            </div>
+          )}
+
+          {(localError || create.error instanceof ApiError) && (
+            <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              {localError ?? (create.error as ApiError).message}
+            </div>
+          )}
         </div>
-      )}
 
-      {(localError || create.error instanceof ApiError) && (
-        <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
-          {localError ?? (create.error as ApiError).message}
-        </div>
-      )}
-
-      <div className="mt-5 flex justify-end gap-2">
-        <button className="btn-ghost" onClick={onClose}>Cancelar</button>
-        <button className="btn-primary" disabled={create.isPending} onClick={submit}>
-          {create.isPending ? 'Salvando...' : 'Lançar'}
-        </button>
+        <footer className="shrink-0 flex items-center justify-end gap-2 border-t border-slate-200 p-4 bg-slate-50">
+          <button className="btn-ghost" onClick={onClose}>Cancelar</button>
+          <button className="btn-primary" disabled={create.isPending} onClick={submit}>
+            {create.isPending ? 'Salvando...' : 'Lançar'}
+          </button>
+        </footer>
       </div>
-    </Modal>
+    </div>,
+    document.body,
   );
 }
 
 // ---------------------------------------------------------------------------
 function SettleModal({ account, onClose, onDone }: { account: Account; onClose: () => void; onDone: () => void }) {
   const saldo = round2(account.amount - account.paidAmount);
-  const [amount, setAmount] = useState(String(saldo));
+  const [amount, setAmount] = useState(() => String(saldo).replace('.', ','));
   const [settleInFull, setSettleInFull] = useState(false);
-  const val = Number(amount) || 0;
+  const val = parseFloat(amount.replace(',', '.')) || 0;
   const isPartial = val > 0 && val < saldo;
 
   const settle = useMutation({
@@ -427,40 +550,61 @@ function SettleModal({ account, onClose, onDone }: { account: Account; onClose: 
     onError: (e) => window.alert(e instanceof ApiError ? e.message : 'Falha na baixa'),
   });
 
-  return (
-    <Modal title="Baixar título" onClose={onClose}>
-      <div className="mb-3 rounded-xl bg-slate-50 px-3 py-2 text-sm">
-        <div className="flex justify-between"><span className="text-slate-500">Valor do título</span><span>{brl(account.amount)}</span></div>
-        {account.paidAmount > 0 && (
-          <div className="flex justify-between"><span className="text-slate-500">Já baixado</span><span>{brl(account.paidAmount)}</span></div>
-        )}
-        <div className="flex justify-between font-semibold"><span>Saldo</span><span>{brl(saldo)}</span></div>
+  return createPortal(
+    <div className="modal-overlay">
+      <div className="modal-sheet w-full sm:max-w-md flex flex-col max-h-[90dvh] !p-0 overflow-hidden">
+        <header className="shrink-0 flex items-center justify-between border-b border-slate-200 p-4">
+          <h2 className="font-display text-lg font-bold">Baixar título</h2>
+          <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
+            <X className="h-5 w-5" />
+          </button>
+        </header>
+
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 space-y-4">
+          <div className="rounded-xl bg-slate-50 px-3 py-2 text-sm">
+            <div className="flex justify-between"><span className="text-slate-500">Valor do título</span><span>{brl(account.amount)}</span></div>
+            {account.paidAmount > 0 && (
+              <div className="flex justify-between"><span className="text-slate-500">Já baixado</span><span>{brl(account.paidAmount)}</span></div>
+            )}
+            <div className="flex justify-between font-semibold"><span>Saldo</span><span>{brl(saldo)}</span></div>
+          </div>
+
+          <label className="block">
+            <span className="label">Valor a baixar (R$)</span>
+            <input
+              className="input"
+              type="text"
+              inputMode="decimal"
+              value={amount}
+              onKeyDown={(e) => { if (['-', '+', 'e', 'E'].includes(e.key)) e.preventDefault(); }}
+              onChange={(e) => setAmount(sanitizeBr(e.target.value))}
+              onFocus={(e) => e.target.select()}
+              autoFocus
+            />
+          </label>
+
+          {isPartial && (
+            <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/60 p-3 text-sm">
+              <input type="checkbox" className="mt-0.5 h-5 w-5 accent-brand-600" checked={settleInFull} onChange={(e) => setSettleInFull(e.target.checked)} />
+              <span>
+                <span className="font-semibold text-amber-700">Quitar integralmente</span>
+                <span className="block text-xs text-amber-600">
+                  Valor menor que o saldo. Marque para quitar o título mesmo assim (perdoa {brl(round2(saldo - val))}). Sem marcar, fica baixa parcial.
+                </span>
+              </span>
+            </label>
+          )}
+        </div>
+
+        <footer className="shrink-0 flex items-center justify-end gap-2 border-t border-slate-200 p-4 bg-slate-50">
+          <button className="btn-ghost" onClick={onClose}>Cancelar</button>
+          <button className="btn-primary" disabled={settle.isPending || val <= 0 || val > saldo + 0.001} onClick={() => settle.mutate()}>
+            {settle.isPending ? 'Baixando...' : isPartial && !settleInFull ? 'Baixar parcial' : 'Confirmar baixa'}
+          </button>
+        </footer>
       </div>
-
-      <label className="block">
-        <span className="label">Valor a baixar (R$)</span>
-        <input className="input" type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus />
-      </label>
-
-      {isPartial && (
-        <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/60 p-3 text-sm">
-          <input type="checkbox" className="mt-0.5 h-5 w-5 accent-brand-600" checked={settleInFull} onChange={(e) => setSettleInFull(e.target.checked)} />
-          <span>
-            <span className="font-semibold text-amber-700">Quitar integralmente</span>
-            <span className="block text-xs text-amber-600">
-              Valor menor que o saldo. Marque para quitar o título mesmo assim (perdoa {brl(round2(saldo - val))}). Sem marcar, fica baixa parcial.
-            </span>
-          </span>
-        </label>
-      )}
-
-      <div className="mt-5 flex justify-end gap-2">
-        <button className="btn-ghost" onClick={onClose}>Cancelar</button>
-        <button className="btn-primary" disabled={settle.isPending || val <= 0 || val > saldo + 0.001} onClick={() => settle.mutate()}>
-          {settle.isPending ? 'Baixando...' : isPartial && !settleInFull ? 'Baixar parcial' : 'Confirmar baixa'}
-        </button>
-      </div>
-    </Modal>
+    </div>,
+    document.body,
   );
 }
 
