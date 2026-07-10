@@ -84,25 +84,8 @@ type Tab = 'sugestao' | 'xml' | 'manual' | 'lancadas';
 export function PurchasesPage() {
   const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>('sugestao');
-  const [windowDays, setWindowDays] = useState(30);
-  const [leadTimeDays, setLeadTimeDays] = useState(15);
-  const [suggBrand, setSuggBrand] = useState('');
-  const [suggGroup, setSuggGroup] = useState('');
-  const [suggSubgroup, setSuggSubgroup] = useState('');
   const [viewInvoiceId, setViewInvoiceId] = useState<string | null>(null);
   const [editInvoiceId, setEditInvoiceId] = useState<string | null>(null);
-
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['suggestions', windowDays, leadTimeDays, suggBrand, suggGroup, suggSubgroup],
-    queryFn: () => {
-      const qs = new URLSearchParams({ windowDays: String(windowDays), leadTimeDays: String(leadTimeDays) });
-      if (suggBrand.trim()) qs.set('brand', suggBrand.trim());
-      if (suggGroup.trim()) qs.set('group', suggGroup.trim());
-      if (suggSubgroup.trim()) qs.set('subgroup', suggSubgroup.trim());
-      return api.get<{ suggestions: Suggestion[] }>(`/api/purchase-suggestions?${qs.toString()}`);
-    },
-    enabled: tab === 'sugestao',
-  });
 
   const tabBtn = (id: Tab) => (tab === id ? 'btn-primary' : 'btn-ghost');
 
@@ -133,96 +116,7 @@ export function PurchasesPage() {
         </button>
       </div>
 
-      {tab === 'sugestao' && (
-        <>
-          <div className="card space-y-3">
-            <div className="flex flex-wrap items-end gap-4">
-              <label className="text-sm">
-                <span className="mb-1 block font-medium text-slate-500">Janela de vendas</span>
-                <select className="input" value={windowDays} onChange={(e) => setWindowDays(Number(e.target.value))}>
-                  <option value={30}>30 dias</option>
-                  <option value={60}>60 dias</option>
-                  <option value={90}>90 dias</option>
-                </select>
-              </label>
-              <label className="text-sm">
-                <span className="mb-1 block font-medium text-slate-500">Tempo de reposição (dias)</span>
-                <input
-                  className="input"
-                  type="number"
-                  value={leadTimeDays === 0 ? '' : leadTimeDays}
-                  onFocus={(e) => e.target.select()}
-                  onChange={(e) => {
-                    const val = e.target.value.replace(/^0+/, '');
-                    setLeadTimeDays(val === '' ? 0 : Number(val));
-                  }}
-                />
-              </label>
-            </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <label className="block">
-                <span className="label">Marca (filtro)</span>
-                <input className="input h-10 text-sm" value={suggBrand} onChange={(e) => setSuggBrand(e.target.value)} placeholder="Todas" />
-              </label>
-              <label className="block">
-                <span className="label">Grupo (filtro)</span>
-                <input className="input h-10 text-sm" value={suggGroup} onChange={(e) => setSuggGroup(e.target.value)} placeholder="Todos" />
-              </label>
-              <label className="block">
-                <span className="label">Subgrupo (filtro)</span>
-                <input className="input h-10 text-sm" value={suggSubgroup} onChange={(e) => setSuggSubgroup(e.target.value)} placeholder="Todos" />
-              </label>
-            </div>
-          </div>
-
-          {error instanceof ApiError && (
-            <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error.message}</div>
-          )}
-
-          {isLoading ? (
-            <div className="p-8 text-center text-slate-500">Calculando...</div>
-          ) : data && data.suggestions.length > 0 ? (
-            <div className="card overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-slate-400">
-                    <th className="py-2">Produto</th>
-                    <th>SKU</th>
-                    <th className="text-right">Estoque</th>
-                    <th className="text-right">Vendas</th>
-                    <th className="text-right">Média/dia</th>
-                    <th className="text-right text-brand-700">Sugerido</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {data.suggestions.map((s) => (
-                    <tr key={s.variantId} className={s.suggestedQty > 0 ? '' : 'opacity-60'}>
-                      <td className="py-2">
-                        <div className="font-medium">{s.productName}</div>
-                        <div className="flex flex-wrap gap-1 text-xs text-slate-400">
-                          {s.brand && <span>{s.brand}</span>}
-                          {s.group && <span>· {s.group}</span>}
-                          {s.subgroup && <span>· {s.subgroup}</span>}
-                          <span>· {s.description}</span>
-                        </div>
-                      </td>
-                      <td className="text-slate-500">{s.sku}</td>
-                      <td className="text-right">{s.stockQty}</td>
-                      <td className="text-right">{s.soldInWindow}</td>
-                      <td className="text-right">{s.avgPerDay}</td>
-                      <td className={`text-right text-base font-bold ${s.suggestedQty > 0 ? 'text-brand-700' : 'text-slate-400'}`}>
-                        {s.suggestedQty > 0 ? `+${s.suggestedQty}` : '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="py-8 text-center text-slate-400">Nenhum produto encontrado para os filtros selecionados.</p>
-          )}
-        </>
-      )}
+      {tab === 'sugestao' && <PurchaseSuggestion />}
 
       {tab === 'xml' && <XmlImport onSuccess={() => { qc.invalidateQueries({ queryKey: ['invoices'] }); qc.invalidateQueries({ queryKey: ['products'] }); }} />}
       {tab === 'manual' && <ManualPurchase />}
@@ -255,6 +149,188 @@ export function PurchasesPage() {
         />
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sugestão de compra
+// ---------------------------------------------------------------------------
+function PurchaseSuggestion() {
+  const [windowDays, setWindowDays] = useState(30);
+  const [leadTimeDays, setLeadTimeDays] = useState(15);
+  const [suggBrand, setSuggBrand] = useState('');
+  const [suggGroup, setSuggGroup] = useState('');
+  const [suggSubgroup, setSuggSubgroup] = useState('');
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['suggestions', windowDays, leadTimeDays, suggBrand, suggGroup, suggSubgroup],
+    queryFn: () => {
+      const qs = new URLSearchParams({ windowDays: String(windowDays), leadTimeDays: String(leadTimeDays) });
+      if (suggBrand.trim()) qs.set('brand', suggBrand.trim());
+      if (suggGroup.trim()) qs.set('group', suggGroup.trim());
+      if (suggSubgroup.trim()) qs.set('subgroup', suggSubgroup.trim());
+      return api.get<{ suggestions: Suggestion[] }>(`/api/purchase-suggestions?${qs.toString()}`);
+    },
+  });
+
+  // Filtros (marca/grupo/subgrupo/janela/reposição) já disparam nova busca no
+  // servidor via queryKey — `suggestions` memoizado garante referência estável
+  // entre re-renders que não mudam `data` (troca de página, p.ex.), para o
+  // efeito de reset abaixo só disparar quando o resultado realmente mudar.
+  const suggestions = useMemo(() => data?.suggestions ?? [], [data]);
+
+  // Paginação client-side (padrão Tray) — mesmo motor de Compras Lançadas/Vendas.
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
+
+  // Resultado mudou (novo filtro) → volta pra primeira página.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [suggestions]);
+
+  const totalPages = Math.max(1, Math.ceil(suggestions.length / itemsPerPage));
+
+  // Rede de segurança: se totalPages encolher (novo filtro/pageSize), evita página fantasma.
+  useEffect(() => {
+    setCurrentPage((p) => Math.min(p, totalPages));
+  }, [totalPages]);
+
+  const paginatedSuggestions = useMemo(
+    () => suggestions.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage),
+    [suggestions, currentPage, itemsPerPage],
+  );
+
+  return (
+    <>
+      <div className="card space-y-3">
+        <div className="flex flex-wrap items-end gap-4">
+          <label className="text-sm">
+            <span className="mb-1 block font-medium text-slate-500">Janela de vendas</span>
+            <select className="input" value={windowDays} onChange={(e) => setWindowDays(Number(e.target.value))}>
+              <option value={30}>30 dias</option>
+              <option value={60}>60 dias</option>
+              <option value={90}>90 dias</option>
+            </select>
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block font-medium text-slate-500">Tempo de reposição (dias)</span>
+            <input
+              className="input"
+              type="number"
+              value={leadTimeDays === 0 ? '' : leadTimeDays}
+              onFocus={(e) => e.target.select()}
+              onChange={(e) => {
+                const val = e.target.value.replace(/^0+/, '');
+                setLeadTimeDays(val === '' ? 0 : Number(val));
+              }}
+            />
+          </label>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <label className="block">
+            <span className="label">Marca (filtro)</span>
+            <input className="input h-10 text-sm" value={suggBrand} onChange={(e) => setSuggBrand(e.target.value)} placeholder="Todas" />
+          </label>
+          <label className="block">
+            <span className="label">Grupo (filtro)</span>
+            <input className="input h-10 text-sm" value={suggGroup} onChange={(e) => setSuggGroup(e.target.value)} placeholder="Todos" />
+          </label>
+          <label className="block">
+            <span className="label">Subgrupo (filtro)</span>
+            <input className="input h-10 text-sm" value={suggSubgroup} onChange={(e) => setSuggSubgroup(e.target.value)} placeholder="Todos" />
+          </label>
+        </div>
+      </div>
+
+      {error instanceof ApiError && (
+        <div className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error.message}</div>
+      )}
+
+      {isLoading ? (
+        <div className="p-8 text-center text-slate-500">Calculando...</div>
+      ) : suggestions.length > 0 ? (
+        <div className="card mt-4">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-slate-400">
+                  <th className="py-2">Produto</th>
+                  <th>SKU</th>
+                  <th className="text-right">Estoque</th>
+                  <th className="text-right">Vendas</th>
+                  <th className="text-right">Média/dia</th>
+                  <th className="text-right text-brand-700">Sugerido</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {paginatedSuggestions.map((s) => (
+                  <tr key={s.variantId} className={s.suggestedQty > 0 ? '' : 'opacity-60'}>
+                    <td className="py-2">
+                      <div className="font-medium">{s.productName}</div>
+                      <div className="flex flex-wrap gap-1 text-xs text-slate-400">
+                        {s.brand && <span>{s.brand}</span>}
+                        {s.group && <span>· {s.group}</span>}
+                        {s.subgroup && <span>· {s.subgroup}</span>}
+                        <span>· {s.description}</span>
+                      </div>
+                    </td>
+                    <td className="text-slate-500">{s.sku}</td>
+                    <td className="text-right">{s.stockQty}</td>
+                    <td className="text-right">{s.soldInWindow}</td>
+                    <td className="text-right">{s.avgPerDay}</td>
+                    <td className={`text-right text-base font-bold ${s.suggestedQty > 0 ? 'text-brand-700' : 'text-slate-400'}`}>
+                      {s.suggestedQty > 0 ? `+${s.suggestedQty}` : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <label className="flex items-center gap-2 text-sm text-slate-500">
+              Linhas por página
+              <select
+                className="input h-9 w-auto py-1"
+                value={String(itemsPerPage)}
+                onChange={(e) => {
+                  setItemsPerPage(Number(e.target.value));
+                  setCurrentPage(1);
+                }}
+              >
+                <option value="10">10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </label>
+
+            <div className="flex items-center gap-3 text-sm">
+              <button
+                className="btn-ghost h-9 px-3"
+                disabled={currentPage <= 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              >
+                <ChevronLeft className="h-4 w-4" /> Anterior
+              </button>
+              <span className="text-slate-500">
+                Página <span className="font-semibold text-slate-700">{currentPage}</span> de{' '}
+                <span className="font-semibold text-slate-700">{totalPages}</span>
+              </span>
+              <button
+                className="btn-ghost h-9 px-3"
+                disabled={currentPage >= totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              >
+                Próximo <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <p className="py-8 text-center text-slate-400">Nenhum produto encontrado para os filtros selecionados.</p>
+      )}
+    </>
   );
 }
 
