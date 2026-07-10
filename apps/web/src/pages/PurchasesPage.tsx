@@ -64,6 +64,13 @@ function toDateInputValue(iso: string): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
 }
 
+// Vender "0,37 unidades por dia" é abstrato demais cru ("0.37") para quem só
+// vende produto inteiro — formata em vírgula BR + sufixo "un/dia" (Sugestão
+// de compra). Zero exato não carrega casas decimais (nada vendido no período).
+function fmtAvgPerDay(n: number): string {
+  return n === 0 ? '0 un/dia' : `${n.toFixed(2).replace('.', ',')} un/dia`;
+}
+
 interface Suggestion {
   variantId: string;
   sku: string;
@@ -278,7 +285,14 @@ function PurchaseSuggestion() {
                     <td className="text-slate-500">{s.sku}</td>
                     <td className="text-right">{s.stockQty}</td>
                     <td className="text-right">{s.soldInWindow}</td>
-                    <td className="text-right">{s.avgPerDay}</td>
+                    <td
+                      className="text-right"
+                      title={`Velocidade média de saída: vende aprox. ${
+                        s.avgPerDay === 0 ? '0' : s.avgPerDay.toFixed(2).replace('.', ',')
+                      } unidades por dia neste período`}
+                    >
+                      {fmtAvgPerDay(s.avgPerDay)}
+                    </td>
                     <td className={`text-right text-base font-bold ${s.suggestedQty > 0 ? 'text-brand-700' : 'text-slate-400'}`}>
                       {s.suggestedQty > 0 ? `+${s.suggestedQty}` : '—'}
                     </td>
