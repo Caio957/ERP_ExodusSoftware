@@ -114,6 +114,7 @@ model Invoice {
   supplier       Person   @relation("SupplierInvoices", fields: [supplierId], references: [id])
   accessKey      String   @unique
   documentNumber Int? // nº sequencial do documento (compras manuais)
+  nfeNumber      String? // nº da nota fiscal (nNF do XML) — nulo em compra manual
   notes          String? // observação da compra
   issueDate      DateTime
   // Data de entrada/digitação (quando o operador deu entrada no sistema) —

@@ -37,6 +37,7 @@ export type ParsedNfeItem = z.infer<typeof parsedNfeItemSchema>;
 export const parsedNfeSchema = z.object({
   accessKey: z.string(),
   issueDate: z.string(), // ISO
+  nfeNumber: z.string(), // nNF do XML
   supplier: z.object({
     document: z.string(),
     name: z.string(),
@@ -74,6 +75,8 @@ export const confirmInvoiceItemSchema = z.object({
 export const confirmInvoiceSchema = z.object({
   supplierId: z.string().uuid(),
   accessKey: z.string().min(1, 'Chave de acesso obrigatória'),
+  /** Nº da nota fiscal (nNF do XML) — exibido na listagem de compras lançadas. */
+  nfeNumber: z.string().trim().optional(),
   issueDate: z.coerce.date(),
   /** Data de entrada/digitação — quando o operador deu entrada no sistema
    *  (distinta da emissão da NFe). Base do StockMovement gerado. */

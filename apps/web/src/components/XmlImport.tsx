@@ -64,6 +64,7 @@ interface ParsedItem {
 interface ParsedNfe {
   accessKey: string;
   issueDate: string;
+  nfeNumber: string;
   supplier: { document: string; name: string; existingId: string | null };
   totalAmount: number;
   items: ParsedItem[];
@@ -205,6 +206,7 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
       await api.post('/api/invoices/confirm', {
         supplierId,
         accessKey: parsed.accessKey,
+        nfeNumber: parsed.nfeNumber,
         issueDate: parsed.issueDate,
         entryDate,
         totalAmount: parsed.totalAmount,

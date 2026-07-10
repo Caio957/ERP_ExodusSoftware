@@ -616,8 +616,10 @@ function ManualPurchase() {
 interface InvoiceListItem {
   id: string;
   documentNumber: number | null;
+  nfeNumber: string | null;
   notes: string | null;
   issueDate: string;
+  entryDate: string;
   totalAmount: number;
   hasFinancial: boolean;
   supplier: { name: string };
@@ -820,9 +822,11 @@ function PurchasesList({ onView }: { onView: (id: string) => void }) {
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-slate-400">
-            <th className="py-2">Doc.</th>
+            <th className="py-2 whitespace-nowrap">Doc.</th>
+            <th className="whitespace-nowrap">Nº NF</th>
             <th>Fornecedor</th>
-            <th>Data</th>
+            <th className="whitespace-nowrap">Emissão</th>
+            <th className="whitespace-nowrap">Entrada</th>
             <th className="text-center">Itens</th>
             <th className="text-right">Total</th>
             <th>Financeiro</th>
@@ -832,12 +836,14 @@ function PurchasesList({ onView }: { onView: (id: string) => void }) {
         <tbody className="divide-y divide-slate-100">
           {paginatedInvoices.map((inv) => (
             <tr key={inv.id}>
-              <td className="py-2 font-medium">{inv.documentNumber ? `#${inv.documentNumber}` : '—'}</td>
+              <td className="py-2 font-medium whitespace-nowrap">{inv.documentNumber ? `#${inv.documentNumber}` : '—'}</td>
+              <td className="whitespace-nowrap text-slate-500">{inv.nfeNumber || '—'}</td>
               <td>
                 {inv.supplier.name}
                 {inv.notes && <div className="text-xs text-slate-400">{inv.notes}</div>}
               </td>
-              <td>{new Date(inv.issueDate).toLocaleDateString('pt-BR')}</td>
+              <td className="whitespace-nowrap">{new Date(inv.issueDate).toLocaleDateString('pt-BR')}</td>
+              <td className="whitespace-nowrap">{new Date(inv.entryDate).toLocaleDateString('pt-BR')}</td>
               <td className="text-center">{inv.items.length}</td>
               <td className="text-right font-semibold">{brl(inv.totalAmount)}</td>
               <td>
@@ -875,14 +881,14 @@ function PurchasesList({ onView }: { onView: (id: string) => void }) {
           ))}
           {data?.items.length === 0 && (
             <tr>
-              <td colSpan={7} className="py-10 text-center text-slate-400">
+              <td colSpan={9} className="py-10 text-center text-slate-400">
                 Nenhuma compra lançada.
               </td>
             </tr>
           )}
           {data && data.items.length > 0 && filteredInvoices.length === 0 && (
             <tr>
-              <td colSpan={7} className="py-10 text-center text-slate-400">
+              <td colSpan={9} className="py-10 text-center text-slate-400">
                 Nenhuma compra encontrada com os filtros aplicados.
               </td>
             </tr>
