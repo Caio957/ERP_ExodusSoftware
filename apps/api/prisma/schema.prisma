@@ -256,6 +256,12 @@ model StockMovement {
   quantity  Int // positivo p/ IN, negativo p/ OUT
   reason    String // 'SALE' | 'INVOICE' | 'MANUAL'
   refId     String? // id da venda/nota de origem
+  // Código sequencial só para acertos de estoque (type='ADJUST') — nulo nos
+  // demais tipos. StockMovement é um razão compartilhado por vendas/notas/
+  // acertos, então um autoincrement de banco numeraria tudo junto; o código
+  // é calculado manualmente (aggregate max + 1 escopado a type='ADJUST') na
+  // rota /adjust-stock, mesmo padrão de Invoice.documentNumber.
+  code      Int?
   createdAt DateTime       @default(now())
 
   @@index([variantId])

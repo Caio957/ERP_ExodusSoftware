@@ -14,6 +14,7 @@ type MovementType = 'BALANCE' | 'IN' | 'OUT';
 
 interface Adjustment {
   id: string;
+  code: number | null;
   variantId: string;
   quantity: number; // diferença aplicada (+/-)
   reason: string;
@@ -263,7 +264,8 @@ function AdjustmentsHistory({ onEdit }: { onEdit: (a: Adjustment) => void }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-slate-400">
-                <th className="py-2">Produto</th>
+                <th className="py-2 whitespace-nowrap">Cód.</th>
+                <th>Produto</th>
                 <th>Motivo</th>
                 <th>Data</th>
                 <th className="text-center">Ajuste</th>
@@ -274,7 +276,10 @@ function AdjustmentsHistory({ onEdit }: { onEdit: (a: Adjustment) => void }) {
             <tbody className="divide-y divide-slate-100">
               {paginatedAdjustments.map((a) => (
                 <tr key={a.id}>
-                  <td className="py-2">
+                  <td className="py-2 whitespace-nowrap">
+                    <span className="font-medium text-slate-700">{a.code ? `#${a.code}` : '—'}</span>
+                  </td>
+                  <td>
                     <div className="font-medium">{a.product}</div>
                     <div className="text-xs text-slate-400">
                       {a.description} · {a.sku}
@@ -317,7 +322,7 @@ function AdjustmentsHistory({ onEdit }: { onEdit: (a: Adjustment) => void }) {
               ))}
               {data?.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-slate-400">
+                  <td colSpan={7} className="py-8 text-center text-slate-400">
                     Nenhum acerto realizado ainda.
                   </td>
                 </tr>
