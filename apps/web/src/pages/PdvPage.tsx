@@ -155,6 +155,52 @@ export function PdvPage() {
   const discountPct = subtotal > 0 ? round2((discount / subtotal) * 100) : 0;
   const surchargePct = subtotal > 0 ? round2((surcharge / subtotal) * 100) : 0;
 
+  // Trava de navegação: carrinho com item pendente não pode ser perdido por
+  // acidente. `resetSale()` já zera o carrinho após finalizar a venda, então
+  // isso nunca bloqueia a navegação pós-venda.
+  const hasUnsavedChanges = cart.length > 0;
+
+  // Refresh / fechar aba / digitar outra URL — prompt nativo do navegador.
+  useEffect(() => {
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  // Navegação interna (menu lateral, bottom nav, drawer): este projeto usa
+  // <BrowserRouter> "clássico" (App.tsx), não createBrowserRouter/RouterProvider
+  // — o hook useBlocker do react-router-dom só funciona com um "data router"
+  // e lançaria em runtime ("useBlocker must be used within a data router").
+  // Migrar o roteamento do app inteiro para desbloquear um hook está fora do
+  // escopo desta trava, então interceptamos o clique nos links de navegação
+  // (todos renderizados como <a href> pelo <NavLink> em Layout.tsx) em fase de
+  // captura do document — chega antes do handler de clique do próprio React
+  // Router, então cancelar o evento aqui impede a navegação.
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    function handleClick(e: MouseEvent) {
+      const anchor = (e.target as HTMLElement | null)?.closest?.('a[href]');
+      if (!anchor) return;
+      const href = anchor.getAttribute('href');
+      if (!href || href.startsWith('#') || anchor.getAttribute('target') === '_blank') return;
+      if (href === window.location.pathname) return;
+      const confirmed = window.confirm(
+        'Você tem uma venda em andamento. Tem certeza que deseja sair e perder os dados?',
+      );
+      if (!confirmed) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }
+    document.addEventListener('click', handleClick, true);
+    return () => document.removeEventListener('click', handleClick, true);
+  }, [hasUnsavedChanges]);
+
   function flash(msg: string) {
     setToast(msg);
     window.setTimeout(() => setToast(null), 2200);
