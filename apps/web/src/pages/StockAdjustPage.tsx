@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ClipboardCheck, Search, Check, History, Pencil, Trash2, X } from 'lucide-react';
+import { ClipboardCheck, Search, Check, History, Pencil, Trash2, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { useSearchHandler } from '../hooks/useSearchHandler';
 
@@ -231,6 +231,26 @@ function AdjustmentsHistory({ onEdit }: { onEdit: (a: Adjustment) => void }) {
     onError: (e) => window.alert(e instanceof ApiError ? e.message : 'Falha ao apagar'),
   });
 
+  // Paginação client-side (padrão Tray, mesmo motor de Vendas/Financeiro/
+  // Compras/Produtos) — o backend retorna os últimos 200 acertos de uma vez,
+  // sem page/pageSize.
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
+
+  // Tamanho de página mudou → volta pra primeira página.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [itemsPerPage]);
+
+  const totalPages = Math.max(1, Math.ceil((data?.length ?? 0) / itemsPerPage));
+
+  // Rede de segurança: se totalPages encolher (novo pageSize), evita página fantasma.
+  useEffect(() => {
+    setCurrentPage((p) => Math.min(p, totalPages));
+  }, [totalPages]);
+
+  const paginatedAdjustments = (data ?? []).slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
   return (
     <div className="card">
       <div className="mb-3 flex items-center gap-2 font-semibold">
@@ -252,7 +272,7 @@ function AdjustmentsHistory({ onEdit }: { onEdit: (a: Adjustment) => void }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {data?.map((a) => (
+              {paginatedAdjustments.map((a) => (
                 <tr key={a.id}>
                   <td className="py-2">
                     <div className="font-medium">{a.product}</div>
@@ -304,6 +324,45 @@ function AdjustmentsHistory({ onEdit }: { onEdit: (a: Adjustment) => void }) {
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {data && data.length > 0 && (
+        <div className="mt-4 flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <label className="flex items-center gap-2 text-sm text-slate-500">
+            Linhas por página
+            <select
+              className="input h-9 w-auto py-1"
+              value={String(itemsPerPage)}
+              onChange={(e) => setItemsPerPage(Number(e.target.value))}
+            >
+              <option value="10">10</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </label>
+
+          <div className="flex items-center gap-3 text-sm">
+            <button
+              className="btn-ghost h-9 px-3"
+              disabled={currentPage <= 1}
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            >
+              <ChevronLeft className="h-4 w-4" /> Anterior
+            </button>
+            <span className="text-slate-500">
+              Página <span className="font-semibold text-slate-700">{currentPage}</span> de{' '}
+              <span className="font-semibold text-slate-700">{totalPages}</span>
+            </span>
+            <button
+              className="btn-ghost h-9 px-3"
+              disabled={currentPage >= totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Próximo <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       )}
     </div>
