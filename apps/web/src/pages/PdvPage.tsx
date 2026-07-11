@@ -782,7 +782,7 @@ export function PdvPage() {
                   disabled={printMode !== null}
                   onClick={() => handlePrint('a4')}
                 >
-                  📄 Papel A4
+                  📄 Imprimir / Salvar PDF (A4)
                 </button>
               </div>
               <button

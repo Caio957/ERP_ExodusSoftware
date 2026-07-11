@@ -747,23 +747,14 @@ function Row({ label, value, tone }: { label: string; value: string; tone?: 'ros
 // ---------------------------------------------------------------------------
 // Impressão (escolha do formato: cupom térmico ou folha A4).
 // ---------------------------------------------------------------------------
-function PrintSaleModal({ saleId, onClose }: { saleId: string; onClose: () => void }) {
-  const { data: sale } = useQuery({
-    queryKey: ['sale', saleId],
-    queryFn: () => api.get<SaleDetail>(`/api/sales/${saleId}`),
-  });
-  const { data: company } = useQuery({
-    queryKey: ['settings', 'company'],
-    queryFn: () => api.get<CompanyInfo>('/api/settings/company'),
-  });
 
-  if (!sale) return null;
-
-  // Ponte de dados: o histórico de vendas guarda itens com `variant.product.name`
-  // (relação completa), enquanto o motor de impressão (mesmo formato usado no
-  // PDV) espera uma descrição já resolvida por item — mapeamento equivalente
-  // ao que o PDV monta a partir do carrinho.
-  const receipt: SaleReceiptData = {
+// Ponte de dados: o histórico de vendas guarda itens com `variant.product.name`
+// (relação completa), enquanto o motor de impressão/PDF (mesmo formato usado
+// no PDV) espera uma descrição já resolvida por item — mapeamento equivalente
+// ao que o PDV monta a partir do carrinho. Reaproveitado por `PrintSaleModal`
+// (impressão nativa).
+function buildSaleReceiptData(sale: SaleDetail): SaleReceiptData {
+  return {
     code: sale.code,
     soldAt: sale.soldAt,
     clientName: sale.client?.name ?? null,
@@ -779,8 +770,21 @@ function PrintSaleModal({ saleId, onClose }: { saleId: string; onClose: () => vo
     payments: sale.payments.length ? sale.payments : [{ method: sale.paymentMethod, amount: sale.totalAmount }],
     notes: sale.notes,
   };
+}
 
-  return <PrintReceiptModal sale={receipt} company={company ?? {}} onClose={onClose} />;
+function PrintSaleModal({ saleId, onClose }: { saleId: string; onClose: () => void }) {
+  const { data: sale } = useQuery({
+    queryKey: ['sale', saleId],
+    queryFn: () => api.get<SaleDetail>(`/api/sales/${saleId}`),
+  });
+  const { data: company } = useQuery({
+    queryKey: ['settings', 'company'],
+    queryFn: () => api.get<CompanyInfo>('/api/settings/company'),
+  });
+
+  if (!sale) return null;
+
+  return <PrintReceiptModal sale={buildSaleReceiptData(sale)} company={company ?? {}} onClose={onClose} />;
 }
 
 // ---------------------------------------------------------------------------
