@@ -4,19 +4,21 @@ import { useQuery } from '@tanstack/react-query';
 import { Printer, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { SaleReceipt, type CompanyInfo, type ReceiptFormat, type SaleReceiptData } from './SaleReceipt';
+import { printElementViaIframe } from '../lib/iframePrint';
 
 const PRINT_ROOT_ID = 'sale-receipt-print-root';
 
 /**
- * Modal de impressão de comprovante — motor único, validado no PDV
- * (Dynamic Measurement Engine), reaproveitado aqui para a consulta de
- * Vendas. Imprimir diretamente o preview on-screen (window.print() sobre
- * um `<div>` com scroll/overflow recortado pelo modal) produz páginas em
- * branco: o navegador não sabe a altura real do cupom nem tem um `@page`
- * dimensionado a ele. Este motor mede o recibo fora da tela antes de
- * chamar `window.print()`, injeta um `@page` com o tamanho exato e remove
- * fisicamente o resto do app do DOM impresso — não só com `visibility:hidden`,
- * que mantém a altura fantasma e gera folhas extras em branco.
+ * Modal de impressão de comprovante — motor único, validado no PDV,
+ * reaproveitado aqui para a consulta de Vendas. Imprimir diretamente o
+ * preview on-screen (window.print() sobre um `<div>` com scroll/overflow
+ * recortado pelo modal) produz páginas em branco: o navegador não sabe a
+ * altura real do cupom nem tem um `@page` dimensionado a ele. Este motor
+ * mede o recibo fora da tela e depois clona o HTML medido para um iframe
+ * isolado (ver lib/iframePrint.ts) — o WebView do Android é um source
+ * conhecido de página em branco ao imprimir o documento principal de uma
+ * SPA diretamente, e o iframe evita essa negociação de visibilidade/altura
+ * com o resto do app.
  */
 export function PrintReceiptModal({
   sale,
@@ -38,35 +40,32 @@ export function PrintReceiptModal({
 
   const [format, setFormat] = useState<ReceiptFormat>('thermal');
   const [printMode, setPrintMode] = useState<ReceiptFormat | null>(null);
-  const [receiptHeight, setReceiptHeight] = useState(0);
   const receiptRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!printMode) return;
-    const afterPrint = () => {
-      setPrintMode(null);
-      setReceiptHeight(0);
-    };
-    window.addEventListener('afterprint', afterPrint);
 
-    // Timeout 1: aguarda o React renderizar o recibo fora da tela para medir.
+    // Timeout: aguarda o React renderizar o recibo fora da tela (portal)
+    // para medir a altura real do cupom antes de clonar o HTML para o iframe.
     const t1 = window.setTimeout(() => {
+      let height = 0;
       if (printMode === 'thermal' && receiptRef.current) {
         // scrollHeight captura a altura real (mesmo com collapsing margins);
         // +15px de sobra para a guilhotina não cortar a última linha.
-        setReceiptHeight(receiptRef.current.scrollHeight + 15);
+        height = receiptRef.current.scrollHeight + 15;
       }
-      // Timeout 2: aguarda o estado de altura atualizar o <style> antes de
-      // imprimir. 300ms (não 50ms) — o spooler de impressão do Android
-      // Chromium precisa de mais margem para processar a injeção do portal
-      // no DOM e computar o layout antes que a thread seja congelada pelo
-      // diálogo nativo de impressão.
-      window.setTimeout(() => window.print(), 300);
+      const pageStyle =
+        printMode === 'thermal'
+          ? `@page { margin: 0; size: 80mm ${height > 0 ? height + 'px' : 'auto'}; }`
+          : `@page { margin: 10mm; size: A4 portrait; }`;
+
+      printElementViaIframe(PRINT_ROOT_ID, pageStyle).then(() => {
+        setPrintMode(null);
+      });
     }, 50);
 
     return () => {
       window.clearTimeout(t1);
-      window.removeEventListener('afterprint', afterPrint);
     };
   }, [printMode]);
 
@@ -100,8 +99,9 @@ export function PrintReceiptModal({
               <button
                 className="btn-primary shrink-0 disabled:cursor-not-allowed disabled:opacity-50"
                 // `printMode !== null` mantém o botão travado durante a janela
-                // assíncrona de medição + window.print() (dois timeouts de 50ms),
-                // evitando cliques repetidos que engasgam o navegador do celular.
+                // assíncrona de medição + clonagem para o iframe (ver
+                // lib/iframePrint.ts), evitando cliques repetidos que
+                // engasgam o navegador do celular.
                 disabled={companyLoading || printMode !== null}
                 onClick={() => setPrintMode(format)}
               >
@@ -122,20 +122,9 @@ export function PrintReceiptModal({
         document.body,
       )}
 
-      {/* Visibilidade/display do root (tela vs. impressão) é 100% governada
-          por index.css (seletor #sale-receipt-print-root) — estático, já
-          presente no bundle antes do window.print() rodar. Só o tamanho
-          físico da página (@page), que depende da altura medida em runtime,
-          precisa ser injetado aqui. */}
-      {printMode && (
-        <style>{printMode === 'thermal'
-          ? `@page { margin: 0; size: 80mm ${receiptHeight > 0 ? receiptHeight + 'px' : 'auto'}; }
-    @media print { body { margin: 0; padding: 0; background: white; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }`
-          : `@page { margin: 10mm; size: A4 portrait; }
-    @media print { body { margin: 0; padding: 0; background: white; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }`
-        }</style>
-      )}
-
+      {/* Sem <style> de @page no documento principal: o motor de impressão
+          via iframe (lib/iframePrint.ts) recebe o `pageStyle` diretamente
+          como argumento e injeta dentro do documento isolado do iframe. */}
       {printMode && createPortal(
         // A4 ancora em 210mm (não `w-full`): no celular, `w-full` = largura do
         // viewport esmagava a folha (o `maxWidth:100%` do template A4 clampava

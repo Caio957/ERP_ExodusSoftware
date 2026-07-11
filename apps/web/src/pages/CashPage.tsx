@@ -20,6 +20,7 @@ import {
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../store/auth';
 import { CashReceipt } from '../components/CashReceipt';
+import { printElementViaIframe } from '../lib/iframePrint';
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -397,9 +398,10 @@ function RegisterSummary({ registerId }: { registerId: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Impressão do relatório de fechamento/resumo de caixa — reaproveita o mesmo
-// Dynamic Measurement Engine do PDV (mede a altura do recibo fora da tela e
-// injeta @page com o tamanho exato antes de chamar window.print()).
+// Impressão do relatório de fechamento/resumo de caixa — mede a altura do
+// recibo fora da tela e imprime via iframe isolado (ver lib/iframePrint.ts),
+// que contorna o bug do WebView do Android que gera página em branco ao
+// imprimir o documento principal de uma SPA diretamente.
 function CashPrintButton({ register }: { register: CashRegister }) {
   const { data: company } = useQuery({
     queryKey: ['settings', 'company'],
@@ -411,7 +413,6 @@ function CashPrintButton({ register }: { register: CashRegister }) {
   });
 
   const [printing, setPrinting] = useState(false);
-  const [receiptHeight, setReceiptHeight] = useState(0);
   const receiptRef = useRef<HTMLDivElement>(null);
 
   const movements = data?.movements ?? [];
@@ -431,25 +432,19 @@ function CashPrintButton({ register }: { register: CashRegister }) {
 
   function handlePrint() {
     setPrinting(true);
-    const afterPrint = () => {
-      setPrinting(false);
-      setReceiptHeight(0);
-      window.removeEventListener('afterprint', afterPrint);
-    };
-    window.addEventListener('afterprint', afterPrint);
 
-    // Timeout 1: aguarda o React renderizar o DOM fora da tela para medir
+    // Timeout: aguarda o React renderizar o DOM fora da tela (portal) para
+    // medir a altura real do cupom antes de clonar o HTML para o iframe.
     window.setTimeout(() => {
       // scrollHeight captura a altura total real (mesmo com collapsing
       // margins); +15px de sobra cirúrgica para a guilhotina não cortar
       // a última linha.
-      if (receiptRef.current) setReceiptHeight(receiptRef.current.scrollHeight + 15);
-      // Timeout 2: aguarda o estado de altura atualizar o <style> antes de
-      // imprimir. 300ms (não 50ms) — o spooler de impressão do Android
-      // Chromium precisa de mais margem para processar a injeção do portal
-      // no DOM e computar o layout antes que a thread seja congelada pelo
-      // diálogo nativo de impressão.
-      window.setTimeout(() => window.print(), 300);
+      const height = receiptRef.current ? receiptRef.current.scrollHeight + 15 : 0;
+      const pageStyle = `@page { margin: 0; size: 80mm ${height > 0 ? height + 'px' : 'auto'}; }`;
+
+      printElementViaIframe('thermal-print-root', pageStyle).then(() => {
+        setPrinting(false);
+      });
     }, 50);
   }
 
@@ -458,16 +453,6 @@ function CashPrintButton({ register }: { register: CashRegister }) {
       <button className="btn-ghost w-full" onClick={handlePrint}>
         <Printer className="h-5 w-5" /> Imprimir Resumo
       </button>
-
-      {/* Visibilidade/display do root (tela vs. impressão) é 100% governada
-          por index.css (seletor #thermal-print-root) — estático, já presente
-          no bundle antes do window.print() rodar. Só o tamanho físico da
-          página (@page), que depende da altura medida em runtime, precisa
-          ser injetado aqui. */}
-      {printing && (
-        <style>{`@page { margin: 0; size: 80mm ${receiptHeight > 0 ? receiptHeight + 'px' : 'auto'}; }
-    @media print { body { margin: 0; padding: 0; background: white; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }`}</style>
-      )}
 
       {printing && createPortal(
         <div id="thermal-print-root" className="w-full bg-white text-black">

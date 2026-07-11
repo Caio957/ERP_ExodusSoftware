@@ -29,6 +29,7 @@ import { lookupByBarcode } from '../lib/products';
 import { enqueueSale } from '../lib/sync';
 import { SaleReceipt, type CompanyInfo, type SaleReceiptData } from '../components/SaleReceipt';
 import { ChangeCalculatorModal } from '../components/ChangeCalculatorModal';
+import { printElementViaIframe } from '../lib/iframePrint';
 
 interface CartItem {
   variantId: string;
@@ -98,7 +99,6 @@ export function PdvPage() {
     notes: string | null;
   } | null>(null);
   const [printMode, setPrintMode] = useState<'thermal' | 'a4' | null>(null);
-  const [receiptHeight, setReceiptHeight] = useState<number>(0);
   const receiptRef = useRef<HTMLDivElement>(null);
 
   const { data: register, isLoading } = useQuery({
@@ -262,27 +262,28 @@ export function PdvPage() {
 
   function handlePrint(mode: 'thermal' | 'a4') {
     setPrintMode(mode);
-    const afterPrint = () => {
-      setPrintMode(null);
-      setReceiptHeight(0);
-      window.removeEventListener('afterprint', afterPrint);
-    };
-    window.addEventListener('afterprint', afterPrint);
 
-    // Timeout 1: aguarda o React renderizar o DOM fora da tela para medir
+    // Timeout: aguarda o React renderizar o DOM fora da tela (portal) para
+    // medir a altura real do cupom antes de clonar o HTML para o iframe.
     window.setTimeout(() => {
+      let height = 0;
       if (mode === 'thermal' && receiptRef.current) {
         // scrollHeight captura a altura total real (mesmo com collapsing
         // margins); +15px de sobra cirúrgica para a guilhotina não cortar
         // a última linha.
-        setReceiptHeight(receiptRef.current.scrollHeight + 15);
+        height = receiptRef.current.scrollHeight + 15;
       }
-      // Timeout 2: aguarda o estado de altura atualizar o <style> antes de
-      // imprimir. 300ms (não 50ms) — o spooler de impressão do Android
-      // Chromium precisa de mais margem para processar a injeção do portal
-      // no DOM e computar o layout antes que a thread seja congelada pelo
-      // diálogo nativo de impressão.
-      window.setTimeout(() => window.print(), 300);
+      const pageStyle =
+        mode === 'thermal'
+          ? `@page { margin: 0; size: 80mm ${height > 0 ? height + 'px' : 'auto'}; }`
+          : `@page { margin: 10mm; size: A4 portrait; }`;
+
+      // Motor de impressão via iframe isolado (ver lib/iframePrint.ts) —
+      // contorna o bug do WebView do Android que gera página em branco ao
+      // imprimir o documento principal de uma SPA diretamente.
+      printElementViaIframe(mode === 'thermal' ? 'thermal-print-root' : 'a4-print-root', pageStyle).then(() => {
+        setPrintMode(null);
+      });
     }, 50);
   }
 
@@ -771,8 +772,8 @@ export function PdvPage() {
             <footer className="shrink-0 space-y-2 border-t border-slate-200 bg-slate-50 p-4 rounded-b-xl">
               {/* Botões travados enquanto uma impressão está em curso
                   (`printMode !== null`) — a janela assíncrona de medição +
-                  window.print() (timeouts de 50ms + 300ms) permitia cliques
-                  repetidos que engasgam o navegador do celular. */}
+                  clonagem para o iframe (ver lib/iframePrint.ts) permitia
+                  cliques repetidos que engasgam o navegador do celular. */}
               <div className="grid grid-cols-2 gap-2">
                 <button
                   className="btn-primary flex items-center justify-center gap-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
@@ -802,19 +803,11 @@ export function PdvPage() {
       )}
     </div>
 
-    {/* Visibilidade/display do root (tela vs. impressão) é 100% governada por
-        index.css (seletores por id) — estático, já presente no bundle antes
-        do window.print() rodar. Só o tamanho físico da página (@page), que
-        depende da altura medida em runtime, precisa ser injetado aqui. */}
-    {printMode && (
-      <style>{printMode === 'thermal'
-        ? `@page { margin: 0; size: 80mm ${receiptHeight > 0 ? receiptHeight + 'px' : 'auto'}; }
-    @media print { body { margin: 0; padding: 0; background: white; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }`
-        : `@page { margin: 10mm; size: A4 portrait; }
-    @media print { body { margin: 0; padding: 0; background: white; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }`
-      }</style>
-    )}
-
+    {/* Sem <style> de @page no documento principal: o motor de impressão via
+        iframe (lib/iframePrint.ts) recebe o `pageStyle` diretamente como
+        argumento e injeta dentro do documento isolado do iframe. Este root
+        só precisa ficar invisível na tela (ver index.css) enquanto o React
+        o renderiza para poder ser medido e clonado. */}
     {receiptData && printMode === 'thermal' && createPortal(
       <div id="thermal-print-root" className="w-full bg-white text-black">
         <div ref={receiptRef} className="mx-auto flex w-full justify-center">
