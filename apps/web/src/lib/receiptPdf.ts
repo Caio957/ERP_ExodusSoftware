@@ -9,9 +9,15 @@ import { SaleReceipt, type CompanyInfo, type ReceiptFormat, type SaleReceiptData
 // mesmo da captura. Forçar `width`/`windowWidth` elimina essa dependência
 // do viewport por completo (mesma causa raiz já corrigida no motor de
 // impressão nativo — ver PdvPage.tsx/PrintReceiptModal.tsx).
+// A4SaleReceipt normalmente usa `210mm` como largura CSS — o motor de
+// renderização interno do html2canvas (fora do pipeline nativo do browser)
+// é uma fonte documentada de erro no cálculo de unidades físicas (mm/cm/in).
+// `widthPx` (prop opcional de SaleReceipt) sobrescreve para px puro só
+// durante a captura, eliminando essa ambiguidade; 800 é o valor usado aqui
+// (arredondamento de 210mm ≈ 794px, folga imperceptível no papel real).
 const CAPTURE_WIDTH_PX: Record<ReceiptFormat, number> = {
   thermal: 302, // 80mm a 96dpi
-  a4: 794, // 210mm a 96dpi
+  a4: 800,
 };
 const PAPER_WIDTH_MM: Record<ReceiptFormat, number> = {
   thermal: 80,
@@ -54,7 +60,7 @@ export async function generateReceiptPdfBlob(
   const root = createRoot(host);
   try {
     await new Promise<void>((resolve) => {
-      root.render(createElement(SaleReceipt, { company, sale, format }));
+      root.render(createElement(SaleReceipt, { company, sale, format, widthPx: width }));
       // Duplo rAF: garante que o React já commitou o DOM antes da captura.
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     });
