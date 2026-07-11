@@ -37,9 +37,16 @@ export async function generateReceiptPdfBlob(
 
   const width = CAPTURE_WIDTH_PX[format];
   const host = document.createElement('div');
-  host.style.position = 'fixed';
-  host.style.top = '-9999px';
-  host.style.left = '-9999px';
+  // `position: absolute` (não `fixed`) + inserido no fluxo normal do
+  // documento: `position: fixed` com coordenadas negativas é conhecido por
+  // gerar captura quebrada/cortada em mobile Safari/Chrome, porque o
+  // viewport visual (barra de endereço recolhendo/expandindo) desalinha o
+  // `getBoundingClientRect()` de elementos `fixed` no momento da leitura do
+  // html2canvas. `absolute` ancora no documento (não no viewport), imune a
+  // esse recálculo.
+  host.style.position = 'absolute';
+  host.style.top = '0';
+  host.style.left = '-99999px';
   host.style.width = `${width}px`;
   host.style.background = '#ffffff';
   document.body.appendChild(host);
@@ -57,6 +64,13 @@ export async function generateReceiptPdfBlob(
       scale: 2, // nitidez do texto no PDF (~192dpi efetivo)
       width,
       windowWidth: width,
+      // Zera o offset de rolagem da página real na hora de localizar o
+      // elemento — outro gatilho documentado de captura deslocada/cortada
+      // em mobile quando o host está fora da área visível.
+      scrollX: 0,
+      scrollY: 0,
+      x: 0,
+      y: 0,
     });
 
     const pdfWidthMm = PAPER_WIDTH_MM[format];
