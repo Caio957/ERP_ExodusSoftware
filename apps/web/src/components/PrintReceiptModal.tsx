@@ -56,8 +56,12 @@ export function PrintReceiptModal({
         // +15px de sobra para a guilhotina não cortar a última linha.
         setReceiptHeight(receiptRef.current.scrollHeight + 15);
       }
-      // Timeout 2: aguarda o estado de altura atualizar o <style> antes de imprimir.
-      window.setTimeout(() => window.print(), 50);
+      // Timeout 2: aguarda o estado de altura atualizar o <style> antes de
+      // imprimir. 300ms (não 50ms) — o spooler de impressão do Android
+      // Chromium precisa de mais margem para processar a injeção do portal
+      // no DOM e computar o layout antes que a thread seja congelada pelo
+      // diálogo nativo de impressão.
+      window.setTimeout(() => window.print(), 300);
     }, 50);
 
     return () => {
@@ -118,26 +122,17 @@ export function PrintReceiptModal({
         document.body,
       )}
 
+      {/* Visibilidade/display do root (tela vs. impressão) é 100% governada
+          por index.css (seletor #sale-receipt-print-root) — estático, já
+          presente no bundle antes do window.print() rodar. Só o tamanho
+          físico da página (@page), que depende da altura medida em runtime,
+          precisa ser injetado aqui. */}
       {printMode && (
         <style>{printMode === 'thermal'
-          ? `
-    @page { margin: 0; size: 80mm ${receiptHeight > 0 ? receiptHeight + 'px' : 'auto'}; }
-    @media print {
-      body > *:not(#${PRINT_ROOT_ID}) { display: none !important; }
-      #${PRINT_ROOT_ID} { position: absolute !important; left: 0 !important; top: 0 !important; display: block !important; }
-      body { margin: 0; padding: 0; background: white; }
-      * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    }
-  `
-          : `
-    @page { margin: 10mm; size: A4 portrait; }
-    @media print {
-      body > *:not(#${PRINT_ROOT_ID}) { display: none !important; }
-      #${PRINT_ROOT_ID} { position: absolute !important; left: 0 !important; top: 0 !important; display: block !important; }
-      body { margin: 0; padding: 0; background: white; }
-      * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    }
-  `
+          ? `@page { margin: 0; size: 80mm ${receiptHeight > 0 ? receiptHeight + 'px' : 'auto'}; }
+    @media print { body { margin: 0; padding: 0; background: white; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }`
+          : `@page { margin: 10mm; size: A4 portrait; }
+    @media print { body { margin: 0; padding: 0; background: white; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }`
         }</style>
       )}
 
@@ -149,7 +144,7 @@ export function PrintReceiptModal({
         // mantém `w-full`.
         <div
           id={PRINT_ROOT_ID}
-          className={`fixed top-[-9999px] left-[-9999px] bg-white text-black ${printMode === 'a4' ? 'w-[210mm]' : 'w-full'}`}
+          className={`bg-white text-black ${printMode === 'a4' ? 'w-[210mm]' : 'w-full'}`}
         >
           <div ref={receiptRef} className="mx-auto flex w-full justify-center">
             <SaleReceipt company={company} sale={sale} format={printMode} />

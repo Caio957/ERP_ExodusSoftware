@@ -277,8 +277,12 @@ export function PdvPage() {
         // a última linha.
         setReceiptHeight(receiptRef.current.scrollHeight + 15);
       }
-      // Timeout 2: aguarda o estado de altura atualizar o <style> antes de imprimir
-      window.setTimeout(() => window.print(), 50);
+      // Timeout 2: aguarda o estado de altura atualizar o <style> antes de
+      // imprimir. 300ms (não 50ms) — o spooler de impressão do Android
+      // Chromium precisa de mais margem para processar a injeção do portal
+      // no DOM e computar o layout antes que a thread seja congelada pelo
+      // diálogo nativo de impressão.
+      window.setTimeout(() => window.print(), 300);
     }, 50);
   }
 
@@ -767,7 +771,7 @@ export function PdvPage() {
             <footer className="shrink-0 space-y-2 border-t border-slate-200 bg-slate-50 p-4 rounded-b-xl">
               {/* Botões travados enquanto uma impressão está em curso
                   (`printMode !== null`) — a janela assíncrona de medição +
-                  window.print() (dois timeouts de 50ms) permitia cliques
+                  window.print() (timeouts de 50ms + 300ms) permitia cliques
                   repetidos que engasgam o navegador do celular. */}
               <div className="grid grid-cols-2 gap-2">
                 <button
@@ -798,31 +802,21 @@ export function PdvPage() {
       )}
     </div>
 
+    {/* Visibilidade/display do root (tela vs. impressão) é 100% governada por
+        index.css (seletores por id) — estático, já presente no bundle antes
+        do window.print() rodar. Só o tamanho físico da página (@page), que
+        depende da altura medida em runtime, precisa ser injetado aqui. */}
     {printMode && (
       <style>{printMode === 'thermal'
-        ? `
-    @page { margin: 0; size: 80mm ${receiptHeight > 0 ? receiptHeight + 'px' : 'auto'}; }
-    @media print {
-      body > *:not(#thermal-print-root) { display: none !important; }
-      #thermal-print-root { position: absolute !important; left: 0 !important; top: 0 !important; display: block !important; }
-      body { margin: 0; padding: 0; background: white; }
-      * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    }
-  `
-        : `
-    @page { margin: 10mm; size: A4 portrait; }
-    @media print {
-      body > *:not(#a4-print-root) { display: none !important; }
-      #a4-print-root { position: absolute !important; left: 0 !important; top: 0 !important; display: block !important; }
-      body { margin: 0; padding: 0; background: white; }
-      * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    }
-  `
+        ? `@page { margin: 0; size: 80mm ${receiptHeight > 0 ? receiptHeight + 'px' : 'auto'}; }
+    @media print { body { margin: 0; padding: 0; background: white; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }`
+        : `@page { margin: 10mm; size: A4 portrait; }
+    @media print { body { margin: 0; padding: 0; background: white; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }`
       }</style>
     )}
 
     {receiptData && printMode === 'thermal' && createPortal(
-      <div id="thermal-print-root" className="fixed top-[-9999px] left-[-9999px] w-full bg-white text-black">
+      <div id="thermal-print-root" className="w-full bg-white text-black">
         <div ref={receiptRef} className="mx-auto flex w-full justify-center">
           <SaleReceipt company={company ?? {}} sale={receiptData} format="thermal" />
         </div>
@@ -836,7 +830,7 @@ export function PdvPage() {
       // clampava a 210mm para a largura do celular), e o `@page A4` depois
       // escalava esse layout esmagado — cupom quebrado. Ancorar em 210mm torna
       // a renderização off-screen imune ao viewport.
-      <div id="a4-print-root" className="fixed top-[-9999px] left-[-9999px] w-[210mm] bg-white text-black">
+      <div id="a4-print-root" className="w-[210mm] bg-white text-black">
         <div className="w-full max-w-[210mm] mx-auto bg-white">
           <SaleReceipt company={company ?? {}} sale={receiptData} format="a4" />
         </div>
