@@ -259,44 +259,15 @@
 }
 
 /* ------------------------------------------------------------------ */
-/* Recibo térmico (58mm / 80mm) — usado apenas na impressão (4.7).     */
-/* ------------------------------------------------------------------ */
-@media print {
-  body::before,
-  body::after {
-    display: none !important;
-  }
-  body * {
-    visibility: hidden;
-  }
-  .print-area,
-  .print-area *,
-  .thermal-receipt,
-  .thermal-receipt * {
-    visibility: visible;
-  }
-  /* position:absolute é obrigatório aqui: os ancestrais ficam com
-     visibility:hidden (que esconde mas MANTÉM o espaço ocupado no fluxo),
-     então sem isso o recibo é empurrado milhares de pixels para baixo pelo
-     layout normal do DOM, o que trava o preview de impressão do Chrome ao
-     tentar encaixar isso dentro de um @page de altura restrita. Como o
-     papel e a div têm exatamente 80mm, left:0/top:0 encaixam perfeitamente
-     no topo da bobina, ignorando o "lixo" invisível abaixo. */
-  .print-area,
-  .thermal-receipt {
-    position: absolute !important;
-    left: 0 !important;
-    top: 0 !important;
-  }
-}
-
-/* ------------------------------------------------------------------ */
 /* Roots de impressão off-screen (PdvPage/PrintReceiptModal/CashPage). */
-/* Controle de visibilidade centralizado aqui — não em classes Tailwind */
-/* no JSX — porque o spooler de impressão do Android Chromium é conhecido */
-/* por falhar (página em branco) ao processar overrides de posicionamento */
-/* injetados via classe utilitária tarde demais no ciclo de render; uma */
-/* folha de estilo estática, já presente no bundle, elimina essa corrida. */
+/* Só precisam ficar invisíveis NA TELA enquanto o React os renderiza  */
+/* para poderem ser medidos e clonados (lib/iframePrint.ts). Não há    */
+/* mais nenhuma regra @media print aqui: a impressão em si roda dentro */
+/* de um iframe isolado (documento HTML à parte, com seu próprio CSS   */
+/* clonado), então o documento principal nunca entra em modo de        */
+/* impressão — as antigas regras @media print que escondiam o app      */
+/* (`.print-area`/`.thermal-receipt` por visibility, e os ids por      */
+/* display:none) eram código morto nesse fluxo e foram removidas.      */
 /* ------------------------------------------------------------------ */
 @media screen {
   #thermal-print-root,
@@ -308,38 +279,5 @@
     opacity: 0;
     pointer-events: none;
     z-index: -9999;
-  }
-}
-
-@media print {
-  /* 1. Libera o body/root de qualquer trava de altura/scroll que possa
-        confundir o cálculo de paginação do spooler. */
-  html,
-  body,
-  #root {
-    height: auto !important;
-    min-height: 100% !important;
-    overflow: visible !important;
-    position: static !important;
-    margin: 0 !important;
-    padding: 0 !important;
-  }
-
-  /* 2. Remove fisicamente o app do DOM impresso (não só visibility:hidden,
-        que mantém a altura fantasma e gera páginas extras em branco). */
-  body > *:not(#thermal-print-root):not(#a4-print-root):not(#sale-receipt-print-root) {
-    display: none !important;
-  }
-
-  /* 3. Força o root de impressão ativo para o topo, visível. */
-  #thermal-print-root,
-  #a4-print-root,
-  #sale-receipt-print-root {
-    position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    opacity: 1 !important;
-    display: block !important;
-    visibility: visible !important;
   }
 }
