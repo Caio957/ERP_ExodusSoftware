@@ -444,8 +444,12 @@ function CashPrintButton({ register }: { register: CashRegister }) {
       // margins); +15px de sobra cirúrgica para a guilhotina não cortar
       // a última linha.
       if (receiptRef.current) setReceiptHeight(receiptRef.current.scrollHeight + 15);
-      // Timeout 2: aguarda o estado de altura atualizar o <style> antes de imprimir
-      window.setTimeout(() => window.print(), 50);
+      // Timeout 2: aguarda o estado de altura atualizar o <style> antes de
+      // imprimir. 300ms (não 50ms) — o spooler de impressão do Android
+      // Chromium precisa de mais margem para processar a injeção do portal
+      // no DOM e computar o layout antes que a thread seja congelada pelo
+      // diálogo nativo de impressão.
+      window.setTimeout(() => window.print(), 300);
     }, 50);
   }
 
@@ -455,20 +459,18 @@ function CashPrintButton({ register }: { register: CashRegister }) {
         <Printer className="h-5 w-5" /> Imprimir Resumo
       </button>
 
+      {/* Visibilidade/display do root (tela vs. impressão) é 100% governada
+          por index.css (seletor #thermal-print-root) — estático, já presente
+          no bundle antes do window.print() rodar. Só o tamanho físico da
+          página (@page), que depende da altura medida em runtime, precisa
+          ser injetado aqui. */}
       {printing && (
-        <style>{`
-    @page { margin: 0; size: 80mm ${receiptHeight > 0 ? receiptHeight + 'px' : 'auto'}; }
-    @media print {
-      body > *:not(#thermal-print-root) { display: none !important; }
-      #thermal-print-root { position: absolute !important; left: 0 !important; top: 0 !important; display: block !important; }
-      body { margin: 0; padding: 0; background: white; }
-      * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    }
-  `}</style>
+        <style>{`@page { margin: 0; size: 80mm ${receiptHeight > 0 ? receiptHeight + 'px' : 'auto'}; }
+    @media print { body { margin: 0; padding: 0; background: white; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }`}</style>
       )}
 
       {printing && createPortal(
-        <div id="thermal-print-root" className="fixed top-[-9999px] left-[-9999px] w-full bg-white text-black">
+        <div id="thermal-print-root" className="w-full bg-white text-black">
           <div
             ref={receiptRef}
             className="mx-auto flex w-full max-w-[80mm] justify-center font-mono text-[11px] leading-tight"

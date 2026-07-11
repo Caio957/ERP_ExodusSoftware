@@ -289,3 +289,57 @@
     top: 0 !important;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Roots de impressão off-screen (PdvPage/PrintReceiptModal/CashPage). */
+/* Controle de visibilidade centralizado aqui — não em classes Tailwind */
+/* no JSX — porque o spooler de impressão do Android Chromium é conhecido */
+/* por falhar (página em branco) ao processar overrides de posicionamento */
+/* injetados via classe utilitária tarde demais no ciclo de render; uma */
+/* folha de estilo estática, já presente no bundle, elimina essa corrida. */
+/* ------------------------------------------------------------------ */
+@media screen {
+  #thermal-print-root,
+  #a4-print-root,
+  #sale-receipt-print-root {
+    position: fixed;
+    top: -9999px;
+    left: -9999px;
+    opacity: 0;
+    pointer-events: none;
+    z-index: -9999;
+  }
+}
+
+@media print {
+  /* 1. Libera o body/root de qualquer trava de altura/scroll que possa
+        confundir o cálculo de paginação do spooler. */
+  html,
+  body,
+  #root {
+    height: auto !important;
+    min-height: 100% !important;
+    overflow: visible !important;
+    position: static !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* 2. Remove fisicamente o app do DOM impresso (não só visibility:hidden,
+        que mantém a altura fantasma e gera páginas extras em branco). */
+  body > *:not(#thermal-print-root):not(#a4-print-root):not(#sale-receipt-print-root) {
+    display: none !important;
+  }
+
+  /* 3. Força o root de impressão ativo para o topo, visível. */
+  #thermal-print-root,
+  #a4-print-root,
+  #sale-receipt-print-root {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    opacity: 1 !important;
+    display: block !important;
+    visibility: visible !important;
+  }
+}
