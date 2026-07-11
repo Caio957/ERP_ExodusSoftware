@@ -22,16 +22,15 @@
   commits são empurrados para o GitHub nessas branches; o **merge para `main` é feito
   manualmente via PR no GitHub** (o merge dispara o auto-deploy no Railway). A IA
   trabalha sempre na branch ativa indicada — nunca commita direto na `main` sem
-  instrução explícita. ✅ **`refinamento-vendas` mesclada via PR #10** (`8458271`) e
-  ✅ **`refinamento-compras` mesclada via PR #11** (`4049233`, 2026-07-09) — ver §11
-  para o histórico completo de commits de ambas. **`main` e `origin/main` estão em
-  sincronia em `4049233`.** Branch ativa no momento: **`feature/bloqueio-edicao-compras`**
-  (criada a partir da `main` pós-merge da `refinamento-compras`) — 6 commits
-  (`33fd0c0`→`eff63de`, fechamento tático da aba de Compras: trava de edição com
-  financeiro ativo, paginação em Compras Lançadas e Sugestão de Compra, scroll-to-top,
-  código/marca do produto e formatação da média diária, Nº NF + Data de Entrada na
-  grade), **enviada ao GitHub, pronta para PR/merge** — ver §11 para o histórico
-  completo.
+  instrução explícita. ✅ **`refinamento-vendas` mesclada via PR #10** (`8458271`),
+  ✅ **`refinamento-compras` mesclada via PR #11** (`4049233`, 2026-07-09) e
+  ✅ **`feature/bloqueio-edicao-compras` + `feature/refinamento-financeiro` mescladas
+  via PR #13** (`3a38eea`, 2026-07-10 — a segunda continuou a partir da primeira, então
+  o PR trouxe as duas levas de uma vez: fechamento tático de Compras + a onda completa
+  de Financeiro/Caixa/Vendas/PDV/Produtos/Estoque/recibos) — ver §11 para o histórico
+  completo de commits de todas. **`main` e `origin/main` estão em sincronia em
+  `3a38eea`.** Nenhuma branch de feature ativa no momento — a próxima onda de trabalho
+  deve criar uma nova `feature/*`/`refinamento-*` a partir daqui.
   ✅ **Divergência anterior resolvida (2026-07-03)**: as três branches em
   paralelo (`feature/tela-produtos-caio`, `feature/estoque-tipo-movimentacao`
   e `feature/refinamento-cadastros`), incluindo os marcadores de conflito
@@ -182,7 +181,10 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
 - ✅ **Caixa**: abrir, sangria/suprimento, fechar; `/current` com `expectedCash`
   (somado por `SalePayment` em dinheiro); **`/cash/registers`** (histórico),
   **`/cash/:id/movements`** (timeline vendas+manuais), **`PUT/DELETE /cash/transactions/:id`**
-  (só com caixa aberto); **`/summary`** por forma — **só ADMIN**.
+  (só com caixa aberto **e bloqueado se a movimentação tiver origem sistêmica** —
+  descrição iniciada em `"Baixa:"`/`"Estorno"`, geradas pelo Financeiro; excluir
+  essas pelo Caixa quebraria a conciliação sem reabrir o título — estorne pela
+  tela de origem); **`/summary`** por forma — **só ADMIN**.
   **`GET /cash/report`** (Relatório Periódico/Extrato Consolidado): recebe
   `startDate`/`endDate`, RBAC igual ao `/registers` (ADMIN vê a loja toda,
   operador só os próprios caixas); fronteiras de data ancoradas em **UTC-3
@@ -192,11 +194,22 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   = `totalInitialCash + vendas em dinheiro + totalSupply - totalBleed -
   totalCollected` (`totalCollected` = soma do `finalCash` dos caixas já
   fechados — dinheiro recolhido sai da gaveta).
-- ✅ **Financeiro**: listar com **filtros** (tipo, status, pessoa, período, busca);
-  `/installments` (N parcelas, fornecedor/cliente obrigatório); **`/:id/settle`** (baixa
-  parcial/total, grava em `AccountSettlement`) e **`/:id/reverse`** (estorno da última
-  baixa); `PUT/DELETE` bloqueados por origem (nota/venda) **e por baixa existente**.
-  Cada título tem **`code` sequencial**; status `PENDING|PARTIAL|PAID`.
+- ✅ **Financeiro**: listar com **filtros avançados** — `orderBy`
+  (`code`/`description`/`dueDate`/`amount`) + `orderDir`, e `statusFilter` semântico
+  (`ALL`/`OPEN`/`OVERDUE`/`NOT_OVERDUE`/`PARTIAL`/`PAID`, este último com
+  precedência sobre o `status`/`dueFrom`/`dueTo` simples quando presente — "hoje"
+  calculado com o mesmo offset `-03:00` explícito do `/cash/report`, evitando o
+  mesmo bug de fuso já documentado); `/installments` (N parcelas, fornecedor/
+  cliente obrigatório); **`/:id/settle`** (baixa parcial/total, grava em
+  `AccountSettlement`) e **`/:id/reverse`** (estorno da última baixa) — **ambas
+  agora integradas ao Caixa**: exigem um `CashRegister` `OPEN` do operador
+  (`req.user.sub`) e criam uma `CashTransaction` de compensação na mesma
+  transação (`settle` de RECEIVABLE → `SUPPLY`; de PAYABLE → `BLEED`; `reverse`
+  faz o inverso), com descrição `"Baixa: {desc}"`/`"Estorno de Baixa: {desc}"` —
+  essas descrições são o que o Caixa usa para bloquear edição/exclusão indevida
+  (acima). `PUT/DELETE` bloqueados por origem (nota/venda) **e por baixa
+  existente**. Cada título tem **`code` sequencial**; status
+  `PENDING|PARTIAL|PAID`.
 - ✅ **Configurações** (tabela `Setting`, JSON): `/settings/product-form` (campos
   obrigatórios), **`/settings/company`** (dados da empresa), **`/settings/payment-types`**
   (tipos de recebimento). GET autenticado, PUT ADMIN.
@@ -225,6 +238,17 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   dados configurados da empresa (nome, CNPJ/CPF, endereço, telefone **e e-mail**) e a
   observação da venda, igual ao A4 (onda 2026-07-07, ver §11). Code real obtido via
   `POST /api/sales` com `clientRef` idempotente ao finalizar online.
+  **Trava de navegação** (carrinho com item pendente): `beforeunload` nativo
+  (refresh/fechar aba) + interceptação de clique em `<a href>` (menu lateral/bottom
+  nav/drawer) em fase de captura no `document` — o projeto usa `<BrowserRouter>`
+  "clássico" (não `createBrowserRouter`/`RouterProvider`), então `useBlocker` do
+  react-router-dom não está disponível (exige "data router"); a interceptação de
+  clique é o equivalente funcional sem migrar o roteamento do app inteiro.
+  **Blindagem de impressão mobile A4**: o container off-screen de medição
+  (`#a4-print-root`) virou `w-[210mm]` fixo (era `w-full` = largura do viewport no
+  celular, que esmagava a folha A4 via `maxWidth:100%` do template antes do
+  `@page` escalar); botões "Bobina"/"Papel A4" ficam `disabled` durante a janela
+  assíncrona de medição + `window.print()`, evitando cliques repetidos.
 - 🟡 **Cadastros** (`/cadastros`, autenticado): CRUD de **clientes e fornecedores**
   (nome, CPF/CNPJ, telefone, e-mail, endereço) com exclusão protegida por origem.
   **Modal via React Portal** no mesmo padrão ouro de Produtos/Caixa (header com
@@ -294,6 +318,10 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   novo campo em `SaleReceiptData`); cliente sem nome exibe "Consumidor Final" no
   comprovante impresso (mantém "Balcão" nas telas do app). `PrintSaleModal` virou
   só a ponte de dados (busca `sale`+`company`, mapeia para `SaleReceiptData`).
+  **Filtro de período + ordenação**: `startDate`/`endDate` (cobrindo o dia inteiro
+  da data final via `T23:59:59`) e `sortField` (`code`/`date`/`items`) +
+  `sortDir`, incorporados ao mesmo objeto `SalesFilterValues`/`updateFilter` já
+  existente — "Limpar filtros" já reseta tudo de graça.
 - ✅ **Produtos**: filtros (marca/grupo/subgrupo) + busca + **ordenação** (Descrição,
   Código, SKU, Preço de venda — crescente/decrescente via selects no painel de filtros);
   editar produto e variantes (asteriscos `*` também no modal Editar); excluir (com
@@ -327,6 +355,11 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   **Sanitização de payload**: `brand || undefined`, `group || undefined` ao salvar (strings
   vazias seriam rejeitadas pelo Zod `.min(1)` do backend; `undefined` é descartado pelo
   JSON.stringify e o Prisma ignora o campo).
+  **Paginação real** (`currentPage`/`itemsPerPage`, padrão 1/50): o backend já
+  paginava de verdade (`skip`/`take` + `total`) mas o front nunca pedia — ficava
+  fixo em `pageSize=100`; agora envia `page`/`pageSize` de verdade e reseta a
+  página ao mudar filtro/ordenação/tamanho. Rodapé Padrão Ouro + botão flutuante
+  "Voltar ao topo" (Dark Glassmorphism, `scrollY > 300`).
 - ✅ **Caixa**: card gradiente com **saldo atual** (`expectedCash`); suprimento/sangria
   via **modal próprio com observação** (sem `window.prompt`); **timeline de
   movimentações** unindo vendas (leitura) + sangrias/suprimentos (editáveis/excluíveis
@@ -368,19 +401,47 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   acesso negado se a compra tiver **qualquer financeiro vinculado** — simetria com
   `Sale.financialGenerated`, não só parcela já baixada) + **excluir** (estorna
   estoque + remove contas a pagar pendentes; bloqueado se houver título já baixado).
+  **Ordenação** (`sortField`: doc/NF/emissão/entrada/valor/itens + `sortDir`)
+  incorporada ao mesmo `PurchaseFilterValues`; label do filtro de data corrigido
+  de "Data da compra" para "Data de emissão" (batendo com a coluna da grade).
 - ✅ **Financeiro**: lançamento manual a pagar/receber com **N parcelas** e
   **fornecedor/cliente obrigatório**; cada título tem **código sequencial** (`code`);
   **baixa parcial** (registra liquidações em `AccountSettlement`, mostra saldo restante)
-  e **quitação integral com desconto**; **estorno da última baixa**; **filtros** por
-  período (vencimento) e busca por descrição/pessoa; **títulos vencidos destacados**;
-  edição/exclusão **bloqueadas** para origem nota/venda e para títulos já baixados.
+  e **quitação integral com desconto**; **estorno da última baixa**; **filtros
+  avançados** (busca, período de vencimento, `statusFilter` semântico — Todos/
+  Abertos/Vencidos/A Vencer/Parcial/Quitado — e ordenação por código/descrição/
+  vencimento/valor, ambos crescente/decrescente) + **paginação** (10/25/50/100,
+  padrão Tray) + **botão flutuante "Voltar ao topo"** (Dark Glassmorphism);
+  **títulos vencidos destacados**; edição/exclusão **bloqueadas** para origem
+  nota/venda e para títulos já baixados. **Modais "Novo lançamento" e "Baixar
+  título" em Padrão Ouro** (`createPortal`, header/body/footer estritos,
+  bottom-sheet no mobile) — antes usavam o wrapper `<Modal>` sem portal, sofrendo
+  o bug de containing block do `animate-fade-in`; o input "Valor a baixar" do
+  modal de baixa migrou de `type="number"` (steppers nativos) para o padrão
+  blindado do projeto (`type="text"` + `inputMode="decimal"` + `sanitizeBr` +
+  bloqueio de `-`/`+`/`e`/`E` + seleção total no foco). **Descrições
+  rastreáveis**: parcelas geradas por Vendas/Compras agora incluem o código de
+  origem — `"Venda #{code} - Parcela X/Y"` e `"Compra #{documentNumber} -
+  Parcela X/Y"` (antes só "Venda a prazo X/Y" / "NF ... - parcela X/Y", sem
+  indicar qual venda/compra originou o título). **Integração com o Caixa**:
+  `/settle` e `/reverse` agora exigem um caixa aberto do operador e criam uma
+  `CashTransaction` de compensação automaticamente (ver bullet do Caixa acima).
 - ✅ **Dashboard** (ADMIN, `/dashboard`): visão financeira por **período** — vendas
   (total/qtd/ticket), recebimentos por forma, série diária (gráfico corrigido) e
   situação de contas a pagar/receber (aberto e vencido); **card Receitas − Despesas**
   (saldo +/− do período).
 - ✅ **Acerto de estoque** (ADMIN, `/estoque`): inventário — informa a quantidade
   contada e o motivo; registra a diferença como `StockMovement` tipo `ADJUST`;
-  **histórico de acertos** com editar (recalcula estoque) e apagar (reverte diff).
+  **histórico de acertos** com editar (recalcula estoque) e apagar (reverte diff),
+  agora com **paginação client-side** (10/25/50/100) e coluna **"Cód."** sequencial
+  (`StockMovement.code`, nulo nos demais tipos de movimento — calculado
+  manualmente via `aggregate max+1` escopado a `type='ADJUST'` na criação, mesmo
+  padrão de `Invoice.documentNumber`, já que a tabela é um razão compartilhado
+  com vendas/notas e um autoincrement de banco misturaria a numeração).
+  **Busca de produto blindada para teclado virtual mobile**: input envolvido em
+  `<form onSubmit>` (`type="search"` + `enterKeyHint="search"`) — o `onKeyDown`
+  isolado não é confiável em teclados virtuais que disparam a submissão nativa
+  do formulário sem um evento de tecla JS correspondente.
   Endpoints: `GET/PUT/DELETE /products/stock-adjustments(/:id)`.
 - ✅ **Configurações** (ADMIN) em abas: **Produto** (campos obrigatórios + lote/validade
   padrão + **modelo de precificação** `pricingMode`: Margem ou Markup — radio group;
@@ -1367,6 +1428,99 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
   `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros** em todos os
   commits.
 
+- ✅ **Onda 2026-07-10 — Financeiro completo (filtros/ordenação/Padrão Ouro/
+  integração com Caixa) + blindagens transversais (Vendas/Compras/PDV/Produtos/
+  Estoque/recibos)** (2026-07-10): Branches `feature/bloqueio-edicao-compras`
+  (continuação) e `feature/refinamento-financeiro` — **mescladas na `main` via
+  PR #13** (`3a38eea`). 15 commits (`4f54d54`→`5e22f81`).
+  - **`4f54d54`** (rastreabilidade financeira): descrições de parcelas geradas
+    por Vendas/Compras passaram a incluir o código de origem —
+    `services/sales.ts` (`createSale`/`updateSale`) e `routes/invoices.ts`
+    (5 pontos de geração: `/confirm` custom/duplicatas, `/manual`, refazer
+    financeiro, edição completa) — `"Venda a prazo X/Y"` virou `"Venda #{code} -
+    Parcela X/Y"`, `"NF ... - parcela X/Y"` virou `"Compra #{documentNumber} -
+    Parcela X/Y"`. Validado com round-trip real (venda a prazo criada e
+    editada, compra manual, refazer financeiro e edição completa de compra —
+    todas as 5 rotas conferidas).
+  - **`9372c62`** (filtros de status + ordenação no Financeiro): novo
+    `listFinancialQuerySchema` (não existia — a rota montava o querystring
+    inline) com `orderBy`/`orderDir`/`statusFilter` semântico (OPEN/OVERDUE/
+    NOT_OVERDUE/PARTIAL/PAID/ALL); "hoje" calculado com offset `-03:00`
+    explícito (mesmo raciocínio de `cash.ts`). Validado com 4 títulos de teste
+    cobrindo todos os cenários de status/vencimento.
+  - **`cc500cf`** (paginação no Financeiro): seletor "Linhas por página" +
+    Anterior/Próximo (`PAGE_SIZE` fixo virou estado `pageSize`).
+  - **`41c0215`** / **`3e834bc`** (Padrão Ouro nos modais de lançamento):
+    `NewEntryModal` e `SettleModal` migrados do wrapper `<Modal>` (sem portal)
+    para `createPortal` + header/body/footer estritos; input "Valor a baixar"
+    blindado (`type="text"` + `sanitizeBr`, era `type="number"` com steppers).
+  - **`5ce8a24`** (integração Financeiro↔Caixa): `/financial/:id/settle` e
+    `/reverse` passaram a exigir um `CashRegister` `OPEN` do operador
+    (`req.user.sub`) e criar uma `CashTransaction` de compensação na mesma
+    transação (RECEIVABLE→SUPPLY / PAYABLE→BLEED na baixa; inverso no
+    estorno), descrição `"Baixa: {desc}"`/`"Estorno de Baixa: {desc}"`.
+    Validado com round-trip real: caixa fechado bloqueia com 400, reaberto
+    processa corretamente ambos os fluxos (recebível e pagável), valores e
+    tipos de `CashTransaction` conferidos byte a byte no banco.
+  - **`2568477`** (blindagem do Caixa contra alteração de origem sistêmica):
+    `PUT/DELETE /cash/transactions/:id` bloqueiam movimentações cuja descrição
+    comece com `"Baixa:"`/`"Estorno"` — excluí-las pelo Caixa deletava a
+    `CashTransaction` sem reabrir o título no Financeiro, quebrando a
+    conciliação. **Achado**: a missão original pedia checar `transaction.saleId`,
+    mas `CashTransaction` não tem esse campo (vendas são um model `Sale`
+    separado, nunca teria `id` resolvido nessa tabela) — incluir o campo
+    quebraria o `typecheck`; removido da trava, mantida só a checagem por
+    prefixo de descrição (a proteção real).
+  - **`dfe88ee`** (filtro de período + ordenação em Vendas): `startDate`/
+    `endDate` + `sortField`(code/date/items)/`sortDir`, incorporados ao mesmo
+    `SalesFilterValues` já existente.
+  - **`8f96425`** (ordenação em Compras Lançadas + fix de rótulo): mesmo padrão
+    de Vendas (`sortField`: doc/NF/emissão/entrada/valor/itens); "Data da
+    compra" renomeado para "Data de emissão" (ambiguidade com "Data de Entrada").
+  - **`58b93b7`** (trava de navegação no PDV): `beforeunload` nativo +
+    interceptação de clique em `<a href>` em fase de captura no `document`.
+    **Achado**: `useBlocker` do react-router-dom exige um "data router"
+    (`createBrowserRouter`/`RouterProvider`); o app usa `<BrowserRouter>`
+    clássico — migrar o roteamento inteiro para desbloquear um hook estava fora
+    do escopo, então a interceptação de clique é o equivalente funcional.
+  - **`c01c959`** (paginação real em Produtos): o backend já paginava de
+    verdade (`skip`/`take` + `total`) mas o front pedia sempre `pageSize=100`
+    fixo; conectado a estados reais + botão "Voltar ao topo". Validado com
+    chamadas reais à API (`page=1`/`page=2`, itens distintos e corretamente
+    fatiados).
+  - **`6a129bf`** (fix Enter mobile na busca de Estoque): input de busca
+    envolvido em `<form onSubmit>` (`type="search"` + `enterKeyHint="search"`);
+    correção adicional necessária: botões de resultado ganharam `type="button"`
+    explícito (sem isso, clicar num resultado também re-disparava a submissão
+    do formulário, já que `<button>` sem `type` é `submit` por padrão dentro
+    de um `<form>`).
+  - **`1157ad8`** (paginação no histórico de acertos): client-side (o backend
+    retorna até 200 registros de uma vez, sem `page`/`pageSize`).
+  - **`b595f50`** (código sequencial nos acertos de estoque): `StockMovement.code
+    Int?` (migração aditiva `20260710041311_add_code_to_stock_adjustments`),
+    calculado manualmente via `aggregate max+1` escopado a `type='ADJUST'` —
+    um autoincrement de banco simples numeraria todos os tipos de movimento
+    juntos (vendas, notas, acertos), não uma sequência limpa só de acertos como
+    o `#1, #2` pedido. Validado com 2 acertos reais consecutivos → `code: 1` e
+    `code: 2`.
+  - **`5e22f81`** (blindagem de impressão mobile): **Achado crítico** — a missão
+    pedia integrar Web Share API + geração de PDF via blob/`html2canvas`, mas o
+    projeto **não tem nenhuma lib de PDF nem usa Blob/`navigator.share`/
+    `window.open`** em lugar nenhum; o motor real é `window.print()` nativo com
+    Dynamic Measurement Engine (mede altura off-screen, injeta `@page`, remove
+    fisicamente o app do DOM impresso). Implementar o pedido literal exigiria um
+    rewrite arquitetural (e `html2canvas` rasterizaria na largura do viewport
+    mobile, *causando* o esmagamento que a missão queria corrigir) — não
+    executado; fica como decisão de produto em aberto (ver §12). Em vez disso,
+    corrigido o bug real: container off-screen do A4 (`PdvPage.tsx` e
+    `PrintReceiptModal.tsx`) era `w-full` (largura do viewport no celular,
+    esmagando a folha 210mm via `maxWidth:100%` do template antes do `@page`
+    escalar) — ancorado em `w-[210mm]` fixo; térmico ganhou `minWidth:300px`
+    como blindagem extra; botões de imprimir (PDV e `PrintReceiptModal`) ficam
+    `disabled` durante a janela assíncrona de impressão.
+  `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros** em todos os
+  commits.
+
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
 ---
@@ -1396,6 +1550,19 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
     bases grandes de clientes/fornecedores — hoje busca até 100 registros por
     tipo sem paginação; edição de fornecedor com múltiplos contatos; outros
     itens ainda não relatados).
+16. **Geração de PDF real + Web Share API para o recibo (mobile)** — decisão de
+    produto em aberto (2026-07-10): uma missão pediu geração de PDF via blob
+    (`html2canvas`/`jspdf`) + `navigator.share` para o recibo no celular, mas o
+    projeto **não usa nada disso hoje** — o motor é `window.print()` nativo
+    (Dynamic Measurement Engine, ver §5 Recibo). Implementar o pedido like-for-like
+    seria um rewrite arquitetural (novas deps pesadas) e o `html2canvas`
+    rasterizaria o DOM na largura do viewport do celular — o mesmo esmagamento
+    que se queria corrigir, só que garantido em vez de acidental. O bug real de
+    esmagamento do A4 no mobile já foi corrigido (container off-screen com
+    largura fixa `210mm`, ver Onda 2026-07-10 em §11). Retomar com o Comandante
+    **só se** o objetivo for deliberadamente trocar `window.print()` por
+    download/compartilhamento de PDF (ex.: enviar recibo por WhatsApp) — nesse
+    caso é uma decisão de produto, não um bug a corrigir.
 
 ---
 
