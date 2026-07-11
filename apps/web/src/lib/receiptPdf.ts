@@ -43,18 +43,23 @@ export async function generateReceiptPdfBlob(
 
   const width = CAPTURE_WIDTH_PX[format];
   const host = document.createElement('div');
-  // `position: absolute` (não `fixed`) + inserido no fluxo normal do
-  // documento: `position: fixed` com coordenadas negativas é conhecido por
-  // gerar captura quebrada/cortada em mobile Safari/Chrome, porque o
-  // viewport visual (barra de endereço recolhendo/expandindo) desalinha o
-  // `getBoundingClientRect()` de elementos `fixed` no momento da leitura do
-  // html2canvas. `absolute` ancora no documento (não no viewport), imune a
-  // esse recálculo.
+  // Estilo 100% inline (nenhuma classe Tailwind) — nada aqui depende de CSS
+  // externo/cascata para definir a largura. `position: absolute` (não
+  // `fixed`) + inserido no fluxo normal do documento: `position: fixed` com
+  // coordenadas negativas é conhecido por gerar captura quebrada/cortada em
+  // mobile Safari/Chrome, porque o viewport visual (barra de endereço
+  // recolhendo/expandindo) desalinha o `getBoundingClientRect()` de
+  // elementos `fixed` no momento da leitura do html2canvas. `absolute`
+  // ancora no documento (não no viewport), imune a esse recálculo.
+  // `display` nunca é tocado (fica no padrão `block` de uma `<div>`) — se
+  // fosse `none`, o html2canvas ignoraria o elemento por completo.
+  host.style.display = 'block';
   host.style.position = 'absolute';
   host.style.top = '0';
   host.style.left = '-99999px';
   host.style.width = `${width}px`;
-  host.style.background = '#ffffff';
+  host.style.minWidth = `${width}px`;
+  host.style.backgroundColor = '#ffffff';
   document.body.appendChild(host);
 
   const root = createRoot(host);
@@ -65,11 +70,25 @@ export async function generateReceiptPdfBlob(
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     });
 
+    // Duas redes de segurança adicionais, além do duplo rAF acima — o
+    // Comandante relatou colunas somem/layout quebra mesmo no desktop, o que
+    // aponta para uma corrida de timing, não só um quirk de viewport mobile:
+    //  1) `document.fonts.ready`: o comprovante usa fontes customizadas
+    //     (Inter/Plus Jakarta Sans); se a captura ocorrer antes do
+    //     `@font-face` aplicar, o texto é medido com a fonte fallback do
+    //     sistema (largura diferente), o que pode empurrar/cortar colunas —
+    //     mais determinístico que um sleep fixo, pois espera o evento real.
+    //  2) Pausa fixa de 500ms como rede final, cobrindo qualquer efeito
+    //     assíncrono residual que nem o rAF nem `fonts.ready` peguem.
+    await document.fonts.ready;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
     const canvas = await html2canvas(host, {
       backgroundColor: '#ffffff',
       scale: 2, // nitidez do texto no PDF (~192dpi efetivo)
       width,
       windowWidth: width,
+      useCORS: true,
       // Zera o offset de rolagem da página real na hora de localizar o
       // elemento — outro gatilho documentado de captura deslocada/cortada
       // em mobile quando o host está fora da área visível.
