@@ -20,6 +20,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ArrowUp,
+  Share2,
 } from 'lucide-react';
 import type { SalesSettings } from '@exodus/shared';
 import { api, ApiError } from '../lib/api';
@@ -27,6 +28,7 @@ import { type CompanyInfo, type SaleReceiptData } from '../components/SaleReceip
 import { PrintReceiptModal } from '../components/PrintReceiptModal';
 import { ChangeCalculatorModal } from '../components/ChangeCalculatorModal';
 import { useSearchHandler } from '../hooks/useSearchHandler';
+import { generateReceiptPdfBlob, shareOrDownloadReceipt } from '../lib/receiptPdf';
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -112,6 +114,7 @@ export function SalesPage() {
   const [viewingId, setViewingId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [printingId, setPrintingId] = useState<string | null>(null);
+  const [sharingId, setSharingId] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [filterValues, setFilterValues] = useState<SalesFilterValues>(EMPTY_SALES_FILTERS);
 
@@ -425,6 +428,14 @@ export function SalesPage() {
                         <Eye className="h-4 w-4" />
                       </button>
                       <button
+                        className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition hover:bg-brand-50 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={sharingId === s.id}
+                        onClick={() => setSharingId(s.id)}
+                        title="Compartilhar recibo (PDF)"
+                      >
+                        <Share2 className="h-4 w-4" />
+                      </button>
+                      <button
                         className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
                         onClick={() => handleDelete(s)}
                         title="Excluir"
@@ -528,6 +539,7 @@ export function SalesPage() {
       )}
 
       {printingId && <PrintSaleModal saleId={printingId} onClose={() => setPrintingId(null)} />}
+      {sharingId && <ShareSaleWorker saleId={sharingId} onDone={() => setSharingId(null)} />}
 
       <ScrollToTopButton />
     </div>
@@ -747,23 +759,14 @@ function Row({ label, value, tone }: { label: string; value: string; tone?: 'ros
 // ---------------------------------------------------------------------------
 // Impressão (escolha do formato: cupom térmico ou folha A4).
 // ---------------------------------------------------------------------------
-function PrintSaleModal({ saleId, onClose }: { saleId: string; onClose: () => void }) {
-  const { data: sale } = useQuery({
-    queryKey: ['sale', saleId],
-    queryFn: () => api.get<SaleDetail>(`/api/sales/${saleId}`),
-  });
-  const { data: company } = useQuery({
-    queryKey: ['settings', 'company'],
-    queryFn: () => api.get<CompanyInfo>('/api/settings/company'),
-  });
 
-  if (!sale) return null;
-
-  // Ponte de dados: o histórico de vendas guarda itens com `variant.product.name`
-  // (relação completa), enquanto o motor de impressão (mesmo formato usado no
-  // PDV) espera uma descrição já resolvida por item — mapeamento equivalente
-  // ao que o PDV monta a partir do carrinho.
-  const receipt: SaleReceiptData = {
+// Ponte de dados: o histórico de vendas guarda itens com `variant.product.name`
+// (relação completa), enquanto o motor de impressão/PDF (mesmo formato usado
+// no PDV) espera uma descrição já resolvida por item — mapeamento equivalente
+// ao que o PDV monta a partir do carrinho. Reaproveitado por `PrintSaleModal`
+// (impressão nativa) e `ShareSaleWorker` (compartilhamento via PDF).
+function buildSaleReceiptData(sale: SaleDetail): SaleReceiptData {
+  return {
     code: sale.code,
     soldAt: sale.soldAt,
     clientName: sale.client?.name ?? null,
@@ -779,8 +782,62 @@ function PrintSaleModal({ saleId, onClose }: { saleId: string; onClose: () => vo
     payments: sale.payments.length ? sale.payments : [{ method: sale.paymentMethod, amount: sale.totalAmount }],
     notes: sale.notes,
   };
+}
 
-  return <PrintReceiptModal sale={receipt} company={company ?? {}} onClose={onClose} />;
+function PrintSaleModal({ saleId, onClose }: { saleId: string; onClose: () => void }) {
+  const { data: sale } = useQuery({
+    queryKey: ['sale', saleId],
+    queryFn: () => api.get<SaleDetail>(`/api/sales/${saleId}`),
+  });
+  const { data: company } = useQuery({
+    queryKey: ['settings', 'company'],
+    queryFn: () => api.get<CompanyInfo>('/api/settings/company'),
+  });
+
+  if (!sale) return null;
+
+  return <PrintReceiptModal sale={buildSaleReceiptData(sale)} company={company ?? {}} onClose={onClose} />;
+}
+
+// ---------------------------------------------------------------------------
+// Compartilhamento nativo (Web Share API) — worker invisível: busca a venda
+// + dados da empresa, gera o PDF (formato A4, mais legível pro cliente ver no
+// celular do que o cupom estreito de 80mm) e dispara a folha de
+// compartilhamento nativa assim que os dados resolverem, sem modal visível
+// (o botão da linha na tabela já reflete o estado "carregando" via `disabled`).
+// ---------------------------------------------------------------------------
+function ShareSaleWorker({ saleId, onDone }: { saleId: string; onDone: () => void }) {
+  const { data: sale } = useQuery({
+    queryKey: ['sale', saleId],
+    queryFn: () => api.get<SaleDetail>(`/api/sales/${saleId}`),
+  });
+  const { data: company } = useQuery({
+    queryKey: ['settings', 'company'],
+    queryFn: () => api.get<CompanyInfo>('/api/settings/company'),
+  });
+  const fired = useRef(false);
+
+  useEffect(() => {
+    if (!sale || !company || fired.current) return;
+    fired.current = true;
+    const receipt = buildSaleReceiptData(sale);
+    (async () => {
+      try {
+        const blob = await generateReceiptPdfBlob(company, receipt, 'a4');
+        await shareOrDownloadReceipt(blob, `recibo-venda-${receipt.code}.pdf`, {
+          title: `Recibo de Venda #${receipt.code}`,
+          text: 'Segue o recibo da sua compra.',
+        });
+      } catch (err) {
+        console.error('Falha ao gerar/compartilhar recibo', err);
+        window.alert('Não foi possível gerar o recibo. Tente novamente.');
+      } finally {
+        onDone();
+      }
+    })();
+  }, [sale, company, onDone]);
+
+  return null;
 }
 
 // ---------------------------------------------------------------------------

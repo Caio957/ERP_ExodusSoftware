@@ -21,6 +21,7 @@ import {
   Trash,
   ChevronDown,
   ScanBarcode,
+  Share2,
   type LucideIcon,
 } from 'lucide-react';
 import { api } from '../lib/api';
@@ -29,6 +30,7 @@ import { lookupByBarcode } from '../lib/products';
 import { enqueueSale } from '../lib/sync';
 import { SaleReceipt, type CompanyInfo, type SaleReceiptData } from '../components/SaleReceipt';
 import { ChangeCalculatorModal } from '../components/ChangeCalculatorModal';
+import { generateReceiptPdfBlob, shareOrDownloadReceipt } from '../lib/receiptPdf';
 
 interface CartItem {
   variantId: string;
@@ -100,6 +102,7 @@ export function PdvPage() {
   const [printMode, setPrintMode] = useState<'thermal' | 'a4' | null>(null);
   const [receiptHeight, setReceiptHeight] = useState<number>(0);
   const receiptRef = useRef<HTMLDivElement>(null);
+  const [sharing, setSharing] = useState(false);
 
   const { data: register, isLoading } = useQuery({
     queryKey: ['cash-current'],
@@ -280,6 +283,28 @@ export function PdvPage() {
       // Timeout 2: aguarda o estado de altura atualizar o <style> antes de imprimir
       window.setTimeout(() => window.print(), 50);
     }, 50);
+  }
+
+  // Compartilhamento nativo (Web Share API): motor tático alternativo à
+  // impressão — algumas impressoras térmicas Android falham silenciosamente
+  // no motor de impressão nativo (window.print()). Gera o PDF em A4 (mais
+  // legível para o cliente ver num celular do que o cupom estreito de 80mm)
+  // e abre a folha de compartilhamento nativa (WhatsApp etc.).
+  async function handleShare() {
+    if (!receiptData || sharing) return;
+    setSharing(true);
+    try {
+      const blob = await generateReceiptPdfBlob(company ?? {}, receiptData, 'a4');
+      await shareOrDownloadReceipt(blob, `recibo-venda-${receiptData.code}.pdf`, {
+        title: `Recibo de Venda #${receiptData.code}`,
+        text: 'Segue o recibo da sua compra.',
+      });
+    } catch (err) {
+      console.error('Falha ao gerar/compartilhar recibo', err);
+      flash('Não foi possível gerar o recibo. Tente novamente.');
+    } finally {
+      setSharing(false);
+    }
   }
 
   async function doSale(
@@ -785,6 +810,18 @@ export function PdvPage() {
                   📄 Papel A4
                 </button>
               </div>
+              {/* Compartilhar: alternativa tática à impressão nativa (falha
+                  silenciosa em algumas impressoras térmicas Android). Gera o
+                  PDF em background e abre a folha de compartilhamento nativa
+                  (WhatsApp etc.); trava o botão durante a geração para evitar
+                  toques repetidos. */}
+              <button
+                className="btn-primary flex w-full items-center justify-center gap-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={sharing || !receiptData}
+                onClick={handleShare}
+              >
+                <Share2 className="h-4 w-4" /> {sharing ? 'Gerando PDF...' : 'Compartilhar'}
+              </button>
               <button
                 className="btn-ghost flex w-full items-center justify-center gap-2"
                 onClick={() => setLastSale(null)}
