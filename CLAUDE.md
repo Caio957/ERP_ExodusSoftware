@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-07-10 (rev. b)
+- **Última atualização:** 2026-07-11
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -27,10 +27,23 @@
   ✅ **`feature/bloqueio-edicao-compras` + `feature/refinamento-financeiro` mescladas
   via PR #13** (`3a38eea`, 2026-07-10 — a segunda continuou a partir da primeira, então
   o PR trouxe as duas levas de uma vez: fechamento tático de Compras + a onda completa
-  de Financeiro/Caixa/Vendas/PDV/Produtos/Estoque/recibos) — ver §11 para o histórico
-  completo de commits de todas. **`main` e `origin/main` estão em sincronia em
-  `3a38eea`.** Nenhuma branch de feature ativa no momento — a próxima onda de trabalho
-  deve criar uma nova `feature/*`/`refinamento-*` a partir daqui.
+  de Financeiro/Caixa/Vendas/PDV/Produtos/Estoque/recibos), ✅ **`feature/melhoria-impressao`
+  mesclada via PR #14** (`35e5026`, 2026-07-10 — implementação, iteração e reversão total
+  do compartilhamento de PDF via `html2canvas`/Web Share API; ver Onda 2026-07-10b em §11),
+  ✅ **`fix/android-print-blank-page` mesclada via PR #15** (`6c39ec6`, 2026-07-10 —
+  blindagem CSS estática do motor de impressão nativo para o spooler do Android) e
+  ✅ **`fix/android-print-iframe-engine` mesclada via PR #16** (`76b38c9`, 2026-07-11 —
+  motor de impressão migrado para iframe isolado, ver Onda 2026-07-11 em §11) — ver §11
+  para o histórico completo de commits de todas. **`main` e `origin/main` estão em
+  sincronia em `76b38c9`.** Nenhuma branch de feature ativa no momento — a próxima onda
+  de trabalho deve criar uma nova `feature/*`/`fix/*`/`refinamento-*` a partir daqui.
+  ⚠️ **Padrão observado nesta rodada de correções de impressão**: cada uma das 3 PRs
+  seguidas (#14→#16) tentou resolver o mesmo sintoma relatado pelo Comandante (página em
+  branco/layout quebrado ao imprimir no Android) com uma causa raiz diferente — cada
+  merge foi feito **antes** de confirmação de teste real no tablet, então a próxima
+  correção só chegava depois que a anterior já estava em produção e ainda falhando.
+  **Recomendação para a próxima vez**: validar no dispositivo real antes do merge, não
+  depois — evita essa cadeia de tentativas sequenciais no ar.
   ✅ **Divergência anterior resolvida (2026-07-03)**: as três branches em
   paralelo (`feature/tela-produtos-caio`, `feature/estoque-tipo-movimentacao`
   e `feature/refinamento-cadastros`), incluindo os marcadores de conflito
@@ -229,9 +242,17 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   recibo. Caixa fechado mostra tela de bloqueio.
   **Pagamento:** 4 formas à vista (atalho) + modal com **split (múltiplas formas)** e
   **"A prazo"** (nº de parcelas, 1º vencimento, intervalo → gera contas a receber).
-  **Motor de impressão dual** (`printMode` state): botões "🖨️ Bobina (80mm)" e "📄 Papel A4"
-  no modal pós-venda; `handlePrint` mede altura do recibo via `receiptRef.offsetHeight`
-  (Dynamic Measurement Engine), injeta `@page` com dimensões exatas e chama `window.print()`.
+  **Motor de impressão dual** (`printMode` state): botões "🖨️ Bobina (80mm)" e "📄 Imprimir
+  / Salvar PDF (A4)" no modal pós-venda; `handlePrint` mede a altura do recibo fora da tela
+  (`receiptRef.scrollHeight`) e imprime via **iframe isolado** (`lib/iframePrint.ts`,
+  onda 2026-07-11 — ver §11): clona o HTML/CSS medido para um iframe invisível e chama
+  `print()` no `contentWindow` dele, não mais em `window.print()` do documento principal.
+  Substituiu o "Dynamic Measurement Engine" original (que imprimia o documento principal
+  filtrado por CSS `@media print`), descontinuado por gerar página em branco no spooler
+  de impressão do WebView do Android mesmo após a blindagem CSS estática. O texto do
+  botão A4 deixa explícito que o próprio spooler do SO já oferece "Salvar como PDF"/
+  "Compartilhar" — não há geração de PDF client-side (`html2canvas`/`jsPDF` foram
+  avaliados, implementados e **revertidos**, ver Onda 2026-07-10b em §11).
   **Bobina e A4 reutilizam exclusivamente `<SaleReceipt>`** (`format="thermal"`/`"a4"`) —
   o antigo `components/ThermalReceipt.tsx` (endereço/telefone **hardcoded**, ignorava os
   dados reais de `/api/settings/company`) foi removido; a bobina do PDV agora mostra os
@@ -248,7 +269,7 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   (`#a4-print-root`) virou `w-[210mm]` fixo (era `w-full` = largura do viewport no
   celular, que esmagava a folha A4 via `maxWidth:100%` do template antes do
   `@page` escalar); botões "Bobina"/"Papel A4" ficam `disabled` durante a janela
-  assíncrona de medição + `window.print()`, evitando cliques repetidos.
+  assíncrona de medição + clonagem para o iframe de impressão, evitando cliques repetidos.
 - 🟡 **Cadastros** (`/cadastros`, autenticado): CRUD de **clientes e fornecedores**
   (nome, CPF/CNPJ, telefone, e-mail, endereço) com exclusão protegida por origem.
   **Modal via React Portal** no mesmo padrão ouro de Produtos/Caixa (header com
@@ -368,14 +389,11 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   modais (Sangria/Suprimento/Fechamento) via **React Portal**
   (`createPortal(..., document.body)`) — mesmo padrão da tela de Produtos, imune
   ao containing block do `animate-fade-in`. **Impressão de resumo/fechamento**
-  (`CashPrintButton` + `CashReceipt.tsx`): motor térmico dual reaproveitado do
-  PDV — mede a altura real do recibo (`scrollHeight + 15px` de sobra para a
-  guilhotina) e injeta `@page` dinâmico; usa `createPortal` com `id`s dedicados
-  (`thermal-print-root`/`a4-print-root`) e `body > *:not(#id) { display:none }`
-  no CSS de impressão para eliminar páginas fantasma (o app shell some
-  fisicamente do DOM impresso em vez de só ficar `visibility:hidden` ocupando
-  espaço); `.thermal-receipt` mantém `position:absolute` no `index.css` (raiz
-  do papel 80mm ancorada no topo, ignorando o "lixo" invisível abaixo).
+  (`CashPrintButton` + `CashReceipt.tsx`): mede a altura real do recibo
+  (`scrollHeight + 15px` de sobra para a guilhotina) e imprime via **iframe
+  isolado** (`lib/iframePrint.ts`, mesmo motor do PDV/Vendas, onda 2026-07-11
+  — ver §11), que clona o HTML/CSS medido para um documento à parte e chama
+  `print()` nele em vez de `window.print()` no documento principal.
   **Terceira aba "Relatório"** (`PeriodicReport`): seletor de período (padrão =
   mês corrente), cards de resumo (Total de vendas, Dinheiro em gaveta,
   Suprimentos, Sangrias, Fechamentos/Recolhido) e timeline consolidada de
@@ -535,7 +553,7 @@ Outras decisões:
 | 4.5 | Caixa (abrir/fechar/sangria/suprimento) | `routes/cash.ts`, `CashPage.tsx` (saldo em tempo real) | ✅ |
 | 4.5 | Resumo financeiro só ADMIN | `routes/cash.ts` (`/summary`), `routes/financial.ts` | ✅ |
 | 4.6 | Sugestão de compra | `routes/purchase-suggestions.ts`, `PurchasesPage.tsx` | ✅ |
-| 4.7 | Recibo 58/80mm + print | `components/ThermalReceipt.tsx`, `components/SaleReceipt.tsx`, motor dual em `PdvPage.tsx` | ✅ |
+| 4.7 | Recibo 58/80mm + print | `components/SaleReceipt.tsx`, motor de impressão via iframe em `lib/iframePrint.ts` | ✅ |
 | 4.8 | Resiliência/Logs | `plugins/error-handler.ts`, `components/ErrorBoundary.tsx` | ✅ |
 | — | Produtos: filtros + editar + excluir | `routes/products.ts` (GET filtros, DELETE protegido), `ProductsPage.tsx` | ✅ |
 | — | PDV: desconto/acréscimo/observação + valor unitário editável | `PdvPage.tsx`, `services/sales.ts` | ✅ |
@@ -1564,6 +1582,71 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
   `npm run typecheck` + `npm run build` (web) → **0 erros** em todos os commits,
   incluindo o de reversão.
 
+- ✅ **Onda 2026-07-10c — Blindagem CSS estática do motor de impressão nativo
+  (Android)** (2026-07-10): Branch `fix/android-print-blank-page` (criada a partir
+  da `main` pós-merge da PR #14, só com este commit) — **mesclada via PR #15**
+  (`6c39ec6`). Commit `6401ea7`. Com o compartilhamento de PDF revertido, o
+  Comandante reportou o sintoma original de novo: impressão em branco no Android
+  (bobina e A4), funcionando normalmente em iOS/Desktop.
+  - **Hipótese**: o spooler de impressão do WebView Android falha ao processar
+    overrides de visibilidade/posicionamento injetados tarde no ciclo de render —
+    tanto via classe Tailwind no JSX quanto via `<style>` React montado
+    dinamicamente pouco antes de `window.print()`.
+  - **PdvPage.tsx/CashPage.tsx**: classes `fixed top-[-9999px] left-[-9999px]`
+    removidas do JSX dos roots `#thermal-print-root`/`#a4-print-root` (mantidas só
+    as classes de layout interno — `w-full`/`w-[210mm]`). **PrintReceiptModal.tsx**:
+    mesmo tratamento no root `#sale-receipt-print-root`.
+  - **`index.css`**: bloco `@media screen { #id {...} }` estático (visibilidade na
+    tela) + bloco `@media print { ... }` estático (libera altura/scroll do
+    `html`/`body`/`#root`, remove fisicamente os irmãos do root ativo via
+    `display:none`, força o root para o topo) — cobrindo os 3 ids reais em uso.
+    `<style>` inline em cada arquivo reduzido a conter só a regra `@page`
+    (dinâmica, depende da altura medida em runtime).
+  - Timeout final antes de `window.print()` aumentado de 50ms para 300ms nos 3
+    arquivos, para dar mais margem ao WebView processar a injeção do portal.
+  - `npm run typecheck` + `npm run build` (web) → **0 erros**.
+  - **Resultado**: não resolveu — ver Onda 2026-07-11 abaixo. A causa raiz não
+    era CSS/timing, mas o próprio `window.print()` rodando sobre o documento
+    principal de uma SPA dentro do WebView.
+
+- ✅ **Onda 2026-07-11 — Motor de impressão migrado para iframe isolado
+  (Android WebView)** (2026-07-11): Branch `fix/android-print-iframe-engine`
+  (criada a partir da `main` pós-merge da PR #15) — **mesclada via PR #16**
+  (`76b38c9`). Commit `d190a2c`. A blindagem CSS da onda anterior não resolveu a
+  página em branco no Android — diagnóstico revisado: bug arquitetural conhecido
+  do WebView do Android ao rodar `window.print()` diretamente sobre o documento
+  de uma SPA complexa, independente de CSS/timing.
+  - **Solução — Impressão via Iframe Isolado** (padrão consolidado da indústria
+    para este cenário): novo `lib/iframePrint.ts` (`printElementViaIframe(rootId,
+    pageStyle)`) — cria um `<iframe>` invisível (`position:fixed; right:0;
+    bottom:0; width:0; height:0`), clona todo `<style>`/`<link rel="stylesheet">`
+    do documento principal + o `innerHTML` do root medido para dentro do
+    `iframeDoc` via `write()`, injeta o `pageStyle` (`@page`) recebido como
+    argumento, e chama `.contentWindow.print()` **do iframe**, não mais
+    `window.print()` do documento principal. Delay de 300ms após `onload` antes
+    de imprimir + 500ms após imprimir antes de remover o iframe (compensa o
+    WebView do Android não ser confiavelmente síncrono em `print()`).
+  - Extraído como helper único (não triplicado) — `PdvPage.tsx`,
+    `PrintReceiptModal.tsx` e `CashPage.tsx` (`CashPrintButton`) mantêm a etapa de
+    medição da altura off-screen inalterada (ainda precisam do portal renderizado
+    para ler `scrollHeight`), só a etapa final trocou.
+  - **Simplificação decorrente**: como o documento principal nunca mais entra em
+    modo de impressão, os listeners de `afterprint` em `window` (que nunca mais
+    disparariam) e o estado `receiptHeight` (só existia para atualizar um
+    `<style>` de `@page` no documento principal via re-render) foram removidos —
+    `pageStyle` agora é uma string local passada direto como argumento.
+  - **`index.css`**: os dois blocos `@media print` que escondiam o app principal
+    — o legado por `visibility` (`.print-area`/`.thermal-receipt`) e o por `id`/
+    `display:none` da onda anterior — removidos por completo (código morto: o
+    documento principal nunca mais é impresso). Mantido só o `@media screen` que
+    mantém os roots off-screen invisíveis na tela durante a renderização/medição.
+  - `npm run typecheck` + `npm run build` (web) → **0 erros**.
+  - **Pendente de validação em tablet Android real** (ver §12 item 10) — as duas
+    ondas anteriores (§11 Onda 2026-07-10c e a blindagem de largura fixa do A4 em
+    Onda 2026-07-10, item `5e22f81`) também pareciam corretas na análise de código
+    e só falharam ao testar de fato no dispositivo; tratar esta correção como
+    **não confirmada** até teste real.
+
 ---
 
 ## 12. Pendências, bloqueios e dívidas técnicas
@@ -1579,7 +1662,15 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
 7. ~~**Pagamento único por venda**~~ **RESOLVIDO** (PDV-B): split de pagamento + "A prazo".
 8. **Estoque pode ficar negativo** em vendas offline (decisão consciente). Avaliar política de bloqueio/alerta.
 9. **JWT sem refresh token** e sem revogação (expira em 12h).
-10. **Recibo**: motor dual (térmico + A4) implementado no PDV; layout 80mm ainda **não testado em impressora térmica física real** (apenas Chrome "Salvar como PDF").
+10. **Recibo/impressão no Android — ainda não confirmada em dispositivo real**:
+    motor migrado para impressão via iframe isolado (`lib/iframePrint.ts`, ver
+    Onda 2026-07-11 em §11), depois de uma blindagem CSS estática (Onda
+    2026-07-10c) não ter resolvido a página em branco relatada pelo Comandante no
+    Android. **Nenhuma das correções desta sequência foi validada em tablet
+    Android real ainda** — só análise de código/typecheck/build. Testar bobina e
+    A4 no tablet do balcão antes de considerar esta pendência encerrada; se o
+    iframe também falhar, o próximo suspeito é o próprio driver/spooler de
+    impressão do fabricante do tablet, não mais o código do app.
 11. **Ícones PWA** usam um único SVG (sem PNGs 192/512 dedicados).
 12. ~~**Tela de Suprimento/Sangria** usa `window.prompt()`~~ **RESOLVIDO** (Onda Caixa): modal próprio com observação.
 13. **Tipos de recebimento customizados** são tratados como "à vista não-dinheiro": o backend reconhece apenas os códigos literais `CASH` (entra no `expectedCash`) e `A_PRAZO` (gera parcelas). Um tipo novo com kind CASH/A_PRAZO não teria esse comportamento especial — por isso a tela de Configurações só permite adicionar tipos `OTHER` (os 5 base são fixos quanto a code/kind).
