@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-07-10
+- **Última atualização:** 2026-07-10 (rev. b)
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -1523,6 +1523,47 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
 
 - ⬜ **Testes automatizados (unit/integration)**: ainda não há suíte (ver §12/§13).
 
+- ✅➜❌ **Onda 2026-07-10b — PDF via html2canvas/jsPDF + Web Share API: implementado,
+  iterado e revertido** (2026-07-10): Branch `feature/melhoria-impressao`. Commits
+  `a3b66b8` (implementação), `ca259b5`→`3a02074` (3 rodadas de correção
+  mobile/desktop) e o commit de reversão total logo abaixo. **Decisão de produto
+  revertida pelo Comandante — ver §12 item 16.**
+  - **Implementação inicial**: o Comandante pediu explicitamente (mudança tática,
+    não premissa falsa) um botão "Compartilhar" que gera o recibo como PDF em
+    background (`jsPDF` + `html2canvas`, importados dinamicamente/code-split) e
+    aciona a Web Share API nativa (`navigator.share`, fallback para download em
+    desktop/sem suporte). Novo `lib/receiptPdf.ts` (host off-screen com largura
+    fixa em px, captura via `html2canvas`, `jsPDF` monta o PDF final) + botões em
+    `PdvPage.tsx` (modal pós-venda) e `SalesPage.tsx` (grade, `ShareSaleWorker`
+    invisível reaproveitando `buildSaleReceiptData`).
+  - **3 rodadas de correção mobile/desktop** (relatos sucessivos do Comandante de
+    layout quebrado/espremido/colunas sumindo): (1) `position:fixed`→`absolute`
+    no host + `scrollX/scrollY/x/y: 0` no `html2canvas` (quirk documentado de
+    captura cortada em mobile Safari/Chrome com elementos `fixed` fora da tela);
+    (2) prop `widthPx` opt-in em `SaleReceipt.tsx` (só usada pela captura,
+    preservando o preview on-screen e o `window.print()` físico) trocando a
+    largura do A4 de `210mm` para `800px` puro — unidades físicas (mm) são fonte
+    documentada de erro no motor de layout interno do `html2canvas`, separado do
+    motor nativo do browser — + `flex-nowrap` explícito em todas as linhas
+    header/tabela/totais/pagamento; (3) `document.fonts.ready` + delay de 500ms
+    antes da captura (hipótese de corrida de timing, já que o bug passou a ser
+    relatado também no desktop, não só mobile).
+  - **Reversão total** (ordem explícita do Comandante, mesmo dia): apesar das 3
+    rodadas de correção com causas plausíveis e bem fundamentadas (cada uma
+    endereçando um quirk real e documentado do `html2canvas`), o Comandante
+    determinou que a abordagem inteira é incompatível com o Dynamic Measurement
+    Engine do projeto e reverteu para o motor nativo. Removidos: `lib/receiptPdf.ts`,
+    dependências `jspdf`/`html2canvas` (`npm uninstall`), botão "Compartilhar" (PDV
+    e Vendas), `ShareSaleWorker`, estado `sharing`/`sharingId`. `SaleReceipt.tsx`
+    restaurado ao estado fluido original (sem `widthPx`, sem `flex-nowrap`
+    injetado). Bundle do PWA voltou de ~1.51MB para ~747KB de precache (chunks
+    `html2canvas`/`jspdf` eliminados). Botão "Papel A4" do PDV renomeado para
+    "📄 Imprimir / Salvar PDF (A4)" — o próprio spooler de impressão nativo do
+    Android/iOS já oferece "Salvar como PDF"/"Compartilhar" via `window.print()`,
+    sem necessidade de reimplementar isso no frontend.
+  `npm run typecheck` + `npm run build` (web) → **0 erros** em todos os commits,
+  incluindo o de reversão.
+
 ---
 
 ## 12. Pendências, bloqueios e dívidas técnicas
@@ -1550,19 +1591,18 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
     bases grandes de clientes/fornecedores — hoje busca até 100 registros por
     tipo sem paginação; edição de fornecedor com múltiplos contatos; outros
     itens ainda não relatados).
-16. **Geração de PDF real + Web Share API para o recibo (mobile)** — decisão de
-    produto em aberto (2026-07-10): uma missão pediu geração de PDF via blob
-    (`html2canvas`/`jspdf`) + `navigator.share` para o recibo no celular, mas o
-    projeto **não usa nada disso hoje** — o motor é `window.print()` nativo
-    (Dynamic Measurement Engine, ver §5 Recibo). Implementar o pedido like-for-like
-    seria um rewrite arquitetural (novas deps pesadas) e o `html2canvas`
-    rasterizaria o DOM na largura do viewport do celular — o mesmo esmagamento
-    que se queria corrigir, só que garantido em vez de acidental. O bug real de
-    esmagamento do A4 no mobile já foi corrigido (container off-screen com
-    largura fixa `210mm`, ver Onda 2026-07-10 em §11). Retomar com o Comandante
-    **só se** o objetivo for deliberadamente trocar `window.print()` por
-    download/compartilhamento de PDF (ex.: enviar recibo por WhatsApp) — nesse
-    caso é uma decisão de produto, não um bug a corrigir.
+16. ~~**Geração de PDF real + Web Share API para o recibo (mobile)**~~ **TENTADO
+    E REVERTIDO (2026-07-10)**: implementado (`jspdf`+`html2canvas`, ver Onda
+    2026-07-10b em §11), passou por 3 rodadas de correção de layout
+    mobile/desktop, e foi **revertido por ordem explícita do Comandante** — a
+    abordagem via captura de canvas (`html2canvas`) é considerada incompatível
+    com o Dynamic Measurement Engine nativo do projeto (`window.print()` +
+    `@page` dinâmico). Decisão final: **não usar `html2canvas`/geração de PDF via
+    blob para o recibo** — o motor de impressão nativo já entrega "Salvar como
+    PDF"/"Compartilhar" através do próprio spooler do SO (Android/iOS) quando o
+    usuário chama `window.print()`, sem depender de rasterização client-side.
+    Botão do PDV renomeado para "📄 Imprimir / Salvar PDF (A4)" para deixar essa
+    rota explícita ao operador. Não reabrir sem alinhamento novo do Comandante.
 
 ---
 

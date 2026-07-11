@@ -63,20 +63,10 @@ function ThermalSaleReceipt({
   company,
   sale,
   width = '80mm',
-  widthPx,
 }: {
   company: CompanyInfo;
   sale: SaleReceiptData;
   width?: '58mm' | '80mm';
-  /**
-   * Override em px puro — usado só pela captura de PDF (lib/receiptPdf.ts).
-   * O html2canvas roda uma passada de layout própria (fora do pipeline
-   * nativo do browser) e unidades físicas (mm/cm/in) são uma fonte
-   * documentada de erro de cálculo nesse motor; sobrescrever para px puro
-   * elimina essa ambiguidade sem afetar `window.print()` (que continua
-   * usando `width` em mm por padrão, imutável aqui).
-   */
-  widthPx?: number;
 }) {
   const storeName = company.name?.trim() || 'Exodus Cosméticos';
   return (
@@ -87,11 +77,7 @@ function ThermalSaleReceipt({
       // nunca refluir/esmagar caso o motor de impressão leia o DOM numa tela
       // estreita de celular durante a medição off-screen. Não aplicado ao
       // 58mm (variante mais estreita, hoje não usada).
-      style={
-        widthPx !== undefined
-          ? { width: widthPx, minWidth: widthPx, maxWidth: widthPx }
-          : { width, minWidth: width === '80mm' ? '300px' : undefined }
-      }
+      style={{ width, minWidth: width === '80mm' ? '300px' : undefined }}
     >
       <div className="px-2 py-2">
         <div className="text-center">
@@ -102,7 +88,7 @@ function ThermalSaleReceipt({
         </div>
 
         <div className="my-1 border-t border-dashed border-black" />
-        <div className="flex flex-row flex-nowrap justify-between">
+        <div className="flex justify-between">
           <span>Venda #{sale.code}</span>
           <span>{fmtDate(sale.soldAt)}</span>
         </div>
@@ -112,7 +98,7 @@ function ThermalSaleReceipt({
         {sale.items.map((it, i) => (
           <div key={i} className="mb-1">
             <div className="truncate">{it.description}</div>
-            <div className="flex flex-row flex-nowrap justify-between">
+            <div className="flex justify-between">
               <span>
                 {it.quantity} x {brl(it.unitPrice)}
               </span>
@@ -122,23 +108,23 @@ function ThermalSaleReceipt({
         ))}
 
         <div className="my-1 border-t border-dashed border-black" />
-        <div className="flex flex-row flex-nowrap justify-between">
+        <div className="flex justify-between">
           <span>Subtotal</span>
           <span>{brl(sale.subtotal)}</span>
         </div>
         {sale.discount > 0 && (
-          <div className="flex flex-row flex-nowrap justify-between">
+          <div className="flex justify-between">
             <span>Desconto</span>
             <span>- {brl(sale.discount)}</span>
           </div>
         )}
         {sale.surcharge > 0 && (
-          <div className="flex flex-row flex-nowrap justify-between">
+          <div className="flex justify-between">
             <span>Acréscimo</span>
             <span>+ {brl(sale.surcharge)}</span>
           </div>
         )}
-        <div className="flex flex-row flex-nowrap justify-between text-sm font-bold">
+        <div className="flex justify-between text-sm font-bold">
           <span>TOTAL</span>
           <span>{brl(sale.total)}</span>
         </div>
@@ -146,7 +132,7 @@ function ThermalSaleReceipt({
         <div className="my-1 border-t border-dashed border-black" />
         <div className="font-bold">Pagamento</div>
         {sale.payments.map((p, i) => (
-          <div key={i} className="flex flex-row flex-nowrap justify-between">
+          <div key={i} className="flex justify-between">
             <span>{labelOf(p.method)}</span>
             <span>{brl(p.amount)}</span>
           </div>
@@ -169,28 +155,14 @@ function ThermalSaleReceipt({
 }
 
 /** Comprovante em folha A4, mais convidativo (impressora comum). */
-function A4SaleReceipt({
-  company,
-  sale,
-  widthPx,
-}: {
-  company: CompanyInfo;
-  sale: SaleReceiptData;
-  /** Override em px puro — ver comentário equivalente em ThermalSaleReceipt. */
-  widthPx?: number;
-}) {
+function A4SaleReceipt({ company, sale }: { company: CompanyInfo; sale: SaleReceiptData }) {
   const storeName = company.name?.trim() || 'Exodus Cosméticos';
   return (
-    <div
-      className="print-area mx-auto bg-white text-slate-900"
-      style={widthPx !== undefined ? { width: widthPx, maxWidth: widthPx } : { width: '210mm', maxWidth: '100%' }}
-    >
+    <div className="print-area mx-auto bg-white text-slate-900" style={{ width: '210mm', maxWidth: '100%' }}>
       <div className="p-10">
-        {/* Cabeçalho — flex-nowrap explícito: nome/logo de um lado, NºDOC do
-            outro, sempre lado a lado (nunca empilhado) mesmo se o motor de
-            captura computar mal a largura física do container. */}
-        <div className="flex flex-row flex-nowrap items-start justify-between border-b-2 border-brand-500 pb-5">
-          <div className="flex flex-row flex-nowrap items-center gap-3">
+        {/* Cabeçalho */}
+        <div className="flex items-start justify-between border-b-2 border-brand-500 pb-5">
+          <div className="flex items-center gap-3">
             <div className="grid h-14 w-14 place-items-center rounded-2xl bg-brand-gradient text-2xl font-bold text-white">
               {storeName.charAt(0).toUpperCase()}
             </div>
@@ -237,25 +209,25 @@ function A4SaleReceipt({
         </table>
 
         {/* Totais */}
-        <div className="mt-4 flex flex-row flex-nowrap justify-end">
+        <div className="mt-4 flex justify-end">
           <div className="w-64 space-y-1 text-sm">
-            <div className="flex flex-row flex-nowrap justify-between text-slate-500">
+            <div className="flex justify-between text-slate-500">
               <span>Subtotal</span>
               <span>{brl(sale.subtotal)}</span>
             </div>
             {sale.discount > 0 && (
-              <div className="flex flex-row flex-nowrap justify-between text-rose-600">
+              <div className="flex justify-between text-rose-600">
                 <span>Desconto</span>
                 <span>- {brl(sale.discount)}</span>
               </div>
             )}
             {sale.surcharge > 0 && (
-              <div className="flex flex-row flex-nowrap justify-between text-emerald-600">
+              <div className="flex justify-between text-emerald-600">
                 <span>Acréscimo</span>
                 <span>+ {brl(sale.surcharge)}</span>
               </div>
             )}
-            <div className="flex flex-row flex-nowrap justify-between border-t border-slate-200 pt-2 text-lg font-bold">
+            <div className="flex justify-between border-t border-slate-200 pt-2 text-lg font-bold">
               <span>TOTAL</span>
               <span>{brl(sale.total)}</span>
             </div>
@@ -266,7 +238,7 @@ function A4SaleReceipt({
         <div className="mt-5 rounded-xl bg-slate-50 p-4 text-sm">
           <div className="mb-1 font-semibold">Forma(s) de pagamento</div>
           {sale.payments.map((p, i) => (
-            <div key={i} className="flex flex-row flex-nowrap justify-between text-slate-600">
+            <div key={i} className="flex justify-between text-slate-600">
               <span>{labelOf(p.method)}</span>
               <span>{brl(p.amount)}</span>
             </div>
@@ -293,17 +265,14 @@ export function SaleReceipt({
   company,
   sale,
   format,
-  widthPx,
 }: {
   company: CompanyInfo;
   sale: SaleReceiptData;
   format: ReceiptFormat;
-  /** Ver comentário em ThermalSaleReceipt/A4SaleReceipt — só usado pela captura de PDF. */
-  widthPx?: number;
 }) {
   return format === 'a4' ? (
-    <A4SaleReceipt company={company} sale={sale} widthPx={widthPx} />
+    <A4SaleReceipt company={company} sale={sale} />
   ) : (
-    <ThermalSaleReceipt company={company} sale={sale} widthPx={widthPx} />
+    <ThermalSaleReceipt company={company} sale={sale} />
   );
 }
