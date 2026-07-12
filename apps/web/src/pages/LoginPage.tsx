@@ -19,12 +19,6 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  function fillDemo() {
-    setEmail('admin@exodus.local');
-    setPassword('admin12345');
-    setError(null);
-  }
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -177,16 +171,6 @@ export function LoginPage() {
               )}
             </button>
           </form>
-
-          <button
-            type="button"
-            onClick={fillDemo}
-            className="mt-6 w-full rounded-xl border-2 border-dashed border-accent-300 bg-accent-50/70 p-3 text-center text-xs text-slate-500 transition hover:bg-accent-100/70"
-          >
-            <span className="font-bold text-accent-700">Toque para preencher o acesso demo</span>
-            <br />
-            admin@exodus.local / admin12345
-          </button>
         </div>
       </main>
     </div>
