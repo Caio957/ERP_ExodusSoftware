@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ProductFormSettings, CompanyProfile, PaymentType, SalesSettings } from '@exodus/shared';
 import { Settings, Save, Check, Package, CreditCard, Building2, Plus, Trash2, Users, Pencil, X, ShieldCheck, UserCheck, Search } from 'lucide-react';
@@ -612,10 +613,11 @@ function UserFormModal({
     save.mutate();
   }
 
-  return (
+  return createPortal(
     <div className="modal-overlay">
-      <div className="modal-sheet sm:max-w-lg">
-        <div className="mb-4 flex items-center justify-between">
+      <div className="modal-sheet sm:max-w-md flex flex-col overflow-hidden !p-0">
+        {/* Cabeçalho fixo */}
+        <div className="shrink-0 flex items-center justify-between p-4 sm:p-6 border-b border-slate-100">
           <h2 className="font-display text-lg font-bold flex items-center gap-2">
             <ShieldCheck className="h-5 w-5 text-brand-600" />
             {isEdit ? 'Editar usuário' : 'Novo usuário'}
@@ -625,7 +627,8 @@ function UserFormModal({
           </button>
         </div>
 
-        <div className="space-y-3">
+        {/* Corpo com scroll interno — min-h-0 é obrigatório para o flexbox não estourar o wrapper */}
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 space-y-4">
           <label className="block">
             <span className="label">Nome *</span>
             <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome completo" />
@@ -705,14 +708,16 @@ function UserFormModal({
           )}
         </div>
 
-        <div className="mt-5 flex justify-end gap-2">
+        {/* Rodapé fixo */}
+        <div className="shrink-0 flex justify-end gap-3 p-4 sm:p-6 border-t border-slate-100 bg-slate-50">
           <button className="btn-ghost" onClick={onClose}>Cancelar</button>
           <button className="btn-primary" disabled={save.isPending} onClick={submit}>
             {save.isPending ? 'Salvando...' : isEdit ? 'Salvar alterações' : 'Criar usuário'}
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
