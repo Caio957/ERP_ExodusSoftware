@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ProductFormSettings, CompanyProfile, PaymentType, SalesSettings } from '@exodus/shared';
+import { createUserSchema, type ProductFormSettings, type CompanyProfile, type PaymentType, type SalesSettings } from '@exodus/shared';
 import { Settings, Save, Check, Package, CreditCard, Building2, Plus, Trash2, Users, Pencil, X, ShieldCheck, UserCheck, Search } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../store/auth';
@@ -606,7 +606,7 @@ function UserFormModal({
   function submit() {
     setLocalError(null);
     if (name.trim().length < 2) return setLocalError('Nome deve ter pelo menos 2 caracteres.');
-    if (!email.includes('@')) return setLocalError('E-mail inválido.');
+    if (!createUserSchema.shape.email.safeParse(email).success) return setLocalError('E-mail inválido.');
     if (!isEdit && password.trim().length < 8) return setLocalError('Senha deve ter ao menos 8 caracteres.');
     if (isEdit && password.trim() && password.trim().length < 8) return setLocalError('Nova senha deve ter ao menos 8 caracteres.');
     save.mutate();
