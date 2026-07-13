@@ -227,6 +227,7 @@ interface Movement {
   kind: 'TRANSACTION' | 'SALE';
   id: string;
   type?: string;
+  code?: number;
   paymentMethod?: string;
   amount: number;
   description?: string;
@@ -284,7 +285,7 @@ function RegisterMovements({
                   <>
                     <span className="flex items-center gap-2 text-slate-600">
                       <Receipt className="h-4 w-4 text-brand-500" />
-                      Venda · {methodLabel[m.paymentMethod ?? ''] ?? m.paymentMethod}
+                      Venda #{m.code} · {methodLabel[m.paymentMethod ?? ''] ?? m.paymentMethod}
                       {m.client && <span className="text-slate-400">· {m.client}</span>}
                     </span>
                     <span className="font-semibold text-emerald-600">+{brl(m.amount)}</span>
