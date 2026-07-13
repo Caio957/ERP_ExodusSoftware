@@ -8,12 +8,13 @@ import {
   manualPurchaseSchema,
   updateInvoiceSchema,
   paginationQuery,
+  apportionLandedCost,
 } from '@exodus/shared';
 import { prisma } from '../lib/prisma.js';
 import { serializeDecimals } from '../lib/serialize.js';
 import { parseNfeXml } from '../services/nfe-parser.js';
 import { BusinessError, ConflictError, NotFoundError } from '../lib/errors.js';
-import { calcWeightedAverageCost, apportionLandedCost } from '../lib/inventory.js';
+import { calcWeightedAverageCost } from '../lib/inventory.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 

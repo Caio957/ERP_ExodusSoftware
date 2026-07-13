@@ -27,6 +27,7 @@ import {
   priceFromMarkup,
   marginFromPrice,
   markupFromPrice,
+  apportionLandedCost,
 } from '@exodus/shared';
 import { api, ApiError } from '../lib/api';
 import { XmlImport } from '../components/XmlImport';
@@ -362,6 +363,10 @@ interface PItem {
   variantId: string;
   label: string;
   currentSalePrice: number;
+  /** Custo cadastrado no catálogo antes desta compra (v.costPrice no
+   *  momento em que o item foi adicionado) — referência fixa para a coluna
+   *  "Custo Antigo" da Etapa 2, distinta de `unitCost` (editável na Etapa 1). */
+  oldCostPrice: number;
   quantity: number;
   unitCost: number;
   newSalePrice: string; // vazio = manter
@@ -372,6 +377,11 @@ interface PItem {
 
 function ManualPurchase() {
   const qc = useQueryClient();
+  // Etapa 1 (dados da nota) → Etapa 2 (reprecificação sobre o custo já
+  // rateado). Separadas porque o rateio do frete só é conhecido depois que
+  // todos os itens/frete/despesas estão lançados — precificar na Etapa 1
+  // seria basear a margem num custo que ainda vai mudar.
+  const [step, setStep] = useState<1 | 2>(1);
   const [supplierName, setSupplierName] = useState('');
   const [supplierId, setSupplierId] = useState<string | null>(null);
   const [hasSearchedSupplier, setHasSearchedSupplier] = useState(false);
@@ -404,6 +414,15 @@ function ManualPurchase() {
 
   const productsTotal = round2(items.reduce((a, it) => a + it.quantity * it.unitCost, 0));
   const total = round2(productsTotal + freight + otherExpenses);
+
+  // Prévia do rateio (landed cost) — espelha apportionLandedCost do backend
+  // (packages/shared/src/pricing.ts, única fonte de verdade compartilhada
+  // pelas duas pontas) para a Etapa 2 mostrar o custo real por item antes
+  // mesmo de confirmar a compra.
+  const landedCosts = useMemo(
+    () => apportionLandedCost(items.map((it) => ({ quantity: it.quantity, unitCost: it.unitCost })), freight, otherExpenses),
+    [items, freight, otherExpenses],
+  );
 
   // Referências estáveis (useCallback) para o React.memo da linha do item
   // realmente evitar re-render das outras linhas a cada tecla.
@@ -439,6 +458,7 @@ function ManualPurchase() {
       qc.invalidateQueries({ queryKey: ['invoices'] });
       qc.invalidateQueries({ queryKey: ['financial'] });
       setDone(true);
+      setStep(1);
       setItems([]);
       setNotes('');
       setFreight(0);
@@ -451,7 +471,7 @@ function ManualPurchase() {
     onError: (e) => setLocalError(e instanceof ApiError ? e.message : 'Falha ao registrar'),
   });
 
-  function submit() {
+  function advanceToStep2() {
     setLocalError(null);
     if (!supplierId && supplierName.trim().length < 1) return setLocalError('Informe o fornecedor.');
     if (items.length === 0) return setLocalError('Adicione ao menos um produto.');
@@ -460,6 +480,11 @@ function ManualPurchase() {
       if (it.tracksLot && (!it.batch.trim() || !it.validity))
         return setLocalError(`Lote/validade obrigatórios em "${it.label}".`);
     }
+    setStep(2);
+  }
+
+  function submit() {
+    setLocalError(null);
     if (genPayable && !manualInstallmentsValid) {
       return setLocalError('As parcelas não fecham com o total da compra.');
     }
@@ -468,108 +493,174 @@ function ManualPurchase() {
 
   return (
     <div className="card max-w-3xl space-y-4">
-      <div className="flex items-center gap-2 font-semibold">
-        <PackagePlus className="h-5 w-5 text-brand-600" /> Nova compra manual
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 font-semibold">
+          <PackagePlus className="h-5 w-5 text-brand-600" /> Nova compra manual
+        </div>
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-400">
+          <span className={step === 1 ? 'text-brand-600' : ''}>1. Dados da nota</span>
+          <ChevronRight className="h-3.5 w-3.5" />
+          <span className={step === 2 ? 'text-brand-600' : ''}>2. Precificação</span>
+        </div>
       </div>
 
-      {/* Fornecedor */}
-      <div className="relative">
-        <span className="label">Fornecedor *</span>
-        <input
-          className="input"
-          value={supplierName}
-          onChange={(e) => {
-            setSupplierName(e.target.value);
-            setSupplierId(null);
-          }}
-          onKeyDown={onSupplierKeyDown}
-          placeholder="Buscar ou digitar um novo fornecedor... (Enter para listar todos)"
-        />
-        {!supplierId && (supplierName.trim().length >= 2 || hasSearchedSupplier) && suppliers && suppliers.items.length > 0 && (
-          <div className="absolute z-10 mt-1 max-h-40 w-full overflow-auto rounded-xl border border-slate-200 bg-white shadow-elevated">
-            {suppliers.items.map((s) => (
-              <button
-                key={s.id}
-                className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
-                onClick={() => {
-                  setSupplierId(s.id);
-                  setSupplierName(s.name);
-                  setHasSearchedSupplier(false);
-                }}
-              >
-                {s.name}
-              </button>
-            ))}
-          </div>
-        )}
-        {supplierId ? (
-          <span className="mt-1 inline-block text-xs text-emerald-600">✓ Fornecedor existente</span>
-        ) : (
-          supplierName.trim().length >= 1 && (
-            <span className="mt-1 inline-block text-xs text-amber-600">Será cadastrado como novo fornecedor</span>
-          )
-        )}
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <label className="block">
-          <span className="label">Data da compra *</span>
-          <input className="input" type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
-        </label>
-        <label className="block">
-          <span className="label">Observação</span>
-          <input className="input" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Opcional" />
-        </label>
-      </div>
-
-      {/* Itens */}
-      <div>
-        <span className="label">Produtos *</span>
-        <ProductSearch
-          onPick={(v) =>
-            setItems((prev) =>
-              prev.some((p) => p.variantId === v.id)
-                ? prev
-                : [
-                    ...prev,
-                    {
-                      variantId: v.id,
-                      label: v.label,
-                      currentSalePrice: v.salePrice,
-                      quantity: 1,
-                      unitCost: v.costPrice,
-                      newSalePrice: '',
-                      // Produtos que já controlam lote/validade vêm marcados; os
-                      // demais vêm desmarcados para o usuário decidir.
-                      tracksLot: v.tracksLot,
-                      batch: '',
-                      validity: '',
-                    },
-                  ],
-            )
-          }
-        />
-      </div>
-
-      {items.length > 0 && (
-        <div className="space-y-2">
-          {items.map((it) => (
-            <ManualPurchaseItemRow
-              key={it.variantId}
-              item={it}
-              pricingMode={pricingMode}
-              onChange={handleItemChange}
-              onRemove={handleItemRemove}
+      {step === 1 && (
+        <>
+          {/* Fornecedor */}
+          <div className="relative">
+            <span className="label">Fornecedor *</span>
+            <input
+              className="input"
+              value={supplierName}
+              onChange={(e) => {
+                setSupplierName(e.target.value);
+                setSupplierId(null);
+              }}
+              onKeyDown={onSupplierKeyDown}
+              placeholder="Buscar ou digitar um novo fornecedor... (Enter para listar todos)"
             />
-          ))}
+            {!supplierId && (supplierName.trim().length >= 2 || hasSearchedSupplier) && suppliers && suppliers.items.length > 0 && (
+              <div className="absolute z-10 mt-1 max-h-40 w-full overflow-auto rounded-xl border border-slate-200 bg-white shadow-elevated">
+                {suppliers.items.map((s) => (
+                  <button
+                    key={s.id}
+                    className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
+                    onClick={() => {
+                      setSupplierId(s.id);
+                      setSupplierName(s.name);
+                      setHasSearchedSupplier(false);
+                    }}
+                  >
+                    {s.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            {supplierId ? (
+              <span className="mt-1 inline-block text-xs text-emerald-600">✓ Fornecedor existente</span>
+            ) : (
+              supplierName.trim().length >= 1 && (
+                <span className="mt-1 inline-block text-xs text-amber-600">Será cadastrado como novo fornecedor</span>
+              )
+            )}
+          </div>
 
-          {/* Custo de aquisição real (landed cost, 4.9): frete e outras
-              despesas são rateados proporcionalmente ao valor de cada item
-              e embutidos no custo/CMP do produto (não no InvoiceItem.unitCost,
-              que guarda o valor original informado aqui). */}
           <div className="grid grid-cols-2 gap-3">
-            <MoneyField label="Frete (R$)" value={freight} onChange={setFreight} />
-            <MoneyField label="Outras despesas (R$)" value={otherExpenses} onChange={setOtherExpenses} />
+            <label className="block">
+              <span className="label">Data da compra *</span>
+              <input className="input" type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
+            </label>
+            <label className="block">
+              <span className="label">Observação</span>
+              <input className="input" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Opcional" />
+            </label>
+          </div>
+
+          {/* Itens */}
+          <div>
+            <span className="label">Produtos *</span>
+            <ProductSearch
+              onPick={(v) =>
+                setItems((prev) =>
+                  prev.some((p) => p.variantId === v.id)
+                    ? prev
+                    : [
+                        ...prev,
+                        {
+                          variantId: v.id,
+                          label: v.label,
+                          currentSalePrice: v.salePrice,
+                          oldCostPrice: v.costPrice,
+                          quantity: 1,
+                          unitCost: v.costPrice,
+                          newSalePrice: '',
+                          // Produtos que já controlam lote/validade vêm marcados; os
+                          // demais vêm desmarcados para o usuário decidir.
+                          tracksLot: v.tracksLot,
+                          batch: '',
+                          validity: '',
+                        },
+                      ],
+                )
+              }
+            />
+          </div>
+
+          {items.length > 0 && (
+            <div className="space-y-2">
+              {items.map((it) => (
+                <ManualPurchaseItemRow
+                  key={it.variantId}
+                  item={it}
+                  pricingMode={pricingMode}
+                  onChange={handleItemChange}
+                  onRemove={handleItemRemove}
+                  showPricing={false}
+                />
+              ))}
+
+              {/* Custo de aquisição real (landed cost, 4.9): frete e outras
+                  despesas são rateados proporcionalmente ao valor de cada item
+                  e embutidos no custo/CMP do produto (não no InvoiceItem.unitCost,
+                  que guarda o valor original informado aqui) — ver Etapa 2. */}
+              <div className="grid grid-cols-2 gap-3">
+                <MoneyField label="Frete (R$)" value={freight} onChange={setFreight} />
+                <MoneyField label="Outras despesas (R$)" value={otherExpenses} onChange={setOtherExpenses} />
+              </div>
+
+              <div className="space-y-1 rounded-xl bg-slate-50 px-4 py-2">
+                <div className="flex justify-between text-sm text-slate-500">
+                  <span>Subtotal (produtos)</span>
+                  <span>{brl(productsTotal)}</span>
+                </div>
+                {freight > 0 && (
+                  <div className="flex justify-between text-sm text-slate-500">
+                    <span>Frete</span>
+                    <span>{brl(freight)}</span>
+                  </div>
+                )}
+                {otherExpenses > 0 && (
+                  <div className="flex justify-between text-sm text-slate-500">
+                    <span>Outras despesas</span>
+                    <span>{brl(otherExpenses)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between border-t border-slate-200 pt-1 font-semibold">
+                  <span>Total da compra</span>
+                  <span>{brl(total)}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {localError && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{localError}</div>}
+
+          <div className="flex items-center justify-end gap-3">
+            <button className="btn-primary" onClick={advanceToStep2}>
+              Avançar para Precificação <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </>
+      )}
+
+      {step === 2 && (
+        <>
+          <div className="space-y-2">
+            <p className="text-xs text-slate-500">
+              Para cada item, veja o custo antigo do catálogo e o custo real já com o rateio de frete/outras
+              despesas embutido. Informe um novo preço de venda ou a {pricingMode === 'margin' ? 'margem' : 'markup'}{' '}
+              desejada — calculados sobre o custo rateado, não o custo base da Etapa 1. Deixe em branco para manter
+              o preço atual.
+            </p>
+            {items.map((it, i) => (
+              <RepricingRow
+                key={it.variantId}
+                item={it}
+                landedCost={landedCosts[i]!}
+                pricingMode={pricingMode}
+                onChange={handleItemChange}
+              />
+            ))}
           </div>
 
           <div className="space-y-1 rounded-xl bg-slate-50 px-4 py-2">
@@ -594,53 +685,58 @@ function ManualPurchase() {
               <span>{brl(total)}</span>
             </div>
           </div>
-        </div>
+
+          {/* Contas a pagar (D7) */}
+          <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-5 w-5 accent-brand-600"
+              checked={genPayable}
+              onChange={(e) => setGenPayable(e.target.checked)}
+            />
+            <span className="text-sm">
+              <span className="font-semibold text-slate-700">Gerar contas a pagar</span>
+              <span className="block text-xs text-slate-500">Cria os títulos a pagar do total da compra, com parcelas.</span>
+            </span>
+          </label>
+
+          {genPayable && (
+            <PurchaseFinancialEngine
+              totalAmount={total}
+              onChange={(installments, valid) => {
+                setManualInstallments(installments);
+                setManualInstallmentsValid(valid);
+              }}
+            />
+          )}
+
+          {(localError || save.error instanceof ApiError) && (
+            <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              {localError ?? (save.error as ApiError).message}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-3">
+            <button className="btn-ghost" onClick={() => setStep(1)}>
+              ← Voltar
+            </button>
+            <div className="flex items-center gap-3">
+              {done && (
+                <span className="flex items-center gap-1 text-sm font-medium text-emerald-600">
+                  <Check className="h-4 w-4" /> Compra registrada!
+                </span>
+              )}
+              <button
+                className="btn-primary"
+                disabled={save.isPending || (genPayable && !manualInstallmentsValid)}
+                onClick={submit}
+              >
+                {save.isPending ? 'Salvando...' : 'Confirmar e Registrar'}
+              </button>
+            </div>
+          </div>
+        </>
       )}
-
-      {/* Contas a pagar (D7) */}
-      <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-        <input
-          type="checkbox"
-          className="mt-0.5 h-5 w-5 accent-brand-600"
-          checked={genPayable}
-          onChange={(e) => setGenPayable(e.target.checked)}
-        />
-        <span className="text-sm">
-          <span className="font-semibold text-slate-700">Gerar contas a pagar</span>
-          <span className="block text-xs text-slate-500">Cria os títulos a pagar do total da compra, com parcelas.</span>
-        </span>
-      </label>
-
-      {genPayable && (
-        <PurchaseFinancialEngine
-          totalAmount={total}
-          onChange={(installments, valid) => {
-            setManualInstallments(installments);
-            setManualInstallmentsValid(valid);
-          }}
-        />
-      )}
-
-      {(localError || save.error instanceof ApiError) && (
-        <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
-          {localError ?? (save.error as ApiError).message}
-        </div>
-      )}
-
-      <div className="flex items-center justify-end gap-3">
-        {done && (
-          <span className="flex items-center gap-1 text-sm font-medium text-emerald-600">
-            <Check className="h-4 w-4" /> Compra registrada!
-          </span>
-        )}
-        <button
-          className="btn-primary"
-          disabled={save.isPending || (genPayable && !manualInstallmentsValid)}
-          onClick={submit}
-        >
-          {save.isPending ? 'Salvando...' : 'Registrar compra'}
-        </button>
-      </div>
     </div>
   );
 }
@@ -1363,6 +1459,7 @@ function EditPurchaseModal({
         variantId: it.variantId,
         label: `${it.variant.product.name} — ${it.variant.description ?? it.variant.sku}`,
         currentSalePrice: it.variant.salePrice,
+        oldCostPrice: it.variant.costPrice,
         quantity: it.quantity,
         unitCost: it.unitCost,
         newSalePrice: '',
@@ -1543,6 +1640,7 @@ function EditPurchaseModal({
                                 variantId: v.id,
                                 label: v.label,
                                 currentSalePrice: v.salePrice,
+                                oldCostPrice: v.costPrice,
                                 quantity: 1,
                                 unitCost: v.costPrice,
                                 newSalePrice: '',
@@ -1820,11 +1918,19 @@ const ManualPurchaseItemRow = memo(function ManualPurchaseItemRow({
   pricingMode,
   onChange,
   onRemove,
+  showPricing = true,
 }: {
   item: PItem;
   pricingMode: 'margin' | 'markup';
   onChange: (variantId: string, patch: Partial<PItem>) => void;
   onRemove: (variantId: string) => void;
+  /**
+   * Etapa 1 da Compra Manual esconde "Novo preço venda"/Margem-Markup: o
+   * rateio do frete só é conhecido depois, então precificar aqui seria
+   * baseado num custo que ainda vai mudar (ver Etapa 2 — RepricingRow).
+   * EditPurchaseModal continua com o formulário completo (não tem Etapa 2).
+   */
+  showPricing?: boolean;
 }) {
   const toRaw = (n: number) => (n !== 0 ? String(n).replace('.', ',') : '');
 
@@ -1914,7 +2020,7 @@ const ManualPurchaseItemRow = memo(function ManualPurchaseItemRow({
           <Trash2 className="h-4 w-4" />
         </button>
       </div>
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-5">
+      <div className={`grid grid-cols-2 gap-2 ${showPricing ? 'md:grid-cols-3 lg:grid-cols-5' : 'md:grid-cols-3'}`}>
         <Num
           label="Qtd"
           value={item.quantity}
@@ -1932,32 +2038,36 @@ const ManualPurchaseItemRow = memo(function ManualPurchaseItemRow({
             onFocus={(e) => e.target.select()}
           />
         </label>
-        <label className="block">
-          <span className="label">Novo preço venda</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            className="input"
-            value={rawPrice}
-            placeholder={`atual ${brl(item.currentSalePrice)}`}
-            onKeyDown={(e) => { if (['-', '+', 'e', 'E'].includes(e.key)) e.preventDefault(); }}
-            onChange={(e) => commitPrice(sanitizeBr(e.target.value))}
-            onFocus={(e) => e.target.select()}
-          />
-        </label>
-        <label className="block">
-          <span className="label">{pricingMode === 'margin' ? 'Margem (%)' : 'Markup (%)'}</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            className="input"
-            value={rawPct}
-            placeholder="0,00"
-            onKeyDown={(e) => { if (['-', '+', 'e', 'E'].includes(e.key)) e.preventDefault(); }}
-            onChange={(e) => commitPct(sanitizeBr(e.target.value))}
-            onFocus={(e) => e.target.select()}
-          />
-        </label>
+        {showPricing && (
+          <>
+            <label className="block">
+              <span className="label">Novo preço venda</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                className="input"
+                value={rawPrice}
+                placeholder={`atual ${brl(item.currentSalePrice)}`}
+                onKeyDown={(e) => { if (['-', '+', 'e', 'E'].includes(e.key)) e.preventDefault(); }}
+                onChange={(e) => commitPrice(sanitizeBr(e.target.value))}
+                onFocus={(e) => e.target.select()}
+              />
+            </label>
+            <label className="block">
+              <span className="label">{pricingMode === 'margin' ? 'Margem (%)' : 'Markup (%)'}</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                className="input"
+                value={rawPct}
+                placeholder="0,00"
+                onKeyDown={(e) => { if (['-', '+', 'e', 'E'].includes(e.key)) e.preventDefault(); }}
+                onChange={(e) => commitPct(sanitizeBr(e.target.value))}
+                onFocus={(e) => e.target.select()}
+              />
+            </label>
+          </>
+        )}
         <label className="flex items-end gap-2 pb-1 text-xs">
           <input
             type="checkbox"
@@ -1989,6 +2099,126 @@ const ManualPurchaseItemRow = memo(function ManualPurchaseItemRow({
           </label>
         </div>
       )}
+    </div>
+  );
+});
+
+// Etapa 2 da Compra Manual: grid de reprecificação sobre o custo já rateado
+// (landedCost) — mesmo padrão de estado local (raw + sanitizeBr + skip-sync)
+// de ManualPurchaseItemRow, mas a base de margem/markup é o custo rateado,
+// não o custo bruto informado na Etapa 1 (que ainda não sabe o frete).
+const RepricingRow = memo(function RepricingRow({
+  item,
+  landedCost,
+  pricingMode,
+  onChange,
+}: {
+  item: PItem;
+  landedCost: number;
+  pricingMode: 'margin' | 'markup';
+  onChange: (variantId: string, patch: Partial<PItem>) => void;
+}) {
+  const toRaw = (n: number) => (n !== 0 ? String(n).replace('.', ',') : '');
+
+  const [rawPrice, setRawPrice] = useState(() => (item.newSalePrice ? item.newSalePrice.replace('.', ',') : ''));
+  const skipPriceSync = useRef(false);
+  useEffect(() => {
+    if (skipPriceSync.current) {
+      skipPriceSync.current = false;
+      return;
+    }
+    setRawPrice(item.newSalePrice ? item.newSalePrice.replace('.', ',') : '');
+  }, [item.newSalePrice]);
+
+  const [rawPct, setRawPct] = useState(() => {
+    if (!item.newSalePrice) return '';
+    const price = parseFloat(item.newSalePrice);
+    const pct = pricingMode === 'margin' ? marginFromPrice(landedCost, price) : markupFromPrice(landedCost, price);
+    return pct ? toRaw(pct) : '';
+  });
+
+  function commitPrice(cleaned: string) {
+    setRawPrice(cleaned);
+    skipPriceSync.current = true;
+    if (!cleaned.trim()) {
+      onChange(item.variantId, { newSalePrice: '' });
+      setRawPct('');
+      return;
+    }
+    const price = parseFloat(cleaned.replace(',', '.')) || 0;
+    onChange(item.variantId, { newSalePrice: String(price) });
+    const pct =
+      pricingMode === 'margin' ? marginFromPrice(landedCost, price) || 0 : markupFromPrice(landedCost, price) || 0;
+    setRawPct(pct !== 0 ? toRaw(pct) : '');
+  }
+
+  function commitPct(cleaned: string) {
+    if (!cleaned.trim()) {
+      setRawPct('');
+      skipPriceSync.current = true;
+      setRawPrice('');
+      onChange(item.variantId, { newSalePrice: '' });
+      return;
+    }
+    let pct = parseFloat(cleaned.replace(',', '.')) || 0;
+    if (pricingMode === 'margin' && pct > 99.99) {
+      pct = 99.99;
+      cleaned = '99,99';
+    }
+    setRawPct(cleaned);
+    const price = pricingMode === 'margin' ? priceFromMargin(landedCost, pct) : priceFromMarkup(landedCost, pct);
+    skipPriceSync.current = true;
+    setRawPrice(toRaw(price));
+    onChange(item.variantId, { newSalePrice: String(price) });
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-200 p-3 space-y-2">
+      <div className="text-sm font-medium">{item.label}</div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-3 lg:grid-cols-5">
+        <div>
+          <div className="text-slate-400 mb-0.5">Custo antigo</div>
+          <div className="font-medium">{item.oldCostPrice > 0 ? brl(item.oldCostPrice) : '—'}</div>
+        </div>
+        <div>
+          <div className="text-slate-400 mb-0.5">Custo novo rateado</div>
+          <div className="font-semibold text-brand-600">{brl(landedCost)}</div>
+        </div>
+        <div>
+          <div className="text-slate-400 mb-0.5">P. venda antigo</div>
+          <div className="font-medium">{item.currentSalePrice > 0 ? brl(item.currentSalePrice) : '—'}</div>
+        </div>
+        <div>
+          <div className="text-slate-400 mb-0.5">Novo p. venda</div>
+          <input
+            type="text"
+            inputMode="decimal"
+            className="input"
+            value={rawPrice}
+            placeholder={item.currentSalePrice > 0 ? brl(item.currentSalePrice) : 'Manter atual'}
+            onKeyDown={(e) => {
+              if (['-', '+', 'e', 'E'].includes(e.key)) e.preventDefault();
+            }}
+            onChange={(e) => commitPrice(sanitizeBr(e.target.value))}
+            onFocus={(e) => e.target.select()}
+          />
+        </div>
+        <div>
+          <div className="text-slate-400 mb-0.5">{pricingMode === 'margin' ? 'Margem (%)' : 'Markup (%)'}</div>
+          <input
+            type="text"
+            inputMode="decimal"
+            className="input"
+            value={rawPct}
+            placeholder="0,00"
+            onKeyDown={(e) => {
+              if (['-', '+', 'e', 'E'].includes(e.key)) e.preventDefault();
+            }}
+            onChange={(e) => commitPct(sanitizeBr(e.target.value))}
+            onFocus={(e) => e.target.select()}
+          />
+        </div>
+      </div>
     </div>
   );
 });
