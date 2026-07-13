@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-07-11
+- **Última atualização:** 2026-07-13
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -33,11 +33,20 @@
   ✅ **`fix/android-print-blank-page` mesclada via PR #15** (`6c39ec6`, 2026-07-10 —
   blindagem CSS estática do motor de impressão nativo para o spooler do Android) e
   ✅ **`fix/android-print-iframe-engine` mesclada via PR #16** (`76b38c9`, 2026-07-11 —
-  motor de impressão migrado para iframe isolado, ver Onda 2026-07-11 em §11) — ver §11
-  para o histórico completo de commits de todas. **`main` e `origin/main` estão em
-  sincronia em `76b38c9`.** Nenhuma branch de feature ativa no momento — a próxima onda
-  de trabalho deve criar uma nova `feature/*`/`fix/*`/`refinamento-*` a partir daqui.
-  ⚠️ **Padrão observado nesta rodada de correções de impressão**: cada uma das 3 PRs
+  motor de impressão migrado para iframe isolado, ver Onda 2026-07-11 em §11),
+  ✅ **`fix/email-client-validation-gap` mesclada via PR #17** (`1eb5f05`, 2026-07-12),
+  ✅ **`fix/remove-demo-login-button` mesclada via PR #18** (`445a4a6`, 2026-07-12),
+  ✅ **`refactor/settings-user-modal-gold-standard` mesclada via PR #19** (`092e528`,
+  2026-07-12) e ✅ **`feature/refinamento-sistema` mesclada via PR #20** (`f18a5fe`,
+  2026-07-13 — isolamento RBAC de Vendas, rastreabilidade de origem no Caixa, e toda a
+  onda de Custo de Aquisição Real/Landed Cost em Compras: frete/outras despesas
+  rateados, wizard de 2 etapas na Compra Manual, cadastro in-line de produto na
+  importação de XML, e frete/despesas editáveis também no fluxo de XML — ver Onda
+  2026-07-12/13 em §11) — ver §11 para o histórico completo de commits de todas.
+  **`main` e `origin/main` estão em sincronia em `f18a5fe`.** Nenhuma branch de feature
+  ativa no momento — a próxima onda de trabalho deve criar uma nova
+  `feature/*`/`fix/*`/`refinamento-*` a partir daqui.
+  ⚠️ **Padrão observado na rodada de correções de impressão (PRs #14→#16)**: cada uma das 3 PRs
   seguidas (#14→#16) tentou resolver o mesmo sintoma relatado pelo Comandante (página em
   branco/layout quebrado ao imprimir no Android) com uma causa raiz diferente — cada
   merge foi feito **antes** de confirmação de teste real no tablet, então a próxima
@@ -190,7 +199,13 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   **`Sale.code` sequencial (NºDOC)**; **`Sale.financialGenerated`** (excluir/gerar
   financeiro: `DELETE/POST /sales/:id/financial`); edição agora suporta split/"a
   prazo" (parcelas → contas a receber); `GET /sales/:id` inclui `payments` e
-  `financialAccounts`.
+  `financialAccounts`. **Isolamento RBAC (2026-07-12)**: `GET /sales` e
+  `GET /sales/:id` não tinham NENHUM filtro por papel/dono — qualquer CASHIER
+  chamando a API diretamente enxergava todas as vendas da loja (a tela `/vendas`
+  já era ADMIN-only só no frontend). Corrigido: `userFilter` condicional
+  (`ADMIN` vê tudo; `CASHIER` só `Sale.userId === req.user.sub`) na listagem;
+  `GET /:id` retorna 403 se o dono não bater (checado após o fetch, já que
+  `findUnique` só aceita campo com constraint única no `where`).
 - ✅ **Caixa**: abrir, sangria/suprimento, fechar; `/current` com `expectedCash`
   (somado por `SalePayment` em dinheiro); **`/cash/registers`** (histórico),
   **`/cash/:id/movements`** (timeline vendas+manuais), **`PUT/DELETE /cash/transactions/:id`**
@@ -233,8 +248,10 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
 ### Frontend
 - ✅ **Shell**: ErrorBoundary, Layout touch, ProtectedRoute (RBAC), StatusBadge
   (online/fila com ícones lucide-react).
-- ✅ **Login**: layout split (painel de marca + formulário), botão "preencher demo",
-  `autoCapitalize=none`, trim na validação.
+- ✅ **Login**: layout split (painel de marca + formulário), `autoCapitalize=none`,
+  trim na validação, `type="email"`. Botão "preencher acesso demo" **removido
+  (2026-07-12)** — sistema em produção com cliente real, virou risco de segurança
+  ter credenciais expostas na tela de login.
 - ✅ **PDV** (§4.4): scanner de teclado, **busca vazia lista todos os produtos**,
   carrinho com **valor unitário editável por item**, **desconto e acréscimo** sobre o
   subtotal (entrada em R$ e em %), **observação** livre da venda, **seletor de cliente**
@@ -385,7 +402,13 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   via **modal próprio com observação** (sem `window.prompt`); **timeline de
   movimentações** unindo vendas (leitura) + sangrias/suprimentos (editáveis/excluíveis
   só com o caixa aberto); **resumo de recebimentos por forma** (ADMIN); **histórico de
-  caixas de outros dias** com detalhe e resumo; fechamento por modal. Todos os
+  caixas de outros dias** com detalhe e resumo; fechamento por modal.
+  **Rastreabilidade de origem** (`RegisterMovements`, 2026-07-12): vendas na
+  timeline mostram `Venda #{code}` (NºDOC), não mais um genérico "Venda ·
+  Dinheiro" — o backend (`/:id/movements`) já enviava o `code` desde a onda de
+  Relatório Periódico, mas esse componente específico (usado tanto na aba "Caixa
+  Atual" quanto no detalhe do "Histórico") nunca usava o campo; a aba "Relatório
+  Periódico" (`PeriodicReport`, componente separado) já fazia certo. Todos os
   modais (Sangria/Suprimento/Fechamento) via **React Portal**
   (`createPortal(..., document.body)`) — mesmo padrão da tela de Produtos, imune
   ao containing block do `animate-fade-in`. **Impressão de resumo/fechamento**
@@ -422,6 +445,32 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   **Ordenação** (`sortField`: doc/NF/emissão/entrada/valor/itens + `sortDir`)
   incorporada ao mesmo `PurchaseFilterValues`; label do filtro de data corrigido
   de "Data da compra" para "Data de emissão" (batendo com a coluna da grade).
+  **Custo de Aquisição Real / Landed Cost** (4.9, onda 2026-07-13 — ver §11):
+  `Invoice.freight`/`Invoice.otherExpenses` — frete e outras despesas rateados
+  proporcionalmente ao valor de cada item (`apportionLandedCost`,
+  `packages/shared/src/pricing.ts` — fonte única backend+frontend) para compor o
+  custo real (`costPrice`/`averageCost`) do produto; `InvoiceItem.unitCost`
+  continua guardando o valor original do documento (auditoria). `totalAmount`
+  passou a ser recalculado de forma uniforme como `produtos + frete + despesas`
+  em `/confirm`, `/manual` e na edição (decisão deliberada: sobrescreve o `vNF`
+  bruto do XML por uma fórmula única e auditável — sistema é gerencial, não
+  fiscal). **Compra Manual virou um wizard de 2 etapas** (`ManualPurchase`):
+  Etapa 1 (dados da nota — fornecedor/data/produtos com só Qtd/Custo Base/Lote-
+  Validade/Frete/Outras Despesas, sem precificação) → Etapa 2 (`RepricingRow`,
+  grid Custo Antigo/Custo Novo Rateado/Preço Venda Antigo/Novo/Margem-Markup,
+  calculado sobre o custo já rateado, não o bruto da Etapa 1). **Cadastro
+  In-Line de Produto na Etapa 1 do XML** (`NewProductInlineForm`): item do XML
+  sem De/Para pode ser cadastrado na hora (Nome/SKU/Código de barras
+  pré-preenchidos do XML, Marca/Grupo/Subgrupo com sugestão via
+  `SmartFilterInput`, obrigatoriedade dinâmica das Configurações) em vez de
+  abandonar a importação — o backend cria Produto+Variante **dentro da mesma
+  transação** do `/confirm`, usando o custo rateado como custo inicial, antes de
+  vincular o `InvoiceItem`; `SupplierProductMapping` também aponta pro produto
+  novo (próxima nota do fornecedor já vem auto-mapeada). **Frete/Outras
+  Despesas editáveis também na Etapa 1 do XML** (não só na Compra Manual): a
+  Etapa 2 do XML recalcula o rateio no cliente (`landedCosts`, `useMemo`) a
+  partir do estado editado, não de um valor congelado do `/parse` — permite
+  ajustar pra refletir frete "por fora" (FOB) não descrito no XML.
 - ✅ **Financeiro**: lançamento manual a pagar/receber com **N parcelas** e
   **fornecedor/cliente obrigatório**; cada título tem **código sequencial** (`code`);
   **baixa parcial** (registra liquidações em `AccountSettlement`, mostra saldo restante)
@@ -468,7 +517,14 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   **Recebimentos** (tipos de pagamento configuráveis: renomear/ativar/adicionar,
   consumidos dinamicamente pelo PDV), **Empresa** (dados cadastrais do contratante) e
   **Usuários** (CRUD completo: criar/editar/excluir; definir quais telas cada operador
-  pode acessar via checkboxes — `allowedPages` granular por usuário).
+  pode acessar via checkboxes — `allowedPages` granular por usuário; modal
+  `UserFormModal` padronizado pro Padrão Ouro — `createPortal` + header/body/footer
+  rígidos, 2026-07-12 — mesma causa raiz do `animate-fade-in` já documentada
+  alhures). Validação de e-mail (login e criação de usuário) já usava
+  `z.string().trim().toLowerCase().email(...)` no schema compartilhado e
+  `type="email"` no frontend desde antes; único gap real encontrado (2026-07-12)
+  era uma pré-checagem fraca (`email.includes('@')`) no `submit()` do
+  `UserFormModal`, substituída por `createUserSchema.shape.email.safeParse(...)`.
 - ✅ **Recibo térmico** 58/80mm e **comprovante A4** (§4.7): `ThermalReceipt` renderiza
   cabeçalho completo (nome, endereço, cidade, tel) + itens + totais + pagamento.
   `SaleReceipt` (componente unificado) entrega cupom térmico ou folha A4 estilizada com
@@ -580,13 +636,16 @@ Outras decisões:
 da venda, **relaxado para string** (tipos de recebimento configuráveis). Detalhe
 completo: `apps/api/prisma/schema.prisma`.
 
-**Migrações (12, todas aditivas/seguras):** `0_init`, `add_lot_validity_control`,
+**Migrações (todas aditivas/seguras, lista não exaustiva — ver
+`apps/api/prisma/migrations/`):** `0_init`, `add_lot_validity_control`,
 `add_settings`, `sale_discount_surcharge_notes`, `financial_account_sale_link`,
 `sale_payments`, `invoice_document_notes`, `financial_settlements_code`,
 `sale_code_financial_flag`, `product_person_code`,
-`20260626000000_add_average_cost_to_variants` (já mesclada na `main` via PR #2),
-`20260702000000_add_person_trade_name` (pendente de merge — ver ⚠️ no topo).
-Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
+`20260626000000_add_average_cost_to_variants`, `20260702000000_add_person_trade_name`,
+`20260710011551_add_invoice_nfe_number`, `20260710041311_add_code_to_stock_adjustments`,
+`20260713021023_add_invoice_expenses` (`Invoice.freight`/`Invoice.otherExpenses` —
+landed cost, ver §5 Compras e Onda 2026-07-13 em §11). Aplicadas automaticamente
+no Railway a cada deploy (`prisma migrate deploy`).
 
 ---
 
@@ -1647,6 +1706,107 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
     e só falharam ao testar de fato no dispositivo; tratar esta correção como
     **não confirmada** até teste real.
 
+- ✅ **Onda 2026-07-12 — Correções pontuais de segurança/UX** (2026-07-12): três
+  branches curtas, cada uma a partir da `main` (não empilhadas), mescladas via PRs
+  #17/#18/#19.
+  - **`fix/email-client-validation-gap`** (PR #17, `1eb5f05`) — commit `e7a419d`.
+    **Achado**: a missão pedia adicionar `z.string().trim().toLowerCase().email(...)`
+    em `loginSchema`/`createUserSchema`/`updateUserSchema`, mas os três **já**
+    usavam exatamente essa cadeia (confirmado com teste real: `"usuario@provedor"`
+    já era rejeitado). O único gap real era client-side: `UserFormModal.submit()`
+    (`SettingsPage.tsx`) fazia uma pré-checagem fraca (`!email.includes('@')`) que
+    deixaria esse mesmo e-mail passar na validação local antes de ser barrado pela
+    API com um erro genérico. Corrigido reaproveitando
+    `createUserSchema.shape.email.safeParse(...)` em vez de duplicar a regra.
+  - **`fix/remove-demo-login-button`** (PR #18, `445a4a6`) — commit `ac37484`.
+    Removidos o botão "Toque para preencher o acesso demo" e a função `fillDemo`
+    de `LoginPage.tsx` — sistema em produção com cliente real, credenciais
+    expostas na tela de login viraram risco de segurança.
+  - **`refactor/settings-user-modal-gold-standard`** (PR #19, `092e528`) — commit
+    `cda3daf`. `UserFormModal` padronizado pro Padrão Ouro (`createPortal` +
+    header/body/footer rígidos) — mesma causa raiz do `animate-fade-in` já
+    documentada em Produtos/Vendas/Cadastros/Caixa/Financeiro. Classes `dark:`
+    sugeridas pela missão **não aplicadas** — o projeto não tem nenhuma
+    infraestrutura de dark mode (zero ocorrências em todo o codebase); seguido o
+    padrão real já usado por `NewEntryModal` (`FinancialPage.tsx`).
+  `npm run typecheck` + `npm run build` → **0 erros** em todos os commits.
+
+- ✅ **Onda 2026-07-12/13 — RBAC de Vendas, rastreabilidade de Caixa e Custo de
+  Aquisição Real (Landed Cost) em Compras** (2026-07-12 a 2026-07-13): branch
+  `feature/refinamento-sistema` — **mesclada via PR #20** (`f18a5fe`). 6 commits.
+  - **`2ac5b4a`** (rastreabilidade no Caixa): `RegisterMovements.tsx` mostrava
+    vendas na timeline como genérico "Venda · Dinheiro". **Achado**: o backend
+    (`/cash/:id/movements`) já enviava `code` (NºDOC) desde a onda de Relatório
+    Periódico — o gap era só esse componente específico nunca usar o campo
+    (a aba "Relatório Periódico", componente separado, já fazia certo). Corrigido
+    para `Venda #{code} · {forma}`, sem nenhuma mudança de backend.
+  - **`98cf8fc`** (IDOR real em Vendas): `GET /api/sales` e `GET /api/sales/:id`
+    não tinham filtro algum por papel/dono — qualquer `CASHIER` chamando a API
+    diretamente via HTTP enxergava/acessava todas as vendas da loja (a tela
+    `/vendas` só bloqueava no frontend). Adicionado `userFilter` condicional na
+    listagem e checagem de posse pós-fetch (403) no detalhe. **Testado ao vivo**:
+    CASHIER foi de ver 48 vendas para 0 (não tem nenhuma própria); 403 ao tentar
+    abrir uma venda específica do ADMIN.
+  - **`7ded77c`** (Landed Cost — fundação): `Invoice.freight`/`otherExpenses`
+    (migração `20260713021023_add_invoice_expenses`); `apportionLandedCost`
+    (rateio proporcional ao valor de cada item) centralizado em
+    `apps/api/src/lib/inventory.ts` inicialmente, aplicado em `/confirm`,
+    `/manual` e na edição completa — `InvoiceItem.unitCost` continua guardando
+    o valor original do documento; o custo rateado só atualiza
+    `costPrice`/`averageCost` do produto. `totalAmount` passou a ser recalculado
+    de forma uniforme (`produtos + frete + despesas`) nas três rotas, inclusive
+    `/confirm` — decisão deliberada de sobrescrever o `vNF` bruto do XML por uma
+    fórmula única e auditável (sistema é gerencial, não fiscal). **Testado ao
+    vivo**: compra manual com 2 itens + frete + despesas gerou `totalAmount` e
+    custos rateados exatamente como calculado à mão.
+  - **`9bcc95a`** (Compra Manual → wizard de 2 etapas): **Achado de UX real**
+    (não premissa falsa) — a tela original deixava o operador definir "Novo
+    Preço Venda"/Margem na mesma etapa onde ainda editava Custo Base/Frete/
+    Despesas, invalidando a margem informada assim que o rateio mudava.
+    `ManualPurchase` virou `step` (1|2): Etapa 1 sem colunas de preço
+    (`ManualPurchaseItemRow` ganhou prop `showPricing`, default `true` —
+    `EditPurchaseModal` não foi tocado); Etapa 2 (`RepricingRow`, novo
+    componente) com grid Custo Antigo/Custo Novo Rateado/Preço Venda Antigo/
+    Novo/Margem-Markup sobre o custo já rateado. `apportionLandedCost` **movido**
+    de `apps/api/src/lib/inventory.ts` para `packages/shared/src/pricing.ts`
+    (mesmo arquivo de `priceFromMargin`/`markupFromPrice`) — o frontend passou a
+    precisar da fórmula pra prévia da Etapa 2, então virou fonte única
+    compartilhada em vez de duplicada.
+  - **`b4609d0`** (cadastro in-line de produto no XML): **Achados de premissa**
+    — não existe `confirmXmlImportSchema`/`PurchaseItems` (é
+    `confirmInvoiceSchema`/`InvoiceItem`); `Product.brand`/`group`/`subgroup` são
+    strings livres sem tabelas próprias (não há `brandId`/`groupId`/`subgroupId`
+    — "Select" virou o mesmo padrão de autocomplete texto-livre `SmartFilterInput`
+    já usado em `ProductPickerModal`); não existe hook `useSettings` (reaproveitado
+    o `useQuery(['settings','product-form'])` já presente no arquivo). Item do XML
+    sem De/Para ganhou link "Ou cadastrar como novo produto" → `NewProductInlineForm`
+    (Nome/SKU/Código de barras pré-preenchidos do XML, Marca/Grupo/Subgrupo com
+    sugestão, obrigatoriedade dinâmica das Configurações). Backend: `/confirm`
+    resolve o `variantId` de cada item **antes** de criar a `Invoice` — itens com
+    `newProductData` criam Produto+Variante **dentro da mesma transação**
+    (`tx.product.create`), usando o custo já rateado como custo inicial; se algo
+    falhar depois, nem a nota nem o produto pela metade ficam salvos.
+    `confirmInvoiceItemSchema.variantId` virou opcional, pareado com
+    `newProductData` opcional (`superRefine`: exatamente um dos dois, e
+    `newSalePrice` obrigatório para produto novo — não há "preço atual" pra
+    manter). **Testado ao vivo**: `POST /confirm` com um item `newProductData`
+    (frete+despesas rateados) criou produto/variante com
+    `costPrice=averageCost=28,75` exatamente como calculado à mão; as duas
+    validações de guarda (falta de preço, `variantId`+`newProductData` juntos)
+    rejeitaram com 400.
+  - **`5b3f5dd`** (frete/despesas editáveis também no XML): Etapa 1 do XML
+    ganhou os mesmos inputs de Frete/Outras Despesas da Compra Manual
+    (`NumInput`, pré-preenchidos com `vFrete`/`vOutro` do XML, editáveis para
+    refletir frete "por fora"/FOB); "Total da nota" no cabeçalho virou dinâmico
+    (`produtos + frete + despesas`, não mais o `vNF` estático). Etapa 2 passou a
+    recalcular o rateio **no cliente** (`landedCosts`, `useMemo` sobre
+    `apportionLandedCost` compartilhado) a partir do estado editável, em vez de
+    confiar no `apportionedUnitCost` que vinha congelado de `/parse` — esse
+    campo virou código morto e foi **removido** (schema, tipo do frontend, e o
+    cálculo em `/parse`) em vez de deixado para trás sem uso.
+  `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros** em todos
+  os commits.
+
 ---
 
 ## 12. Pendências, bloqueios e dívidas técnicas
@@ -1658,7 +1818,10 @@ Aplicadas automaticamente no Railway a cada deploy (`prisma migrate deploy`).
 5. ~~**BrasilAPI** ainda não integrada no formulário de fornecedor~~ **RESOLVIDO
    (2026-07-02)**: CEP via BrasilAPI (endereço completo) + CNPJ via ReceitaWS
    (proxeada pelo backend, ver §5 Cadastros).
-6. **Cadastro de produto** cria 1 variante por vez (multi-variante a fazer).
+6. **Cadastro de produto** cria 1 variante por vez (multi-variante a fazer) —
+   ainda vale para a tela de Produtos; o cadastro in-line na importação de XML
+   (2026-07-13, ver §5 Compras/§11) cobre só o caso pontual de item sem De/Para
+   durante a importação, sempre 1 variante, não substitui essa pendência.
 7. ~~**Pagamento único por venda**~~ **RESOLVIDO** (PDV-B): split de pagamento + "A prazo".
 8. **Estoque pode ficar negativo** em vendas offline (decisão consciente). Avaliar política de bloqueio/alerta.
 9. **JWT sem refresh token** e sem revogação (expira em 12h).
