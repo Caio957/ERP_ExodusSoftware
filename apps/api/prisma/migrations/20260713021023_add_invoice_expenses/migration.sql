@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Invoice" ADD COLUMN     "freight" DECIMAL(10,2) NOT NULL DEFAULT 0,
+ADD COLUMN     "otherExpenses" DECIMAL(10,2) NOT NULL DEFAULT 0;

@@ -378,6 +378,8 @@ function ManualPurchase() {
   const [purchaseDate, setPurchaseDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<PItem[]>([]);
+  const [freight, setFreight] = useState(0);
+  const [otherExpenses, setOtherExpenses] = useState(0);
   const [genPayable, setGenPayable] = useState(false);
   const [manualInstallments, setManualInstallments] = useState<PurchaseInstallment[]>([]);
   const [manualInstallmentsValid, setManualInstallmentsValid] = useState(false);
@@ -400,7 +402,8 @@ function ManualPurchase() {
   });
   const pricingMode = productFormSettings?.pricingMode ?? 'margin';
 
-  const total = round2(items.reduce((a, it) => a + it.quantity * it.unitCost, 0));
+  const productsTotal = round2(items.reduce((a, it) => a + it.quantity * it.unitCost, 0));
+  const total = round2(productsTotal + freight + otherExpenses);
 
   // Referências estáveis (useCallback) para o React.memo da linha do item
   // realmente evitar re-render das outras linhas a cada tecla.
@@ -427,6 +430,8 @@ function ManualPurchase() {
           batch: it.batch || undefined,
           validity: it.validity || undefined,
         })),
+        freight,
+        otherExpenses,
         installments: genPayable ? manualInstallments : undefined,
       }),
     onSuccess: () => {
@@ -436,6 +441,8 @@ function ManualPurchase() {
       setDone(true);
       setItems([]);
       setNotes('');
+      setFreight(0);
+      setOtherExpenses(0);
       setGenPayable(false);
       setManualInstallments([]);
       setManualInstallmentsValid(false);
@@ -555,9 +562,37 @@ function ManualPurchase() {
               onRemove={handleItemRemove}
             />
           ))}
-          <div className="flex justify-between rounded-xl bg-slate-50 px-4 py-2 font-semibold">
-            <span>Total da compra</span>
-            <span>{brl(total)}</span>
+
+          {/* Custo de aquisição real (landed cost, 4.9): frete e outras
+              despesas são rateados proporcionalmente ao valor de cada item
+              e embutidos no custo/CMP do produto (não no InvoiceItem.unitCost,
+              que guarda o valor original informado aqui). */}
+          <div className="grid grid-cols-2 gap-3">
+            <MoneyField label="Frete (R$)" value={freight} onChange={setFreight} />
+            <MoneyField label="Outras despesas (R$)" value={otherExpenses} onChange={setOtherExpenses} />
+          </div>
+
+          <div className="space-y-1 rounded-xl bg-slate-50 px-4 py-2">
+            <div className="flex justify-between text-sm text-slate-500">
+              <span>Subtotal (produtos)</span>
+              <span>{brl(productsTotal)}</span>
+            </div>
+            {freight > 0 && (
+              <div className="flex justify-between text-sm text-slate-500">
+                <span>Frete</span>
+                <span>{brl(freight)}</span>
+              </div>
+            )}
+            {otherExpenses > 0 && (
+              <div className="flex justify-between text-sm text-slate-500">
+                <span>Outras despesas</span>
+                <span>{brl(otherExpenses)}</span>
+              </div>
+            )}
+            <div className="flex justify-between border-t border-slate-200 pt-1 font-semibold">
+              <span>Total da compra</span>
+              <span>{brl(total)}</span>
+            </div>
           </div>
         </div>
       )}
@@ -1040,6 +1075,8 @@ interface InvoiceDetail {
   issueDate: string;
   entryDate: string;
   totalAmount: number;
+  freight: number;
+  otherExpenses: number;
   supplier: { id: string; name: string };
   items: Array<{
     id: string;
@@ -1157,7 +1194,25 @@ function ViewPurchaseModal({
                 ))}
               </ul>
 
-              <div className="flex justify-between border-t border-slate-100 pt-2 text-base font-bold">
+              {(data.freight > 0 || data.otherExpenses > 0) && (
+                <div className="space-y-0.5 border-t border-slate-100 pt-2 text-sm text-slate-500">
+                  {data.freight > 0 && (
+                    <div className="flex justify-between">
+                      <span>Frete</span>
+                      <span>{brl(data.freight)}</span>
+                    </div>
+                  )}
+                  {data.otherExpenses > 0 && (
+                    <div className="flex justify-between">
+                      <span>Outras despesas</span>
+                      <span>{brl(data.otherExpenses)}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+              <div
+                className={`flex justify-between text-base font-bold ${data.freight > 0 || data.otherExpenses > 0 ? '' : 'border-t border-slate-100 pt-2'}`}
+              >
                 <span>Total</span>
                 <span>{brl(data.totalAmount)}</span>
               </div>
@@ -1278,6 +1333,8 @@ function EditPurchaseModal({
   const [purchaseDate, setPurchaseDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<PItem[]>([]);
+  const [freight, setFreight] = useState(0);
+  const [otherExpenses, setOtherExpenses] = useState(0);
   const [genPayable, setGenPayable] = useState(false);
   const [editInstallments, setEditInstallments] = useState<PurchaseInstallment[]>([]);
   const [editInstallmentsValid, setEditInstallmentsValid] = useState(false);
@@ -1298,6 +1355,8 @@ function EditPurchaseModal({
     setSupplierName(invoice.supplier.name);
     setPurchaseDate(toDateInputValue(invoice.issueDate));
     setNotes(invoice.notes ?? '');
+    setFreight(invoice.freight);
+    setOtherExpenses(invoice.otherExpenses);
     setGenPayable(invoice.financialAccounts.length > 0);
     setItems(
       invoice.items.map((it) => ({
@@ -1328,7 +1387,8 @@ function EditPurchaseModal({
   });
   const pricingMode = productFormSettings?.pricingMode ?? 'margin';
 
-  const total = round2(items.reduce((a, it) => a + it.quantity * it.unitCost, 0));
+  const productsTotal = round2(items.reduce((a, it) => a + it.quantity * it.unitCost, 0));
+  const total = round2(productsTotal + freight + otherExpenses);
 
   const handleItemChange = useCallback((variantId: string, patch: Partial<PItem>) => {
     setItems((prev) => prev.map((it) => (it.variantId === variantId ? { ...it, ...patch } : it)));
@@ -1352,6 +1412,8 @@ function EditPurchaseModal({
           batch: it.batch || undefined,
           validity: it.validity || undefined,
         })),
+        freight,
+        otherExpenses,
         installments: genPayable ? editInstallments : undefined,
       }),
     onSuccess: onSaved,
@@ -1505,6 +1567,10 @@ function EditPurchaseModal({
                         onRemove={handleItemRemove}
                       />
                     ))}
+                    <div className="grid grid-cols-2 gap-3">
+                      <MoneyField label="Frete (R$)" value={freight} onChange={setFreight} />
+                      <MoneyField label="Outras despesas (R$)" value={otherExpenses} onChange={setOtherExpenses} />
+                    </div>
                   </div>
                 )}
               </div>
@@ -1512,9 +1578,27 @@ function EditPurchaseModal({
               {/* Resumo */}
               <div className="lg:sticky lg:top-0 lg:self-start">
                 <div className="card space-y-3">
-                  <div className="flex justify-between text-base font-bold">
-                    <span>Total da compra</span>
-                    <span>{brl(total)}</span>
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-sm text-slate-500">
+                      <span>Subtotal (produtos)</span>
+                      <span>{brl(productsTotal)}</span>
+                    </div>
+                    {freight > 0 && (
+                      <div className="flex justify-between text-sm text-slate-500">
+                        <span>Frete</span>
+                        <span>{brl(freight)}</span>
+                      </div>
+                    )}
+                    {otherExpenses > 0 && (
+                      <div className="flex justify-between text-sm text-slate-500">
+                        <span>Outras despesas</span>
+                        <span>{brl(otherExpenses)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between border-t border-slate-200 pt-1 text-base font-bold">
+                      <span>Total da compra</span>
+                      <span>{brl(total)}</span>
+                    </div>
                   </div>
 
                   <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -1908,6 +1992,54 @@ const ManualPurchaseItemRow = memo(function ManualPurchaseItemRow({
     </div>
   );
 });
+
+// Campo monetário (Frete/Outras Despesas) — mesmo padrão de estado local +
+// sanitizeBr + skip-sync usado no custo/preço de ManualPurchaseItemRow, para
+// não reintroduzir o bug do "zero fantasma" com type="number".
+function MoneyField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  const toRaw = (n: number) => (n !== 0 ? String(n).replace('.', ',') : '');
+  const [raw, setRaw] = useState(() => toRaw(value));
+  const skipSync = useRef(false);
+  useEffect(() => {
+    if (skipSync.current) {
+      skipSync.current = false;
+      return;
+    }
+    setRaw(toRaw(value));
+  }, [value]);
+
+  function commit(cleaned: string) {
+    setRaw(cleaned);
+    skipSync.current = true;
+    onChange(parseFloat(cleaned.replace(',', '.')) || 0);
+  }
+
+  return (
+    <label className="block">
+      <span className="label">{label}</span>
+      <input
+        type="text"
+        inputMode="decimal"
+        className="input"
+        value={raw}
+        placeholder="0,00"
+        onKeyDown={(e) => {
+          if (['-', '+', 'e', 'E'].includes(e.key)) e.preventDefault();
+        }}
+        onChange={(e) => commit(sanitizeBr(e.target.value))}
+        onFocus={(e) => e.target.select()}
+      />
+    </label>
+  );
+}
 
 function Num({
   label,

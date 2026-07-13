@@ -29,6 +29,10 @@ export interface RawNfe {
   nfeNumber: string;
   supplier: { document: string; name: string };
   totalAmount: number;
+  /** vFrete do total.ICMSTot — landed cost, rateado entre os itens (4.9). */
+  freight: number;
+  /** vOutro do total.ICMSTot — idem. */
+  otherExpenses: number;
   items: RawNfeItem[];
   duplicates: RawNfeDuplicate[];
 }
@@ -91,6 +95,8 @@ export function parseNfeXml(xml: string): RawNfe {
       name: String(emit.xNome ?? ''),
     },
     totalAmount: Number(total.vNF ?? 0),
+    freight: Number(total.vFrete ?? 0),
+    otherExpenses: Number(total.vOutro ?? 0),
     items,
     duplicates,
   };

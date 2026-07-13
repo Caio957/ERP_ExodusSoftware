@@ -22,3 +22,35 @@ export function calcWeightedAverageCost(
   const newAverageCost = (totalCurrentValue + totalIncomingValue) / (currentStockQty + incomingQty);
   return Math.round(newAverageCost * 100) / 100;
 }
+
+/**
+ * Landed cost: rateia frete + outras despesas da nota entre os itens,
+ * proporcionalmente ao valor de cada um (qtd × custo original) dentro do
+ * total de produtos da compra. Fonte única usada por `/invoices/confirm`,
+ * `/invoices/manual` e a edição completa — mesma motivação de
+ * `calcWeightedAverageCost` (evitar que as rotas divirjam).
+ *
+ * `InvoiceItem.unitCost` continua guardando o custo original do documento
+ * (auditoria/conciliação com o fornecedor); o valor retornado aqui — que já
+ * embute a fatia rateada — é o que atualiza `costPrice`/`averageCost` do
+ * produto (o custo real de aquisição, refletido na tela de reprecificação).
+ *
+ * Sem despesas extras ou sem valor de produtos para ratear (ex.: todos os
+ * itens com custo zero), retorna os custos originais inalterados.
+ */
+export function apportionLandedCost(
+  items: Array<{ quantity: number; unitCost: number }>,
+  freight: number,
+  otherExpenses: number,
+): number[] {
+  const extra = freight + otherExpenses;
+  const productsTotal = items.reduce((acc, it) => acc + it.quantity * it.unitCost, 0);
+  if (extra <= 0 || productsTotal <= 0) {
+    return items.map((it) => it.unitCost);
+  }
+  return items.map((it) => {
+    const weight = (it.quantity * it.unitCost) / productsTotal;
+    const share = extra * weight;
+    return Math.round((it.unitCost + share / it.quantity) * 100) / 100;
+  });
+}

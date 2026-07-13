@@ -60,6 +60,10 @@ interface ParsedItem {
   /** Dados reais do catálogo (nome do produto + variante) já resolvidos pelo
    *  backend quando o De/Para foi encontrado automaticamente. */
   matchedVariant: VariantDetail | null;
+  /** Custo unitário já com a fatia rateada de frete/outras despesas (landed
+   *  cost, 4.9) — calculado pelo backend em /parse. Igual a `unitCost`
+   *  quando a nota não tem frete/outras despesas. */
+  apportionedUnitCost: number;
 }
 interface ParsedNfe {
   accessKey: string;
@@ -67,6 +71,9 @@ interface ParsedNfe {
   nfeNumber: string;
   supplier: { document: string; name: string; existingId: string | null };
   totalAmount: number;
+  /** vFrete/vOutro do total.ICMSTot — rateados entre os itens (4.9). */
+  freight: number;
+  otherExpenses: number;
   items: ParsedItem[];
   duplicates: Array<{ number: string; dueDate: string; amount: number }>;
   alreadyImported: boolean;
@@ -126,8 +133,9 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
   const [pickerIdx, setPickerIdx] = useState<number | null>(null);
 
   // passo 2: revisão de preços — keyed by item index. `newPct` é só apoio de
-  // UX (nunca vai ao backend); a base de cálculo é sempre o custo da nota
-  // (it.unitCost), não o custo anterior da variante.
+  // UX (nunca vai ao backend); a base de cálculo é sempre o custo real da
+  // nota (it.apportionedUnitCost — já com a fatia de frete/outras despesas
+  // embutida, 4.9), não o custo anterior da variante.
   const [newPrices, setNewPrices] = useState<Record<number, number>>({});
   const [newPct, setNewPct] = useState<Record<number, number>>({});
 
@@ -210,6 +218,8 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
         issueDate: parsed.issueDate,
         entryDate,
         totalAmount: parsed.totalAmount,
+        freight: parsed.freight,
+        otherExpenses: parsed.otherExpenses,
         items: parsed.items.map((it, i) => {
           const newPrice = newPrices[i];
           return {
@@ -371,6 +381,13 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
               <div className="text-right">
                 <div className="text-xs text-slate-400">Total da nota</div>
                 <div className="text-lg font-bold">{brl(parsed.totalAmount)}</div>
+                {(parsed.freight > 0 || parsed.otherExpenses > 0) && (
+                  <div className="text-xs text-slate-400">
+                    {parsed.freight > 0 && `Frete: ${brl(parsed.freight)}`}
+                    {parsed.freight > 0 && parsed.otherExpenses > 0 && ' · '}
+                    {parsed.otherExpenses > 0 && `Outras despesas: ${brl(parsed.otherExpenses)}`}
+                  </div>
+                )}
                 <div className="text-xs text-slate-400">Emissão: {fmtDate(parsed.issueDate)}</div>
               </div>
             </div>
@@ -460,13 +477,20 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
                   </div>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-3 lg:grid-cols-5">
                     <InfoCell label="Custo anterior" value={v?.costPrice != null && v.costPrice > 0 ? brl(v.costPrice) : '—'} />
-                    <InfoCell label="Custo na nota" value={brl(it.unitCost)} highlight />
+                    <InfoCell label="Custo na nota" value={brl(it.unitCost)} />
+                    {/* Custo de aquisição real (landed cost, 4.9): custo da nota já com a
+                        fatia rateada de frete/outras despesas embutida — é essa base,
+                        não o custo bruto da nota, que alimenta a margem/markup abaixo e
+                        vira costPrice/averageCost do produto ao confirmar. */}
+                    {it.apportionedUnitCost !== it.unitCost && (
+                      <InfoCell label="Custo real (c/ frete)" value={brl(it.apportionedUnitCost)} highlight />
+                    )}
                     <InfoCell label="P. venda atual" value={v?.salePrice != null && v.salePrice > 0 ? brl(v.salePrice) : '—'} />
                     <div>
                       <div className="text-slate-400 mb-0.5">Novo p. venda</div>
                       <NumInput
                         value={newPrices[i] ?? 0}
-                        onChange={(price) => applyNewPrice(i, it.unitCost, price)}
+                        onChange={(price) => applyNewPrice(i, it.apportionedUnitCost, price)}
                         placeholder={v?.salePrice != null && v.salePrice > 0 ? brl(v.salePrice) : 'Manter atual'}
                       />
                     </div>
@@ -474,7 +498,7 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
                       <div className="text-slate-400 mb-0.5">{pricingMode === 'margin' ? 'Margem (%)' : 'Markup (%)'}</div>
                       <NumInput
                         value={newPct[i] ?? 0}
-                        onChange={(pct) => applyNewPct(i, it.unitCost, pct)}
+                        onChange={(pct) => applyNewPct(i, it.apportionedUnitCost, pct)}
                         max={pricingMode === 'margin' ? 99.99 : undefined}
                         placeholder="0,00"
                       />

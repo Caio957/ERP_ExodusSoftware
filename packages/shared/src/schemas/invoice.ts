@@ -31,6 +31,14 @@ export const parsedNfeItemSchema = z.object({
       group: z.string().nullable(),
     })
     .nullable(),
+  /**
+   * Custo unitário já com a fatia rateada do frete/outras despesas da nota
+   * embutida (landed cost) — calculado pelo backend em `/parse` a partir de
+   * `freight`/`otherExpenses` do XML, para a Etapa 2 (revisão de preços) usar
+   * como base de margem/markup em vez do `unitCost` bruto do documento.
+   * Igual a `unitCost` quando a nota não tem frete/outras despesas.
+   */
+  apportionedUnitCost: z.number().nonnegative(),
 });
 export type ParsedNfeItem = z.infer<typeof parsedNfeItemSchema>;
 
@@ -43,6 +51,9 @@ export const parsedNfeSchema = z.object({
     name: z.string(),
   }),
   totalAmount: z.number().nonnegative(),
+  /** vFrete/vOutro do total.ICMSTot — landed cost (4.9), ver apportionLandedCost. */
+  freight: z.number().nonnegative(),
+  otherExpenses: z.number().nonnegative(),
   items: z.array(parsedNfeItemSchema),
   duplicates: z.array(
     z.object({
@@ -82,6 +93,12 @@ export const confirmInvoiceSchema = z.object({
    *  (distinta da emissão da NFe). Base do StockMovement gerado. */
   entryDate: z.coerce.date().default(() => new Date()),
   totalAmount: money,
+  /** Landed cost (4.9): rateados entre os itens para compor o custo real —
+   *  ver apportionLandedCost (lib/inventory.ts). O total persistido é
+   *  recalculado no backend como soma dos itens + freight + otherExpenses,
+   *  não o `totalAmount` acima (mantido só como referência do que veio do XML). */
+  freight: money.default(0),
+  otherExpenses: money.default(0),
   items: z.array(confirmInvoiceItemSchema).min(1, 'Nota sem itens'),
   /** Duplicatas do XML (mantido para compatibilidade). */
   duplicates: z
@@ -139,6 +156,9 @@ export const manualPurchaseSchema = z
     purchaseDate: z.coerce.date(),
     notes: z.string().trim().max(500).optional(),
     items: z.array(manualPurchaseItemSchema).min(1, 'Adicione ao menos um produto'),
+    /** Landed cost (4.9): rateados entre os itens — ver apportionLandedCost. */
+    freight: money.default(0),
+    otherExpenses: money.default(0),
     /** Parcelas do contas a pagar (D7). Se vazio, não gera financeiro. */
     installments: z
       .array(z.object({ dueDate: z.coerce.date(), amount: money }))
@@ -164,6 +184,10 @@ export const updateInvoiceSchema = z.object({
   documentNumber: z.number().int().positive().nullish(),
   supplierId: z.string().uuid().optional(),
   items: z.array(manualPurchaseItemSchema).min(1, 'Adicione ao menos um produto').optional(),
+  /** Landed cost (4.9). Só usado (e obrigatório considerar) quando `items`
+   *  está presente — omitido, o backend trata como 0. */
+  freight: money.optional(),
+  otherExpenses: money.optional(),
   /** Parcelas do contas a pagar. Só usado quando `items` está presente. */
   installments: z.array(z.object({ dueDate: z.coerce.date(), amount: money })).optional(),
 });
