@@ -22,3 +22,8 @@ export function calcWeightedAverageCost(
   const newAverageCost = (totalCurrentValue + totalIncomingValue) / (currentStockQty + incomingQty);
   return Math.round(newAverageCost * 100) / 100;
 }
+
+// `apportionLandedCost` (rateio de frete/outras despesas) mudou para
+// packages/shared/src/pricing.ts — o frontend também precisa da mesma
+// fórmula para a prévia da Etapa 2 da Compra Manual/XmlImport, então virou
+// uma função compartilhada em vez de viver só aqui.

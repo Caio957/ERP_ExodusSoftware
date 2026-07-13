@@ -43,6 +43,9 @@ export const parsedNfeSchema = z.object({
     name: z.string(),
   }),
   totalAmount: z.number().nonnegative(),
+  /** vFrete/vOutro do total.ICMSTot — landed cost (4.9), ver apportionLandedCost. */
+  freight: z.number().nonnegative(),
+  otherExpenses: z.number().nonnegative(),
   items: z.array(parsedNfeItemSchema),
   duplicates: z.array(
     z.object({
@@ -55,22 +58,68 @@ export const parsedNfeSchema = z.object({
 export type ParsedNfe = z.infer<typeof parsedNfeSchema>;
 
 /**
- * Confirmação da entrada após o usuário resolver o De/Para de cada item.
- * `variantId` já mapeado; opcionalmente persiste a associação fornecedor↔produto
- * para reuso em notas futuras (Requisito 4.3).
+ * Cadastro in-line de produto durante a importação de XML (4.10): quando o
+ * item não existe no catálogo, o operador preenche estes dados em vez de
+ * escolher uma variante — o backend cria Produto+Variante dentro da mesma
+ * transação da confirmação, antes de vincular o InvoiceItem.
  */
-export const confirmInvoiceItemSchema = z.object({
-  variantId: z.string().uuid(),
-  quantity: positiveInt,
-  unitCost: money,
-  cfop: z.string().min(1),
-  /** Novo preço de venda; se omitido, mantém o atual da variante. */
-  newSalePrice: money.optional(),
-  // Para gravar o De/Para:
-  supplierItemCode: z.string().optional(),
-  supplierBarcode: z.string().nullish(),
-  saveMapping: z.boolean().default(true),
+export const newProductDataSchema = z.object({
+  name: z.string().trim().min(2, 'Nome do produto obrigatório'),
+  sku: z.string().trim().min(1, 'SKU obrigatório'),
+  barcode: z.string().trim().min(1).optional(),
+  // Obrigatoriedade configurável (Configurações da loja) — validada na rota,
+  // igual ao cadastro normal de produto (routes/products.ts).
+  brand: z.string().trim().min(1).optional(),
+  group: z.string().trim().min(1).optional(),
+  subgroup: z.string().trim().min(1).optional(),
 });
+export type NewProductData = z.infer<typeof newProductDataSchema>;
+
+/**
+ * Confirmação da entrada após o usuário resolver o De/Para de cada item.
+ * Ou `variantId` (produto existente já mapeado) ou `newProductData`
+ * (cadastro in-line, 4.10) — nunca os dois nem nenhum dos dois. Um item novo
+ * exige `newSalePrice` (não há preço "atual" para manter). Opcionalmente
+ * persiste a associação fornecedor↔produto para reuso em notas futuras
+ * (Requisito 4.3) — funciona também para produtos recém-criados.
+ */
+export const confirmInvoiceItemSchema = z
+  .object({
+    variantId: z.string().uuid().optional(),
+    newProductData: newProductDataSchema.optional(),
+    quantity: positiveInt,
+    unitCost: money,
+    cfop: z.string().min(1),
+    /** Novo preço de venda; se omitido (produto existente), mantém o atual da variante. */
+    newSalePrice: money.optional(),
+    // Para gravar o De/Para:
+    supplierItemCode: z.string().optional(),
+    supplierBarcode: z.string().nullish(),
+    saveMapping: z.boolean().default(true),
+  })
+  .superRefine((d, ctx) => {
+    if (!d.variantId && !d.newProductData) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['variantId'],
+        message: 'Informe um produto existente ou os dados de um novo produto',
+      });
+    }
+    if (d.variantId && d.newProductData) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['newProductData'],
+        message: 'Não é possível informar produto existente e novo produto ao mesmo tempo',
+      });
+    }
+    if (d.newProductData && !(d.newSalePrice != null && d.newSalePrice > 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['newSalePrice'],
+        message: 'Preço de venda obrigatório para produto novo',
+      });
+    }
+  });
 
 export const confirmInvoiceSchema = z.object({
   supplierId: z.string().uuid(),
@@ -82,6 +131,12 @@ export const confirmInvoiceSchema = z.object({
    *  (distinta da emissão da NFe). Base do StockMovement gerado. */
   entryDate: z.coerce.date().default(() => new Date()),
   totalAmount: money,
+  /** Landed cost (4.9): rateados entre os itens para compor o custo real —
+   *  ver apportionLandedCost (lib/inventory.ts). O total persistido é
+   *  recalculado no backend como soma dos itens + freight + otherExpenses,
+   *  não o `totalAmount` acima (mantido só como referência do que veio do XML). */
+  freight: money.default(0),
+  otherExpenses: money.default(0),
   items: z.array(confirmInvoiceItemSchema).min(1, 'Nota sem itens'),
   /** Duplicatas do XML (mantido para compatibilidade). */
   duplicates: z
@@ -139,6 +194,9 @@ export const manualPurchaseSchema = z
     purchaseDate: z.coerce.date(),
     notes: z.string().trim().max(500).optional(),
     items: z.array(manualPurchaseItemSchema).min(1, 'Adicione ao menos um produto'),
+    /** Landed cost (4.9): rateados entre os itens — ver apportionLandedCost. */
+    freight: money.default(0),
+    otherExpenses: money.default(0),
     /** Parcelas do contas a pagar (D7). Se vazio, não gera financeiro. */
     installments: z
       .array(z.object({ dueDate: z.coerce.date(), amount: money }))
@@ -164,6 +222,10 @@ export const updateInvoiceSchema = z.object({
   documentNumber: z.number().int().positive().nullish(),
   supplierId: z.string().uuid().optional(),
   items: z.array(manualPurchaseItemSchema).min(1, 'Adicione ao menos um produto').optional(),
+  /** Landed cost (4.9). Só usado (e obrigatório considerar) quando `items`
+   *  está presente — omitido, o backend trata como 0. */
+  freight: money.optional(),
+  otherExpenses: money.optional(),
   /** Parcelas do contas a pagar. Só usado quando `items` está presente. */
   installments: z.array(z.object({ dueDate: z.coerce.date(), amount: money })).optional(),
 });

@@ -69,3 +69,32 @@ export function pricingSnapshot(cost: number, salePrice: number): PricingSnapsho
     profit: round2(salePrice - cost),
   };
 }
+
+/**
+ * Landed cost: rateia frete + outras despesas de uma compra entre os itens,
+ * proporcionalmente ao valor de cada um (qtd × custo original) dentro do
+ * total de produtos. Compartilhada entre backend (persistência do custo
+ * real em costPrice/averageCost) e frontend (prévia visual na Etapa 2 da
+ * Compra Manual e do XmlImport, antes mesmo de confirmar) — mesma
+ * motivação das funções de margem/markup acima: uma fórmula, sem risco de
+ * o preview do front divergir do que o backend efetivamente grava.
+ *
+ * Sem despesas extras ou sem valor de produtos para ratear, retorna os
+ * custos originais inalterados.
+ */
+export function apportionLandedCost(
+  items: Array<{ quantity: number; unitCost: number }>,
+  freight: number,
+  otherExpenses: number,
+): number[] {
+  const extra = freight + otherExpenses;
+  const productsTotal = items.reduce((acc, it) => acc + it.quantity * it.unitCost, 0);
+  if (extra <= 0 || productsTotal <= 0) {
+    return items.map((it) => it.unitCost);
+  }
+  return items.map((it) => {
+    const weight = (it.quantity * it.unitCost) / productsTotal;
+    const share = extra * weight;
+    return round2(it.unitCost + share / it.quantity);
+  });
+}

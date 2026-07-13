@@ -18,6 +18,7 @@ import {
   priceFromMarkup,
   marginFromPrice,
   markupFromPrice,
+  apportionLandedCost,
 } from '@exodus/shared';
 import { api, ApiError } from '../lib/api';
 import { useSearchHandler } from '../hooks/useSearchHandler';
@@ -25,6 +26,7 @@ import { maskCpfCnpj } from '../lib/masks';
 import { PurchaseFinancialEngine, type PurchaseInstallment } from './PurchaseFinancialEngine';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 // Padrão BR de vírgula decimal (mesmo helper usado em PDV/Vendas/Produtos).
 function sanitizeBr(s: string): string {
@@ -67,6 +69,9 @@ interface ParsedNfe {
   nfeNumber: string;
   supplier: { document: string; name: string; existingId: string | null };
   totalAmount: number;
+  /** vFrete/vOutro do total.ICMSTot — rateados entre os itens (4.9). */
+  freight: number;
+  otherExpenses: number;
   items: ParsedItem[];
   duplicates: Array<{ number: string; dueDate: string; amount: number }>;
   alreadyImported: boolean;
@@ -80,6 +85,18 @@ interface VariantDetail {
   productName: string;
   brand?: string | null;
   group?: string | null;
+}
+
+/** Cadastro in-line de produto (4.10) — preenchido quando o item do XML não
+ *  existe no catálogo e o operador opta por cadastrá-lo na hora, em vez de
+ *  abandonar a importação para ir à tela de Produtos. */
+interface NewProductDraft {
+  name: string;
+  sku: string;
+  barcode: string;
+  brand: string;
+  group: string;
+  subgroup: string;
 }
 
 type Step = 'upload' | 'mapping' | 'prices' | 'financial';
@@ -120,14 +137,73 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
     queryFn: () => api.get<ProductFormSettings>('/api/settings/product-form'),
   });
   const pricingMode = productFormSettings?.pricingMode ?? 'margin';
+  // Mesma obrigatoriedade configurável usada no cadastro normal de produto
+  // (routes/products.ts) — o mini-form in-line (4.10) precisa respeitar.
+  const brandRequired = productFormSettings?.brandRequired ?? false;
+  const groupRequired = productFormSettings?.groupRequired ?? false;
+  const subgroupRequired = productFormSettings?.subgroupRequired ?? false;
+  const barcodeRequired = productFormSettings?.barcodeRequired ?? false;
+
+  // Sugestões de Marca/Grupo/Subgrupo para o mini-form in-line — derivadas do
+  // catálogo já cadastrado, sem endpoint dedicado de valores únicos (mesmo
+  // approach de ProductPickerModal, mais abaixo).
+  const { data: catalogForOptions } = useQuery({
+    queryKey: ['product-catalog-options'],
+    queryFn: () => api.get<{ items: ProductRow[] }>('/api/products?pageSize=100'),
+    staleTime: 60_000,
+  });
+  const catalogProducts = catalogForOptions?.items ?? [];
+  const distinctSorted = (values: Array<string | null | undefined>) =>
+    Array.from(new Set(values.map((v) => v?.trim()).filter((v): v is string => !!v))).sort((a, b) =>
+      a.localeCompare(b),
+    );
+  const brandOptions = useMemo(() => distinctSorted(catalogProducts.map((p) => p.brand)), [catalogProducts]);
+  const groupOptions = useMemo(() => distinctSorted(catalogProducts.map((p) => p.group)), [catalogProducts]);
+  const subgroupOptions = useMemo(() => distinctSorted(catalogProducts.map((p) => p.subgroup)), [catalogProducts]);
 
   // passo 1: De/Para
   const [mapping, setMapping] = useState<Record<number, VariantDetail>>({});
   const [pickerIdx, setPickerIdx] = useState<number | null>(null);
+  // Cadastro in-line de produto (4.10) — chave presente = item nesse modo.
+  const [newProductDrafts, setNewProductDrafts] = useState<Record<number, NewProductDraft>>({});
+
+  // Landed cost editável (4.9/4.11): o XML já traz vFrete/vOutro, mas o
+  // operador pode ajustar para refletir frete pago "por fora" (FOB) ou outras
+  // despesas reais não descritas no documento — inicializado com o valor
+  // extraído da nota, sobrescrito em processFile() a cada novo upload.
+  const [freight, setFreight] = useState(0);
+  const [otherExpenses, setOtherExpenses] = useState(0);
+  const productsTotal = round2((parsed?.items ?? []).reduce((a, it) => a + it.quantity * it.unitCost, 0));
+  const editedTotal = round2(productsTotal + freight + otherExpenses);
+  // Prévia do rateio recalculada no cliente a partir do estado editável —
+  // não do apportionedUnitCost vindo de /parse, que reflete só o vFrete/vOutro
+  // originais do XML e ficaria desatualizado assim que o operador editasse os
+  // campos acima. Mesma fórmula da Compra Manual (apportionLandedCost,
+  // packages/shared/src/pricing.ts — fonte única compartilhada front/back).
+  const landedCosts = useMemo(
+    () =>
+      apportionLandedCost(
+        (parsed?.items ?? []).map((it) => ({ quantity: it.quantity, unitCost: it.unitCost })),
+        freight,
+        otherExpenses,
+      ),
+    [parsed, freight, otherExpenses],
+  );
+
+  function isDraftValid(d: NewProductDraft | undefined): boolean {
+    if (!d) return false;
+    if (!d.name.trim() || !d.sku.trim()) return false;
+    if (brandRequired && !d.brand.trim()) return false;
+    if (groupRequired && !d.group.trim()) return false;
+    if (subgroupRequired && !d.subgroup.trim()) return false;
+    if (barcodeRequired && !d.barcode.trim()) return false;
+    return true;
+  }
 
   // passo 2: revisão de preços — keyed by item index. `newPct` é só apoio de
-  // UX (nunca vai ao backend); a base de cálculo é sempre o custo da nota
-  // (it.unitCost), não o custo anterior da variante.
+  // UX (nunca vai ao backend); a base de cálculo é sempre o custo real
+  // rateado (landedCosts[i] — já com a fatia de frete/outras despesas
+  // editáveis embutida, 4.9/4.11), não o custo anterior da variante.
   const [newPrices, setNewPrices] = useState<Record<number, number>>({});
   const [newPct, setNewPct] = useState<Record<number, number>>({});
 
@@ -173,6 +249,10 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
         }
       });
       setMapping(init);
+      // Estado editável inicializado com o vFrete/vOutro extraídos do XML —
+      // o operador ajusta a partir daqui (frete por fora/FOB, despesas reais).
+      setFreight(data.freight);
+      setOtherExpenses(data.otherExpenses);
       setStep('mapping');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Falha ao processar XML');
@@ -209,9 +289,38 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
         nfeNumber: parsed.nfeNumber,
         issueDate: parsed.issueDate,
         entryDate,
-        totalAmount: parsed.totalAmount,
+        // O backend recalcula totalAmount a partir dos itens + freight/
+        // otherExpenses de qualquer forma (fonte única com /manual e a
+        // edição) — enviamos o total já editado só por consistência do payload.
+        totalAmount: editedTotal,
+        freight,
+        otherExpenses,
         items: parsed.items.map((it, i) => {
           const newPrice = newPrices[i];
+          const draft = newProductDrafts[i];
+          // Cadastro in-line (4.10): sem variantId — o backend cria o
+          // Produto+Variante na mesma transação da confirmação e usa o preço
+          // de venda informado (obrigatório aqui, já validado no gate da
+          // Etapa 2 e no Zod).
+          if (draft) {
+            return {
+              quantity: it.quantity,
+              unitCost: it.unitCost,
+              cfop: it.cfop,
+              supplierItemCode: it.supplierItemCode,
+              supplierBarcode: it.supplierBarcode,
+              saveMapping: true,
+              newSalePrice: newPrice,
+              newProductData: {
+                name: draft.name.trim(),
+                sku: draft.sku.trim(),
+                barcode: draft.barcode.trim() || undefined,
+                brand: draft.brand.trim() || undefined,
+                group: draft.group.trim() || undefined,
+                subgroup: draft.subgroup.trim() || undefined,
+              },
+            };
+          }
           return {
             variantId: mapping[i]!.id,
             quantity: it.quantity,
@@ -242,6 +351,9 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
     setFileName(null);
     setStep('upload');
     setMapping({});
+    setNewProductDrafts({});
+    setFreight(0);
+    setOtherExpenses(0);
     setNewPrices({});
     setNewPct({});
     setFinancialMode('xml');
@@ -250,10 +362,20 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
     setEntryDate(new Date().toISOString().split('T')[0]);
   }
 
-  const allMapped = parsed?.items.every((_, i) => mapping[i]?.id);
+  const allMapped = parsed?.items.every((_, i) => mapping[i]?.id || isDraftValid(newProductDrafts[i]));
 
-  // Inicializa modo financeiro ao entrar na etapa
+  // Inicializa modo financeiro ao entrar na etapa. Itens de cadastro in-line
+  // (4.10) exigem preço de venda definido aqui — não há "preço atual" para
+  // manter, diferente de um produto já existente.
   function goToFinancial() {
+    setError(null);
+    const missingPrice = parsed?.items.some(
+      (_, i) => newProductDrafts[i] && !(newPrices[i] != null && newPrices[i]! > 0),
+    );
+    if (missingPrice) {
+      setError('Defina o preço de venda dos produtos novos antes de continuar (Etapa 2).');
+      return;
+    }
     if (parsed?.duplicates.length) {
       setFinancialMode('xml');
     } else {
@@ -369,20 +491,41 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
                 )}
               </div>
               <div className="text-right">
-                <div className="text-xs text-slate-400">Total da nota</div>
-                <div className="text-lg font-bold">{brl(parsed.totalAmount)}</div>
+                <div className="text-xs text-slate-400">Total da nota (com ajustes)</div>
+                {/* Dinâmico: reage aos campos de Frete/Outras despesas abaixo —
+                    Soma dos Produtos + Frete + Outras Despesas, não mais o
+                    totalAmount estático vindo do XML (que pode ter outros
+                    componentes que este ERP gerencial não modela). */}
+                <div className="text-lg font-bold">{brl(editedTotal)}</div>
+                <div className="text-xs text-slate-400">Subtotal produtos: {brl(productsTotal)}</div>
                 <div className="text-xs text-slate-400">Emissão: {fmtDate(parsed.issueDate)}</div>
               </div>
             </div>
-            <label className="mt-3 block max-w-[200px]">
-              <span className="label">Data de entrada</span>
-              <input
-                type="date"
-                className="input"
-                value={entryDate}
-                onChange={(e) => setEntryDate(e.target.value)}
-              />
-            </label>
+
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <label className="block">
+                <span className="label">Data de entrada</span>
+                <input
+                  type="date"
+                  className="input"
+                  value={entryDate}
+                  onChange={(e) => setEntryDate(e.target.value)}
+                />
+              </label>
+              {/* Landed cost editável (4.11): o XML já traz vFrete/vOutro
+                  (pré-preenchidos em processFile), mas o operador pode ajustar
+                  para refletir frete pago por fora (FOB) ou outras despesas
+                  reais de aquisição não descritas na nota — afeta o rateio
+                  usado na Etapa 2 (ver landedCosts, useMemo acima). */}
+              <label className="block">
+                <span className="label">Frete (R$)</span>
+                <NumInput value={freight} onChange={setFreight} placeholder="0,00" />
+              </label>
+              <label className="block">
+                <span className="label">Outras despesas (R$)</span>
+                <NumInput value={otherExpenses} onChange={setOtherExpenses} placeholder="0,00" />
+              </label>
+            </div>
             {parsed.alreadyImported && (
               <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
                 ⚠️ Esta nota já foi importada anteriormente.
@@ -415,13 +558,54 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
                       trocar
                     </button>
                   </div>
+                ) : newProductDrafts[i] ? (
+                  <NewProductInlineForm
+                    draft={newProductDrafts[i]}
+                    brandRequired={brandRequired}
+                    groupRequired={groupRequired}
+                    subgroupRequired={subgroupRequired}
+                    barcodeRequired={barcodeRequired}
+                    brandOptions={brandOptions}
+                    groupOptions={groupOptions}
+                    subgroupOptions={subgroupOptions}
+                    onChange={(patch) =>
+                      setNewProductDrafts((d) => ({ ...d, [i]: { ...d[i]!, ...patch } }))
+                    }
+                    onCancel={() =>
+                      setNewProductDrafts((d) => {
+                        const n = { ...d };
+                        delete n[i];
+                        return n;
+                      })
+                    }
+                  />
                 ) : (
-                  <button
-                    className="mt-2 w-full rounded-lg border border-dashed border-brand-300 bg-brand-50/30 px-3 py-2 text-sm text-brand-700 hover:bg-brand-50 flex items-center justify-center gap-2"
-                    onClick={() => { setError(null); setPickerIdx(i); }}
-                  >
-                    <Search className="h-4 w-4" /> Selecionar produto do catálogo
-                  </button>
+                  <div className="mt-2 space-y-2">
+                    <button
+                      className="w-full rounded-lg border border-dashed border-brand-300 bg-brand-50/30 px-3 py-2 text-sm text-brand-700 hover:bg-brand-50 flex items-center justify-center gap-2"
+                      onClick={() => { setError(null); setPickerIdx(i); }}
+                    >
+                      <Search className="h-4 w-4" /> Selecionar produto do catálogo
+                    </button>
+                    <button
+                      className="w-full text-center text-xs font-medium text-accent-700 hover:underline"
+                      onClick={() =>
+                        setNewProductDrafts((d) => ({
+                          ...d,
+                          [i]: {
+                            name: it.description,
+                            sku: it.supplierItemCode,
+                            barcode: it.supplierBarcode ?? '',
+                            brand: '',
+                            group: '',
+                            subgroup: '',
+                          },
+                        }))
+                      }
+                    >
+                      Ou cadastrar como novo produto
+                    </button>
+                  </div>
                 )}
               </div>
             ))}
@@ -452,29 +636,49 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
             </p>
             {parsed.items.map((it, i) => {
               const v = mapping[i];
+              const draft = newProductDrafts[i];
               return (
                 <div key={i} className="rounded-xl border border-slate-200 p-3 space-y-2">
-                  <div className="flex flex-wrap justify-between gap-1 text-sm">
-                    <span className="font-medium">{v?.productName || it.description}</span>
+                  <div className="flex flex-wrap items-center justify-between gap-1 text-sm">
+                    <span className="flex items-center gap-1.5 font-medium">
+                      {draft?.name || v?.productName || it.description}
+                      {draft && (
+                        <span className="badge-gold flex items-center gap-1 text-[10px]">
+                          <Sparkles className="h-3 w-3" /> Novo produto
+                        </span>
+                      )}
+                    </span>
                     {v?.description && <span className="text-slate-500 text-xs">{v.description}</span>}
                   </div>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-3 lg:grid-cols-5">
                     <InfoCell label="Custo anterior" value={v?.costPrice != null && v.costPrice > 0 ? brl(v.costPrice) : '—'} />
-                    <InfoCell label="Custo na nota" value={brl(it.unitCost)} highlight />
+                    <InfoCell label="Custo na nota" value={brl(it.unitCost)} />
+                    {/* Custo de aquisição real (landed cost, 4.9/4.11): custo da nota já
+                        com a fatia rateada de frete/outras despesas embutida — recalculado
+                        no cliente (landedCosts, useMemo acima) a partir do Frete/Outras
+                        despesas editáveis na Etapa 1, não do apportionedUnitCost estático
+                        vindo de /parse. É essa base, não o custo bruto da nota, que
+                        alimenta a margem/markup abaixo e vira costPrice/averageCost do
+                        produto ao confirmar. */}
+                    {landedCosts[i] !== it.unitCost && (
+                      <InfoCell label="Custo real (c/ frete)" value={brl(landedCosts[i]!)} highlight />
+                    )}
                     <InfoCell label="P. venda atual" value={v?.salePrice != null && v.salePrice > 0 ? brl(v.salePrice) : '—'} />
                     <div>
-                      <div className="text-slate-400 mb-0.5">Novo p. venda</div>
+                      <div className="text-slate-400 mb-0.5">{draft ? 'Preço de venda *' : 'Novo p. venda'}</div>
                       <NumInput
                         value={newPrices[i] ?? 0}
-                        onChange={(price) => applyNewPrice(i, it.unitCost, price)}
-                        placeholder={v?.salePrice != null && v.salePrice > 0 ? brl(v.salePrice) : 'Manter atual'}
+                        onChange={(price) => applyNewPrice(i, landedCosts[i]!, price)}
+                        placeholder={
+                          draft ? 'Obrigatório' : v?.salePrice != null && v.salePrice > 0 ? brl(v.salePrice) : 'Manter atual'
+                        }
                       />
                     </div>
                     <div>
                       <div className="text-slate-400 mb-0.5">{pricingMode === 'margin' ? 'Margem (%)' : 'Markup (%)'}</div>
                       <NumInput
                         value={newPct[i] ?? 0}
-                        onChange={(pct) => applyNewPct(i, it.unitCost, pct)}
+                        onChange={(pct) => applyNewPct(i, landedCosts[i]!, pct)}
                         max={pricingMode === 'margin' ? 99.99 : undefined}
                         placeholder="0,00"
                       />
@@ -656,6 +860,92 @@ function NumInput({
 }
 
 // ---------------------------------------------------------------------------
+// Cadastro in-line de produto (4.10) — mini-form exibido na própria linha do
+// item quando ele não existe no catálogo, evitando abandonar a importação.
+// ---------------------------------------------------------------------------
+function NewProductInlineForm({
+  draft,
+  brandRequired,
+  groupRequired,
+  subgroupRequired,
+  barcodeRequired,
+  brandOptions,
+  groupOptions,
+  subgroupOptions,
+  onChange,
+  onCancel,
+}: {
+  draft: NewProductDraft;
+  brandRequired: boolean;
+  groupRequired: boolean;
+  subgroupRequired: boolean;
+  barcodeRequired: boolean;
+  brandOptions: string[];
+  groupOptions: string[];
+  subgroupOptions: string[];
+  onChange: (patch: Partial<NewProductDraft>) => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="mt-2 space-y-3 rounded-xl border-2 border-dashed border-accent-300 bg-accent-50/30 p-3">
+      <div className="flex items-center gap-1.5 text-xs font-semibold text-accent-700">
+        <Sparkles className="h-3.5 w-3.5" /> Cadastro de produto novo
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <label className="block sm:col-span-2">
+          <span className="label">Nome *</span>
+          <input
+            className="input h-9 text-sm"
+            value={draft.name}
+            onChange={(e) => onChange({ name: e.target.value })}
+          />
+        </label>
+        <label className="block">
+          <span className="label">SKU *</span>
+          <input
+            className="input h-9 text-sm"
+            value={draft.sku}
+            onChange={(e) => onChange({ sku: e.target.value })}
+          />
+        </label>
+        <label className="block">
+          <span className="label">Código de barras{barcodeRequired ? ' *' : ''}</span>
+          <input
+            className="input h-9 text-sm"
+            value={draft.barcode}
+            onChange={(e) => onChange({ barcode: e.target.value })}
+          />
+        </label>
+        <label className="block">
+          <span className="label">Marca{brandRequired ? ' *' : ''}</span>
+          <SmartFilterInput value={draft.brand} onChange={(v) => onChange({ brand: v })} options={brandOptions} placeholder="Marca" />
+        </label>
+        <label className="block">
+          <span className="label">Grupo{groupRequired ? ' *' : ''}</span>
+          <SmartFilterInput value={draft.group} onChange={(v) => onChange({ group: v })} options={groupOptions} placeholder="Grupo" />
+        </label>
+        <label className="block sm:col-span-2">
+          <span className="label">Subgrupo{subgroupRequired ? ' *' : ''}</span>
+          <SmartFilterInput
+            value={draft.subgroup}
+            onChange={(v) => onChange({ subgroup: v })}
+            options={subgroupOptions}
+            placeholder="Subgrupo"
+          />
+        </label>
+      </div>
+      <div className="rounded-lg bg-white/70 px-3 py-2 text-xs text-slate-600">
+        ℹ️ O produto será cadastrado automaticamente no sistema ao finalizar a importação da nota. Defina o preço de
+        venda na Etapa 2 — Revisão de preços.
+      </div>
+      <button type="button" className="text-xs font-medium text-slate-500 hover:underline" onClick={onCancel}>
+        Cancelar / voltar a buscar no catálogo
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // ProductPickerModal — catálogo completo com filtros
 // ---------------------------------------------------------------------------
 interface ProductRow {
@@ -663,6 +953,7 @@ interface ProductRow {
   name: string;
   brand: string | null;
   group: string | null;
+  subgroup?: string | null;
   variants: Array<{
     id: string;
     sku: string;

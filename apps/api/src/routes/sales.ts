@@ -5,7 +5,7 @@ import { createSaleSchema, syncSalesSchema, updateSaleSchema, paginationQuery } 
 import { prisma } from '../lib/prisma.js';
 import { serializeDecimals } from '../lib/serialize.js';
 import { createSale, updateSale, deleteSale, setSaleFinancialGenerated } from '../services/sales.js';
-import { NotFoundError } from '../lib/errors.js';
+import { ForbiddenError, NotFoundError } from '../lib/errors.js';
 
 export async function saleRoutes(app: FastifyInstance) {
   const r = app.withTypeProvider<ZodTypeProvider>();
@@ -48,11 +48,17 @@ export async function saleRoutes(app: FastifyInstance) {
     },
   );
 
+  // RBAC (isolamento de dados): ADMIN vê todas as vendas da loja; CASHIER só
+  // as próprias (Sale.userId — operador que registrou). A tela /vendas é
+  // ADMIN-only no frontend, mas o endpoint em si não tinha nenhuma trava —
+  // um CASHIER chamando a API diretamente enxergava vendas de todo mundo.
   r.get('/', { preHandler: app.authenticate, schema: { querystring: paginationQuery } }, async (req) => {
     const { page, pageSize } = req.query;
+    const userFilter = req.user.role === 'ADMIN' ? {} : { userId: req.user.sub };
     const [total, items] = await Promise.all([
-      prisma.sale.count(),
+      prisma.sale.count({ where: userFilter }),
       prisma.sale.findMany({
+        where: userFilter,
         include: { items: true, client: true },
         orderBy: { soldAt: 'desc' },
         skip: (page - 1) * pageSize,
@@ -76,6 +82,11 @@ export async function saleRoutes(app: FastifyInstance) {
         },
       });
       if (!sale) throw new NotFoundError('Venda');
+      // findUnique só aceita campos com constraint única no where — a checagem
+      // de posse acontece depois de buscar, não dá pra combinar id+userId ali.
+      if (req.user.role !== 'ADMIN' && sale.userId !== req.user.sub) {
+        throw new ForbiddenError('Você só pode visualizar suas próprias vendas');
+      }
       return serializeDecimals(sale);
     },
   );

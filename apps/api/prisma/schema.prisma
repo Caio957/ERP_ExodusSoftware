@@ -122,6 +122,11 @@ model Invoice {
   // estoque só existe fisicamente na loja a partir da entrada real).
   entryDate      DateTime @default(now())
   totalAmount    Decimal  @db.Decimal(10, 2)
+  // Landed cost: frete e outras despesas da nota, rateados proporcionalmente
+  // ao valor de cada item para compor o custo real (ver lib/inventory.ts —
+  // apportionLandedCost). totalAmount = soma dos itens + freight + otherExpenses.
+  freight        Decimal  @default(0) @db.Decimal(10, 2)
+  otherExpenses  Decimal  @default(0) @db.Decimal(10, 2)
   createdAt      DateTime @default(now())
 
   items             InvoiceItem[]
