@@ -9,6 +9,7 @@ import {
   updateInvoiceSchema,
   paginationQuery,
   apportionLandedCost,
+  productFormSettingsSchema,
 } from '@exodus/shared';
 import { prisma } from '../lib/prisma.js';
 import { serializeDecimals } from '../lib/serialize.js';
@@ -146,6 +147,60 @@ export async function invoiceRoutes(app: FastifyInstance) {
         const last = await tx.invoice.aggregate({ _max: { documentNumber: true } });
         const documentNumber = (last._max.documentNumber ?? 0) + 1;
 
+        // Cadastro in-line de produto (4.10): resolve o variantId de cada
+        // item ANTES de gravar a nota — itens com `newProductData` criam
+        // Produto+Variante aqui, na mesma transação, para que uma falha em
+        // qualquer ponto (ex.: item seguinte) desfaça tanto a nota quanto os
+        // produtos já criados (nunca fica "produto pela metade").
+        let productFormCfg: ReturnType<typeof productFormSettingsSchema.parse> | null = null;
+        const resolvedItems = await Promise.all(
+          items.map(async (it, i) => {
+            if (it.variantId) return { ...it, resolvedVariantId: it.variantId };
+
+            const draft = it.newProductData!;
+            if (!productFormCfg) {
+              const setting = await tx.setting.findUnique({ where: { key: 'product_form' } });
+              productFormCfg = productFormSettingsSchema.parse(setting?.value ?? {});
+            }
+            if (productFormCfg.brandRequired && !draft.brand)
+              throw new BusinessError(`Marca é obrigatória (produto novo "${draft.name}")`);
+            if (productFormCfg.groupRequired && !draft.group)
+              throw new BusinessError(`Grupo é obrigatório (produto novo "${draft.name}")`);
+            if (productFormCfg.subgroupRequired && !draft.subgroup)
+              throw new BusinessError(`Subgrupo é obrigatório (produto novo "${draft.name}")`);
+            if (productFormCfg.barcodeRequired && !draft.barcode)
+              throw new BusinessError(`Código de barras é obrigatório (produto novo "${draft.name}")`);
+
+            // Custo inicial = custo já rateado (landed cost, 4.9) desta
+            // própria entrada — mesma base usada para produtos existentes.
+            const landedCost = apportioned[i]!;
+            const newProduct = await tx.product.create({
+              data: {
+                name: draft.name,
+                brand: draft.brand ?? '',
+                group: draft.group ?? '',
+                subgroup: draft.subgroup ?? null,
+                variants: {
+                  create: [
+                    {
+                      sku: draft.sku,
+                      barcode: draft.barcode ?? null,
+                      description: draft.name,
+                      costPrice: landedCost,
+                      averageCost: landedCost,
+                      // Validado no Zod (superRefine): obrigatório quando há newProductData.
+                      salePrice: it.newSalePrice!,
+                      stockQty: 0,
+                    },
+                  ],
+                },
+              },
+              include: { variants: true },
+            });
+            return { ...it, resolvedVariantId: newProduct.variants[0]!.id };
+          }),
+        );
+
         const created = await tx.invoice.create({
           data: {
             supplierId,
@@ -158,8 +213,8 @@ export async function invoiceRoutes(app: FastifyInstance) {
             freight,
             otherExpenses,
             items: {
-              create: items.map((it) => ({
-                variantId: it.variantId,
+              create: resolvedItems.map((it) => ({
+                variantId: it.resolvedVariantId,
                 quantity: it.quantity,
                 unitCost: it.unitCost,
                 cfop: it.cfop,
@@ -169,13 +224,17 @@ export async function invoiceRoutes(app: FastifyInstance) {
           include: { items: true },
         });
 
-        // Entrada de estoque + custo + CMP + (novo preço de venda, opcional)
-        for (const [i, it] of items.entries()) {
+        // Entrada de estoque + custo + CMP + (novo preço de venda, opcional).
+        // Produtos recém-criados entram com stockQty=0/averageCost=landedCost
+        // (acima), então o CMP aqui só confirma o mesmo valor (estoque<=0 →
+        // calcWeightedAverageCost retorna o custo exato desta entrada) — um
+        // único código para os dois casos, sem bifurcar a lógica.
+        for (const [i, it] of resolvedItems.entries()) {
           const landedCost = apportioned[i]!;
-          const current = await tx.productVariant.findUniqueOrThrow({ where: { id: it.variantId }, select: { stockQty: true, averageCost: true } });
+          const current = await tx.productVariant.findUniqueOrThrow({ where: { id: it.resolvedVariantId }, select: { stockQty: true, averageCost: true } });
           const newAvg = calcWeightedAverageCost(current.stockQty, Number(current.averageCost), it.quantity, landedCost);
           await tx.productVariant.update({
-            where: { id: it.variantId },
+            where: { id: it.resolvedVariantId },
             data: {
               stockQty: { increment: it.quantity },
               costPrice: landedCost,
@@ -185,7 +244,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
           });
           await tx.stockMovement.create({
             data: {
-              variantId: it.variantId,
+              variantId: it.resolvedVariantId,
               type: 'IN',
               quantity: it.quantity,
               reason: 'INVOICE',
@@ -197,8 +256,10 @@ export async function invoiceRoutes(app: FastifyInstance) {
           });
         }
 
-        // Persistir De/Para para notas futuras
-        const toMap = items.filter((it) => it.saveMapping && it.supplierItemCode);
+        // Persistir De/Para para notas futuras — funciona também para
+        // produtos recém-criados: a próxima nota do mesmo fornecedor com o
+        // mesmo cProd/cEAN já chega auto-mapeada.
+        const toMap = resolvedItems.filter((it) => it.saveMapping && it.supplierItemCode);
         for (const it of toMap) {
           await tx.supplierProductMapping.upsert({
             where: {
@@ -211,9 +272,9 @@ export async function invoiceRoutes(app: FastifyInstance) {
               supplierId,
               supplierItemCode: it.supplierItemCode!,
               supplierBarcode: it.supplierBarcode ?? null,
-              variantId: it.variantId,
+              variantId: it.resolvedVariantId,
             },
-            update: { variantId: it.variantId, supplierBarcode: it.supplierBarcode ?? null },
+            update: { variantId: it.resolvedVariantId, supplierBarcode: it.supplierBarcode ?? null },
           });
         }
 

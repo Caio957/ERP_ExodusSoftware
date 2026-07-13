@@ -66,22 +66,68 @@ export const parsedNfeSchema = z.object({
 export type ParsedNfe = z.infer<typeof parsedNfeSchema>;
 
 /**
- * Confirmação da entrada após o usuário resolver o De/Para de cada item.
- * `variantId` já mapeado; opcionalmente persiste a associação fornecedor↔produto
- * para reuso em notas futuras (Requisito 4.3).
+ * Cadastro in-line de produto durante a importação de XML (4.10): quando o
+ * item não existe no catálogo, o operador preenche estes dados em vez de
+ * escolher uma variante — o backend cria Produto+Variante dentro da mesma
+ * transação da confirmação, antes de vincular o InvoiceItem.
  */
-export const confirmInvoiceItemSchema = z.object({
-  variantId: z.string().uuid(),
-  quantity: positiveInt,
-  unitCost: money,
-  cfop: z.string().min(1),
-  /** Novo preço de venda; se omitido, mantém o atual da variante. */
-  newSalePrice: money.optional(),
-  // Para gravar o De/Para:
-  supplierItemCode: z.string().optional(),
-  supplierBarcode: z.string().nullish(),
-  saveMapping: z.boolean().default(true),
+export const newProductDataSchema = z.object({
+  name: z.string().trim().min(2, 'Nome do produto obrigatório'),
+  sku: z.string().trim().min(1, 'SKU obrigatório'),
+  barcode: z.string().trim().min(1).optional(),
+  // Obrigatoriedade configurável (Configurações da loja) — validada na rota,
+  // igual ao cadastro normal de produto (routes/products.ts).
+  brand: z.string().trim().min(1).optional(),
+  group: z.string().trim().min(1).optional(),
+  subgroup: z.string().trim().min(1).optional(),
 });
+export type NewProductData = z.infer<typeof newProductDataSchema>;
+
+/**
+ * Confirmação da entrada após o usuário resolver o De/Para de cada item.
+ * Ou `variantId` (produto existente já mapeado) ou `newProductData`
+ * (cadastro in-line, 4.10) — nunca os dois nem nenhum dos dois. Um item novo
+ * exige `newSalePrice` (não há preço "atual" para manter). Opcionalmente
+ * persiste a associação fornecedor↔produto para reuso em notas futuras
+ * (Requisito 4.3) — funciona também para produtos recém-criados.
+ */
+export const confirmInvoiceItemSchema = z
+  .object({
+    variantId: z.string().uuid().optional(),
+    newProductData: newProductDataSchema.optional(),
+    quantity: positiveInt,
+    unitCost: money,
+    cfop: z.string().min(1),
+    /** Novo preço de venda; se omitido (produto existente), mantém o atual da variante. */
+    newSalePrice: money.optional(),
+    // Para gravar o De/Para:
+    supplierItemCode: z.string().optional(),
+    supplierBarcode: z.string().nullish(),
+    saveMapping: z.boolean().default(true),
+  })
+  .superRefine((d, ctx) => {
+    if (!d.variantId && !d.newProductData) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['variantId'],
+        message: 'Informe um produto existente ou os dados de um novo produto',
+      });
+    }
+    if (d.variantId && d.newProductData) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['newProductData'],
+        message: 'Não é possível informar produto existente e novo produto ao mesmo tempo',
+      });
+    }
+    if (d.newProductData && !(d.newSalePrice != null && d.newSalePrice > 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['newSalePrice'],
+        message: 'Preço de venda obrigatório para produto novo',
+      });
+    }
+  });
 
 export const confirmInvoiceSchema = z.object({
   supplierId: z.string().uuid(),
