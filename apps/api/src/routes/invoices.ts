@@ -89,18 +89,16 @@ export async function invoiceRoutes(app: FastifyInstance) {
       ]),
     );
 
-    // Landed cost (4.9): custo unitário já com a fatia de frete/outras
-    // despesas embutida — a Etapa 2 (revisão de preços) usa isso como base
-    // de margem/markup em vez do unitCost bruto do documento.
-    const apportionedCosts = apportionLandedCost(raw.items, raw.freight, raw.otherExpenses);
-
+    // Frete/outras despesas (4.9) vêm só como referência inicial — o
+    // operador pode editá-los na Etapa 1 (4.11), então o rateio em si
+    // (apportionLandedCost) é recalculado no cliente a partir do estado
+    // editável, não fixado aqui a partir do vFrete/vOutro originais do XML.
     const items = raw.items.map((item, i) => ({
       ...item,
       matchedVariantId: matchedVariantIds[i]!.matchedVariantId,
       matchedVariant: matchedVariantIds[i]!.matchedVariantId
         ? (variantDetailById.get(matchedVariantIds[i]!.matchedVariantId!) ?? null)
         : null,
-      apportionedUnitCost: apportionedCosts[i]!,
     }));
 
     return {

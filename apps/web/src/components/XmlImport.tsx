@@ -18,6 +18,7 @@ import {
   priceFromMarkup,
   marginFromPrice,
   markupFromPrice,
+  apportionLandedCost,
 } from '@exodus/shared';
 import { api, ApiError } from '../lib/api';
 import { useSearchHandler } from '../hooks/useSearchHandler';
@@ -25,6 +26,7 @@ import { maskCpfCnpj } from '../lib/masks';
 import { PurchaseFinancialEngine, type PurchaseInstallment } from './PurchaseFinancialEngine';
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 // Padrão BR de vírgula decimal (mesmo helper usado em PDV/Vendas/Produtos).
 function sanitizeBr(s: string): string {
@@ -60,10 +62,6 @@ interface ParsedItem {
   /** Dados reais do catálogo (nome do produto + variante) já resolvidos pelo
    *  backend quando o De/Para foi encontrado automaticamente. */
   matchedVariant: VariantDetail | null;
-  /** Custo unitário já com a fatia rateada de frete/outras despesas (landed
-   *  cost, 4.9) — calculado pelo backend em /parse. Igual a `unitCost`
-   *  quando a nota não tem frete/outras despesas. */
-  apportionedUnitCost: number;
 }
 interface ParsedNfe {
   accessKey: string;
@@ -169,6 +167,29 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
   // Cadastro in-line de produto (4.10) — chave presente = item nesse modo.
   const [newProductDrafts, setNewProductDrafts] = useState<Record<number, NewProductDraft>>({});
 
+  // Landed cost editável (4.9/4.11): o XML já traz vFrete/vOutro, mas o
+  // operador pode ajustar para refletir frete pago "por fora" (FOB) ou outras
+  // despesas reais não descritas no documento — inicializado com o valor
+  // extraído da nota, sobrescrito em processFile() a cada novo upload.
+  const [freight, setFreight] = useState(0);
+  const [otherExpenses, setOtherExpenses] = useState(0);
+  const productsTotal = round2((parsed?.items ?? []).reduce((a, it) => a + it.quantity * it.unitCost, 0));
+  const editedTotal = round2(productsTotal + freight + otherExpenses);
+  // Prévia do rateio recalculada no cliente a partir do estado editável —
+  // não do apportionedUnitCost vindo de /parse, que reflete só o vFrete/vOutro
+  // originais do XML e ficaria desatualizado assim que o operador editasse os
+  // campos acima. Mesma fórmula da Compra Manual (apportionLandedCost,
+  // packages/shared/src/pricing.ts — fonte única compartilhada front/back).
+  const landedCosts = useMemo(
+    () =>
+      apportionLandedCost(
+        (parsed?.items ?? []).map((it) => ({ quantity: it.quantity, unitCost: it.unitCost })),
+        freight,
+        otherExpenses,
+      ),
+    [parsed, freight, otherExpenses],
+  );
+
   function isDraftValid(d: NewProductDraft | undefined): boolean {
     if (!d) return false;
     if (!d.name.trim() || !d.sku.trim()) return false;
@@ -180,9 +201,9 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
   }
 
   // passo 2: revisão de preços — keyed by item index. `newPct` é só apoio de
-  // UX (nunca vai ao backend); a base de cálculo é sempre o custo real da
-  // nota (it.apportionedUnitCost — já com a fatia de frete/outras despesas
-  // embutida, 4.9), não o custo anterior da variante.
+  // UX (nunca vai ao backend); a base de cálculo é sempre o custo real
+  // rateado (landedCosts[i] — já com a fatia de frete/outras despesas
+  // editáveis embutida, 4.9/4.11), não o custo anterior da variante.
   const [newPrices, setNewPrices] = useState<Record<number, number>>({});
   const [newPct, setNewPct] = useState<Record<number, number>>({});
 
@@ -228,6 +249,10 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
         }
       });
       setMapping(init);
+      // Estado editável inicializado com o vFrete/vOutro extraídos do XML —
+      // o operador ajusta a partir daqui (frete por fora/FOB, despesas reais).
+      setFreight(data.freight);
+      setOtherExpenses(data.otherExpenses);
       setStep('mapping');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Falha ao processar XML');
@@ -264,9 +289,12 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
         nfeNumber: parsed.nfeNumber,
         issueDate: parsed.issueDate,
         entryDate,
-        totalAmount: parsed.totalAmount,
-        freight: parsed.freight,
-        otherExpenses: parsed.otherExpenses,
+        // O backend recalcula totalAmount a partir dos itens + freight/
+        // otherExpenses de qualquer forma (fonte única com /manual e a
+        // edição) — enviamos o total já editado só por consistência do payload.
+        totalAmount: editedTotal,
+        freight,
+        otherExpenses,
         items: parsed.items.map((it, i) => {
           const newPrice = newPrices[i];
           const draft = newProductDrafts[i];
@@ -324,6 +352,8 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
     setStep('upload');
     setMapping({});
     setNewProductDrafts({});
+    setFreight(0);
+    setOtherExpenses(0);
     setNewPrices({});
     setNewPct({});
     setFinancialMode('xml');
@@ -461,27 +491,41 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
                 )}
               </div>
               <div className="text-right">
-                <div className="text-xs text-slate-400">Total da nota</div>
-                <div className="text-lg font-bold">{brl(parsed.totalAmount)}</div>
-                {(parsed.freight > 0 || parsed.otherExpenses > 0) && (
-                  <div className="text-xs text-slate-400">
-                    {parsed.freight > 0 && `Frete: ${brl(parsed.freight)}`}
-                    {parsed.freight > 0 && parsed.otherExpenses > 0 && ' · '}
-                    {parsed.otherExpenses > 0 && `Outras despesas: ${brl(parsed.otherExpenses)}`}
-                  </div>
-                )}
+                <div className="text-xs text-slate-400">Total da nota (com ajustes)</div>
+                {/* Dinâmico: reage aos campos de Frete/Outras despesas abaixo —
+                    Soma dos Produtos + Frete + Outras Despesas, não mais o
+                    totalAmount estático vindo do XML (que pode ter outros
+                    componentes que este ERP gerencial não modela). */}
+                <div className="text-lg font-bold">{brl(editedTotal)}</div>
+                <div className="text-xs text-slate-400">Subtotal produtos: {brl(productsTotal)}</div>
                 <div className="text-xs text-slate-400">Emissão: {fmtDate(parsed.issueDate)}</div>
               </div>
             </div>
-            <label className="mt-3 block max-w-[200px]">
-              <span className="label">Data de entrada</span>
-              <input
-                type="date"
-                className="input"
-                value={entryDate}
-                onChange={(e) => setEntryDate(e.target.value)}
-              />
-            </label>
+
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <label className="block">
+                <span className="label">Data de entrada</span>
+                <input
+                  type="date"
+                  className="input"
+                  value={entryDate}
+                  onChange={(e) => setEntryDate(e.target.value)}
+                />
+              </label>
+              {/* Landed cost editável (4.11): o XML já traz vFrete/vOutro
+                  (pré-preenchidos em processFile), mas o operador pode ajustar
+                  para refletir frete pago por fora (FOB) ou outras despesas
+                  reais de aquisição não descritas na nota — afeta o rateio
+                  usado na Etapa 2 (ver landedCosts, useMemo acima). */}
+              <label className="block">
+                <span className="label">Frete (R$)</span>
+                <NumInput value={freight} onChange={setFreight} placeholder="0,00" />
+              </label>
+              <label className="block">
+                <span className="label">Outras despesas (R$)</span>
+                <NumInput value={otherExpenses} onChange={setOtherExpenses} placeholder="0,00" />
+              </label>
+            </div>
             {parsed.alreadyImported && (
               <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
                 ⚠️ Esta nota já foi importada anteriormente.
@@ -609,19 +653,22 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
                   <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-3 lg:grid-cols-5">
                     <InfoCell label="Custo anterior" value={v?.costPrice != null && v.costPrice > 0 ? brl(v.costPrice) : '—'} />
                     <InfoCell label="Custo na nota" value={brl(it.unitCost)} />
-                    {/* Custo de aquisição real (landed cost, 4.9): custo da nota já com a
-                        fatia rateada de frete/outras despesas embutida — é essa base,
-                        não o custo bruto da nota, que alimenta a margem/markup abaixo e
-                        vira costPrice/averageCost do produto ao confirmar. */}
-                    {it.apportionedUnitCost !== it.unitCost && (
-                      <InfoCell label="Custo real (c/ frete)" value={brl(it.apportionedUnitCost)} highlight />
+                    {/* Custo de aquisição real (landed cost, 4.9/4.11): custo da nota já
+                        com a fatia rateada de frete/outras despesas embutida — recalculado
+                        no cliente (landedCosts, useMemo acima) a partir do Frete/Outras
+                        despesas editáveis na Etapa 1, não do apportionedUnitCost estático
+                        vindo de /parse. É essa base, não o custo bruto da nota, que
+                        alimenta a margem/markup abaixo e vira costPrice/averageCost do
+                        produto ao confirmar. */}
+                    {landedCosts[i] !== it.unitCost && (
+                      <InfoCell label="Custo real (c/ frete)" value={brl(landedCosts[i]!)} highlight />
                     )}
                     <InfoCell label="P. venda atual" value={v?.salePrice != null && v.salePrice > 0 ? brl(v.salePrice) : '—'} />
                     <div>
                       <div className="text-slate-400 mb-0.5">{draft ? 'Preço de venda *' : 'Novo p. venda'}</div>
                       <NumInput
                         value={newPrices[i] ?? 0}
-                        onChange={(price) => applyNewPrice(i, it.apportionedUnitCost, price)}
+                        onChange={(price) => applyNewPrice(i, landedCosts[i]!, price)}
                         placeholder={
                           draft ? 'Obrigatório' : v?.salePrice != null && v.salePrice > 0 ? brl(v.salePrice) : 'Manter atual'
                         }
@@ -631,7 +678,7 @@ export function XmlImport({ onSuccess }: { onSuccess?: () => void }) {
                       <div className="text-slate-400 mb-0.5">{pricingMode === 'margin' ? 'Margem (%)' : 'Markup (%)'}</div>
                       <NumInput
                         value={newPct[i] ?? 0}
-                        onChange={(pct) => applyNewPct(i, it.apportionedUnitCost, pct)}
+                        onChange={(pct) => applyNewPct(i, landedCosts[i]!, pct)}
                         max={pricingMode === 'margin' ? 99.99 : undefined}
                         placeholder="0,00"
                       />

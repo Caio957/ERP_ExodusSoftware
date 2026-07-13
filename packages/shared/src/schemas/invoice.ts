@@ -31,14 +31,6 @@ export const parsedNfeItemSchema = z.object({
       group: z.string().nullable(),
     })
     .nullable(),
-  /**
-   * Custo unitário já com a fatia rateada do frete/outras despesas da nota
-   * embutida (landed cost) — calculado pelo backend em `/parse` a partir de
-   * `freight`/`otherExpenses` do XML, para a Etapa 2 (revisão de preços) usar
-   * como base de margem/markup em vez do `unitCost` bruto do documento.
-   * Igual a `unitCost` quando a nota não tem frete/outras despesas.
-   */
-  apportionedUnitCost: z.number().nonnegative(),
 });
 export type ParsedNfeItem = z.infer<typeof parsedNfeItemSchema>;
 
