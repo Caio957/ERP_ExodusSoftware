@@ -20,12 +20,15 @@ import {
   ChevronLeft,
   ChevronRight,
   ArrowUp,
+  Wallet,
+  Landmark,
 } from 'lucide-react';
 import type { SalesSettings } from '@exodus/shared';
 import { api, ApiError } from '../lib/api';
 import { type CompanyInfo, type SaleReceiptData } from '../components/SaleReceipt';
 import { PrintReceiptModal } from '../components/PrintReceiptModal';
 import { ChangeCalculatorModal } from '../components/ChangeCalculatorModal';
+import { RegisterSelectionModal } from '../components/RegisterSelectionModal';
 import { useSearchHandler } from '../hooks/useSearchHandler';
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -77,6 +80,8 @@ interface SaleDetail {
   }>;
   payments: Array<{ method: string; amount: number }>;
   financialAccounts: Array<{ id: string; description: string; amount: number; dueDate: string; status: string }>;
+  /** Em qual caixa a venda foi registrada (4.13) — DIARIO (Físico) ou BANCO. */
+  cashRegister?: { type: 'DIARIO' | 'BANCO' } | null;
 }
 
 interface SalesFilterValues {
@@ -580,6 +585,24 @@ function FinancialBadge({ generated }: { generated: boolean }) {
   );
 }
 
+/** Rastreabilidade (4.13): em qual caixa a venda foi registrada — mesmas
+ *  cores/ícones do seletor de tipo em CashPage.tsx/PdvPage.tsx (Wallet+
+ *  azul para o Físico, Landmark+dourado para a Conta Banco). */
+function RegisterTypeBadge({ type }: { type: 'DIARIO' | 'BANCO' }) {
+  const isBank = type === 'BANCO';
+  const Icon = isBank ? Landmark : Wallet;
+  return (
+    <span
+      className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
+        isBank ? 'bg-accent-100 text-accent-700' : 'bg-brand-100 text-brand-700'
+      }`}
+    >
+      <Icon className="h-3 w-3" />
+      Destino: {isBank ? 'Conta Banco' : 'Caixa Físico'}
+    </span>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Visualização da venda (somente leitura) — decide se vai editar/imprimir.
 // ---------------------------------------------------------------------------
@@ -602,9 +625,23 @@ function ViewSaleModal({
     queryFn: () => api.get<SaleDetail>(`/api/sales/${saleId}`),
   });
 
+  // Caixas abertos do operador — usados pelo RegisterSelectionModal ao
+  // recriar o financeiro (escolher em qual "livro" a venda volta a contar).
+  const { data: registerDiario } = useQuery({
+    queryKey: ['cash-current', 'DIARIO'],
+    queryFn: () => api.get<{ id: string } | null>('/api/cash/current?type=DIARIO'),
+  });
+  const { data: registerBanco } = useQuery({
+    queryKey: ['cash-current', 'BANCO'],
+    queryFn: () => api.get<{ id: string } | null>('/api/cash/current?type=BANCO'),
+  });
+  const [showRegisterModal, setShowRegisterModal] = useState(false);
+
   const toggleFinancial = useMutation({
-    mutationFn: (generated: boolean) =>
-      generated ? api.post(`/api/sales/${saleId}/financial`, {}) : api.del(`/api/sales/${saleId}/financial`),
+    mutationFn: ({ generated, targetRegisterType }: { generated: boolean; targetRegisterType?: 'DIARIO' | 'BANCO' }) =>
+      generated
+        ? api.post(`/api/sales/${saleId}/financial`, { targetRegisterType })
+        : api.del(`/api/sales/${saleId}/financial`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sale', saleId] });
       onChanged();
@@ -622,6 +659,7 @@ function ViewSaleModal({
               <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
                 <span>{new Date(sale.soldAt).toLocaleString('pt-BR')}</span>
                 <FinancialBadge generated={sale.financialGenerated} />
+                {sale.cashRegister && <RegisterTypeBadge type={sale.cashRegister.type} />}
               </div>
             )}
           </div>
@@ -704,7 +742,7 @@ function ViewSaleModal({
                 disabled={toggleFinancial.isPending}
                 onClick={() => {
                   if (window.confirm('Excluir o financeiro desta venda? Ela deixará de contar no caixa/recebimentos.'))
-                    toggleFinancial.mutate(false);
+                    toggleFinancial.mutate({ generated: false });
                 }}
               >
                 <Ban className="h-4 w-4" /> Excluir financeiro
@@ -713,7 +751,7 @@ function ViewSaleModal({
               <button
                 className="inline-flex items-center gap-1 rounded-xl bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
                 disabled={toggleFinancial.isPending}
-                onClick={() => toggleFinancial.mutate(true)}
+                onClick={() => setShowRegisterModal(true)}
               >
                 <CircleDollarSign className="h-4 w-4" /> Gerar financeiro
               </button>
@@ -729,6 +767,19 @@ function ViewSaleModal({
           </footer>
         )}
       </div>
+
+      {showRegisterModal && sale && (
+        <RegisterSelectionModal
+          defaultType={sale.cashRegister?.type ?? (sale.paymentMethod === 'CASH' ? 'DIARIO' : 'BANCO')}
+          diarioAvailable={!!registerDiario}
+          bancoAvailable={!!registerBanco}
+          onClose={() => setShowRegisterModal(false)}
+          onConfirm={(type) => {
+            setShowRegisterModal(false);
+            toggleFinancial.mutate({ generated: true, targetRegisterType: type });
+          }}
+        />
+      )}
     </div>,
     document.body,
   );

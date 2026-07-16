@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { money, positiveInt } from './common.js';
+import { CashRegisterType } from '../enums.js';
 
 /**
  * Código da forma de pagamento. Aceita qualquer tipo configurado nas
@@ -85,3 +86,15 @@ export const updateSaleSchema = z.object({
   installments: z.array(saleInstallmentSchema).optional(),
 });
 export type UpdateSaleInput = z.infer<typeof updateSaleSchema>;
+
+/**
+ * Regeração do financeiro de uma venda (`POST /api/sales/:id/financial`).
+ * `targetRegisterType` é opcional: quando informado, move a venda para o
+ * caixa aberto do operador daquele tipo (DIARIO/BANCO) antes de reativar o
+ * financeiro — usado quando o operador tem mais de um caixa aberto e quer
+ * escolher em qual "livro" a venda volta a contar.
+ */
+export const regenerateSaleFinancialSchema = z.object({
+  targetRegisterType: CashRegisterType.optional(),
+});
+export type RegenerateSaleFinancialInput = z.infer<typeof regenerateSaleFinancialSchema>;

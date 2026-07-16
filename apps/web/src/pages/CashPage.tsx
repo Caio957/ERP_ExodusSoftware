@@ -782,7 +782,19 @@ function PeriodicReport({ registerType }: { registerType: CashRegisterType }) {
             </h3>
             <div className="grid grid-cols-2 gap-3">
               <SummaryCard label="Total de vendas" value={brl(data.summary.totalSales)} hint={`${data.summary.salesCount} venda(s)`} tone="brand" />
-              <SummaryCard label="Dinheiro em gaveta" value={brl(data.summary.cashInDrawer)} hint="Fundo inc. + Vendas (Dinh) + Supr. − Sangrias − Fechamentos" tone="emerald" />
+              {/* Rótulo/legenda mudam por tipo de caixa (4.12) — o backend
+                  mantém o mesmo nome de variável (cashInDrawer) para os dois,
+                  só o cálculo por trás muda (ver cash.ts, isLiquid). */}
+              <SummaryCard
+                label={registerType === 'BANCO' ? 'Saldo em Conta' : 'Dinheiro em gaveta'}
+                value={brl(data.summary.cashInDrawer)}
+                hint={
+                  registerType === 'BANCO'
+                    ? 'Fundo inc. + Recebimentos (exceto A prazo) + Supr. − Sangrias − Fechamentos'
+                    : 'Fundo inc. + Vendas (Dinh) + Supr. − Sangrias − Fechamentos'
+                }
+                tone="emerald"
+              />
               <SummaryCard label="Suprimentos" value={brl(data.summary.totalSupply)} tone="emerald" />
               <SummaryCard label="Sangrias" value={brl(data.summary.totalBleed)} tone="rose" />
               <SummaryCard label="Fechamentos (Recolhido)" value={brl(data.summary.totalCollected)} hint="Valor físico recolhido nos fechamentos" tone="rose" />
@@ -836,11 +848,17 @@ function PeriodicReport({ registerType }: { registerType: CashRegisterType }) {
                             ? `Venda #${m.code} · ${methodLabel[m.paymentMethod ?? ''] ?? m.paymentMethod}`
                             : m.type === 'SUPPLY'
                               ? 'Suprimento'
-                              : 'Sangria'}
+                              : m.type === 'BLEED'
+                                ? 'Sangria'
+                                : // REVERSAL (estorno virtual, ver saleTimelineEntries em
+                                  // cash.ts): a description já traz "Estorno: Venda #X" —
+                                  // usada como label principal em vez do genérico "Sangria",
+                                  // sem repeti-la de novo no sufixo abaixo.
+                                  (m.description ?? 'Estorno')}
                           {m.kind === 'SALE' && m.client && (
                             <span className="text-slate-400"> · {m.client}</span>
                           )}
-                          {m.kind === 'TRANSACTION' && m.description && (
+                          {m.kind === 'TRANSACTION' && m.type !== 'REVERSAL' && m.description && (
                             <span className="text-slate-400"> · {m.description}</span>
                           )}
                         </span>
@@ -852,10 +870,12 @@ function PeriodicReport({ registerType }: { registerType: CashRegisterType }) {
                     </div>
                     <span
                       className={`shrink-0 font-semibold ${
-                        m.kind === 'TRANSACTION' && m.type === 'BLEED' ? 'text-rose-600' : 'text-emerald-600'
+                        m.kind === 'TRANSACTION' && (m.type === 'BLEED' || m.type === 'REVERSAL')
+                          ? 'text-rose-600'
+                          : 'text-emerald-600'
                       }`}
                     >
-                      {m.kind === 'TRANSACTION' && m.type === 'BLEED' ? '−' : '+'}
+                      {m.kind === 'TRANSACTION' && (m.type === 'BLEED' || m.type === 'REVERSAL') ? '−' : '+'}
                       {brl(m.amount)}
                     </span>
                   </li>

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
 import {
   openCashSchema,
@@ -16,10 +17,99 @@ const idParam = z.object({ id: z.string().uuid() });
 
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
-/** Caixa esperado = inicial + suprimentos - sangrias + vendas em dinheiro. */
+/**
+ * Filtro de SalePayment que compõe o saldo esperado — depende do tipo do
+ * caixa (4.12): DIARIO é a gaveta física, só dinheiro em espécie conta;
+ * BANCO é a conta digital, onde PIX/cartões SÃO o "dinheiro" do livro — só
+ * 'A_PRAZO' fica de fora (não é recebimento agora, é conta a receber).
+ */
+function liquidPaymentFilter(registerType: string): Prisma.SalePaymentWhereInput {
+  return registerType === 'DIARIO' ? { method: 'CASH' } : { method: { not: 'A_PRAZO' } };
+}
+
+/**
+ * Timeline de uma venda: a linha original (`kind: 'SALE'`) e, quando o
+ * financeiro foi excluído (`financialGenerated: false`), uma SEGUNDA linha
+ * VIRTUAL de estorno (`kind: 'TRANSACTION'`, `type: 'REVERSAL'`) — só para a
+ * timeline justificar visualmente por que o saldo caiu. Nenhuma
+ * `CashTransaction` real é criada: `computeExpectedCash` já desconsidera a
+ * venda via `financialGenerated`, então gravar uma `CashTransaction` de
+ * verdade duplicaria a dedução ("dupla dedução", como o Comandante já
+ * identificou).
+ *
+ * `type: 'REVERSAL'`, não `'BLEED'` — de propósito: `CashPrintButton`
+ * (recibo de fechamento impresso, CashPage.tsx) soma `type === 'BLEED'`
+ * direto do array de `movements` para compor `totalBleed`/`expectedCash`
+ * local. Usar `'BLEED'` aqui infitaria essa soma com uma "sangria fantasma"
+ * no recibo físico impresso. `'REVERSAL'` fica de fora de qualquer filtro
+ * `=== 'BLEED'` existente automaticamente; só a renderização visual
+ * (ícone/cor vermelha) em PeriodicReport precisou tratar o novo tipo — o
+ * resto (RegisterMovements, ícone/trava de edição) já cai no mesmo branch
+ * visual via fallback (não é `'SUPPLY'` ⇒ vermelho) e já trava edição/exclusão
+ * por `description.startsWith('Estorno')`, a mesma regra que já protege
+ * baixas/estornos reais do Financeiro.
+ *
+ * O `id` sintético (`virtual-reversal-{id}`) nunca bate com um registro
+ * real — `PUT/DELETE /cash/transactions/:id` não encontra e responde 404 se
+ * alguém tentar (defesa redundante; a UI já nem mostra os botões).
+ *
+ * A data do estorno virtual é sintética (`soldAt + 1ms`): `Sale` não tem
+ * `updatedAt` nem qualquer campo que registre quando o financeiro foi
+ * excluído, só o estado atual (`financialGenerated`) — `soldAt + 1ms`
+ * garante que a linha apareça imediatamente após a venda na ordenação
+ * decrescente por data, sem inventar um "quando" que o sistema não sabe.
+ */
+function saleTimelineEntries(
+  s: {
+    id: string;
+    code: number;
+    paymentMethod: string;
+    totalAmount: Prisma.Decimal | number;
+    client?: { name: string } | null;
+    financialGenerated: boolean;
+    payments: { method: string; amount: Prisma.Decimal | number }[];
+    soldAt: Date;
+  },
+  operator?: string | null,
+) {
+  const amount = toMoney(s.totalAmount) ?? 0;
+  const saleEntry = {
+    kind: 'SALE' as const,
+    id: s.id,
+    code: s.code,
+    paymentMethod: s.paymentMethod,
+    amount,
+    client: s.client?.name ?? null,
+    ...(operator !== undefined ? { operator } : {}),
+    financialGenerated: s.financialGenerated,
+    payments: s.payments.map((p) => ({ method: p.method, amount: toMoney(p.amount) ?? 0 })),
+    at: s.soldAt,
+  };
+  if (s.financialGenerated) return [saleEntry];
+
+  const reversalEntry = {
+    kind: 'TRANSACTION' as const,
+    id: `virtual-reversal-${s.id}`,
+    type: 'REVERSAL' as const,
+    amount,
+    description: `Estorno: Venda #${s.code}`,
+    ...(operator !== undefined ? { operator } : {}),
+    at: new Date(s.soldAt.getTime() + 1),
+  };
+  return [saleEntry, reversalEntry];
+}
+
+/** Caixa esperado = inicial + suprimentos - sangrias + recebimentos líquidos
+ *  do tipo de caixa (dinheiro em espécie no DIARIO; tudo exceto A_PRAZO no
+ *  BANCO). Baixas do Financeiro já entram via CashTransaction SUPPLY/BLEED
+ *  (`requireOpenRegister`, routes/financial.ts) — esse model não tem campo
+ *  `method`, então já é agnóstico ao tipo de caixa, sem precisar de filtro
+ *  aqui. */
 async function computeExpectedCash(cashRegisterId: string) {
-  const [register, supplies, bleeds, cashSales] = await Promise.all([
-    prisma.cashRegister.findUnique({ where: { id: cashRegisterId } }),
+  const register = await prisma.cashRegister.findUnique({ where: { id: cashRegisterId } });
+  if (!register) throw new NotFoundError('Caixa');
+
+  const [supplies, bleeds, liquidSales] = await Promise.all([
     prisma.cashTransaction.aggregate({
       where: { cashRegisterId, type: 'SUPPLY' },
       _sum: { amount: true },
@@ -28,19 +118,18 @@ async function computeExpectedCash(cashRegisterId: string) {
       where: { cashRegisterId, type: 'BLEED' },
       _sum: { amount: true },
     }),
-    // Soma os PAGAMENTOS em dinheiro (não o total da venda) — trata split e a prazo.
+    // Soma os PAGAMENTOS líquidos (não o total da venda) — trata split e a prazo.
     // Ignora vendas com o financeiro excluído (financialGenerated = false).
     prisma.salePayment.aggregate({
-      where: { method: 'CASH', sale: { cashRegisterId, financialGenerated: true } },
+      where: { ...liquidPaymentFilter(register.type), sale: { cashRegisterId, financialGenerated: true } },
       _sum: { amount: true },
     }),
   ]);
-  if (!register) throw new NotFoundError('Caixa');
 
   const initial = toMoney(register.initialCash) ?? 0;
   const supply = toMoney(supplies._sum.amount) ?? 0;
   const bleed = toMoney(bleeds._sum.amount) ?? 0;
-  const cash = toMoney(cashSales._sum.amount) ?? 0;
+  const cash = toMoney(liquidSales._sum.amount) ?? 0;
   return { register, expectedCash: initial + supply - bleed + cash };
 }
 
@@ -212,6 +301,9 @@ export async function cashRoutes(app: FastifyInstance) {
       });
 
       // 1) Timeline consolidada (vendas + transações manuais), mais recente 1º.
+      // Cada venda vira 1 ou 2 linhas: a original, e — se o financeiro foi
+      // excluído — um estorno virtual injetado só para a timeline (ver
+      // saleTimelineEntries acima).
       const movements = registers
         .flatMap((reg) => [
           ...reg.transactions.map((t) => ({
@@ -223,18 +315,7 @@ export async function cashRoutes(app: FastifyInstance) {
             operator: reg.user?.name ?? null,
             at: t.createdAt,
           })),
-          ...reg.sales.map((s) => ({
-            kind: 'SALE' as const,
-            id: s.id,
-            code: s.code,
-            paymentMethod: s.paymentMethod,
-            amount: toMoney(s.totalAmount) ?? 0,
-            client: s.client?.name ?? null,
-            operator: reg.user?.name ?? null,
-            financialGenerated: s.financialGenerated,
-            payments: s.payments.map((p) => ({ method: p.method, amount: toMoney(p.amount) ?? 0 })),
-            at: s.soldAt,
-          })),
+          ...reg.sales.flatMap((s) => saleTimelineEntries(s, reg.user?.name ?? null)),
         ])
         .sort((a, b) => +new Date(b.at) - +new Date(a.at));
 
@@ -250,16 +331,22 @@ export async function cashRoutes(app: FastifyInstance) {
 
       // Vendas e recebimentos por forma (só as com financeiro gerado). Vendas
       // legadas sem SalePayment usam paymentMethod + totalAmount como fallback.
+      // `registers` já está filtrado por um único `type` (query acima), então
+      // o predicado de liquidez é o mesmo para todo o período consultado —
+      // mesma regra de computeExpectedCash (DIARIO: só CASH; BANCO: tudo
+      // menos A_PRAZO).
+      const isLiquid = (method: string) =>
+        req.query.type === 'DIARIO' ? method === 'CASH' : method !== 'A_PRAZO';
       let totalSales = 0;
       let salesCount = 0;
-      let cashSales = 0;
+      let liquidSales = 0;
       const methodMap = new Map<string, { count: number; total: number }>();
       const addMethod = (method: string, amount: number) => {
         const cur = methodMap.get(method) ?? { count: 0, total: 0 };
         cur.count += 1;
         cur.total += amount;
         methodMap.set(method, cur);
-        if (method === 'CASH') cashSales += amount;
+        if (isLiquid(method)) liquidSales += amount;
       };
       for (const reg of registers) {
         for (const s of reg.sales) {
@@ -287,10 +374,13 @@ export async function cashRoutes(app: FastifyInstance) {
         .filter((r) => r.status === 'CLOSED')
         .reduce((acc, r) => acc + Number(r.finalCash || 0), 0);
 
-      // Dinheiro em gaveta = fundo inicial + vendas em dinheiro + suprimentos
-      // - sangrias - fechamentos (recolhimentos).
+      // Saldo do livro (nome da variável mantido por compatibilidade — o
+      // frontend rotula como "Dinheiro em gaveta" no DIARIO e "Saldo em
+      // Conta" no BANCO, ver CashPage.tsx) = fundo inicial + recebimentos
+      // líquidos do tipo (isLiquid acima) + suprimentos - sangrias -
+      // fechamentos (recolhimentos).
       const cashInDrawer = round2(
-        totalInitialCash + cashSales + totalSupply - totalBleed - totalCollected,
+        totalInitialCash + liquidSales + totalSupply - totalBleed - totalCollected,
       );
 
       return {
@@ -334,17 +424,10 @@ export async function cashRoutes(app: FastifyInstance) {
         description: t.description,
         at: t.createdAt,
       })),
-      ...sales.map((s) => ({
-        kind: 'SALE' as const,
-        id: s.id,
-        code: s.code,
-        paymentMethod: s.paymentMethod,
-        amount: toMoney(s.totalAmount) ?? 0,
-        client: s.client?.name ?? null,
-        financialGenerated: s.financialGenerated,
-        payments: s.payments.map((p) => ({ method: p.method, amount: toMoney(p.amount) ?? 0 })),
-        at: s.soldAt,
-      })),
+      // Cada venda vira 1 ou 2 linhas: a original, e — se o financeiro foi
+      // excluído — um estorno virtual injetado só para a timeline (não
+      // persiste no banco, ver saleTimelineEntries acima).
+      ...sales.flatMap((s) => saleTimelineEntries(s)),
     ].sort((a, b) => +new Date(b.at) - +new Date(a.at));
 
     return { register: serializeDecimals(register), movements };

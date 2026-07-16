@@ -29,6 +29,7 @@ import { lookupByBarcode } from '../lib/products';
 import { enqueueSale } from '../lib/sync';
 import { SaleReceipt, type CompanyInfo, type SaleReceiptData } from '../components/SaleReceipt';
 import { ChangeCalculatorModal } from '../components/ChangeCalculatorModal';
+import { RegisterSelectionModal } from '../components/RegisterSelectionModal';
 import { printElementViaIframe } from '../lib/iframePrint';
 
 interface CartItem {
@@ -85,6 +86,13 @@ export function PdvPage() {
   const [showClientSearch, setShowClientSearch] = useState(false);
   const [changeConfig, setChangeConfig] = useState<{ amount: number; onConfirm: () => void } | null>(null);
   const [confirmMethod, setConfirmMethod] = useState<string | null>(null);
+  // Seleção de destino financeiro (Caixa Físico vs Conta Banco) — aberto pelo
+  // doSale() para toda venda que não seja 100% "A prazo" (ver PASSO 3 da missão).
+  const [destinationModal, setDestinationModal] = useState<{
+    defaultType: 'DIARIO' | 'BANCO';
+    payments: { method: string; amount: number }[];
+    installments?: { dueDate: string; amount: number }[];
+  } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [lastSale, setLastSale] = useState<{
     items: SaleReceiptData['items'];
@@ -101,9 +109,18 @@ export function PdvPage() {
   const [printMode, setPrintMode] = useState<'thermal' | 'a4' | null>(null);
   const receiptRef = useRef<HTMLDivElement>(null);
 
+  // Caixa Físico (DIARIO) continua sendo o portão de entrada do PDV — abrir
+  // caixa para vender sempre significou abrir o físico; ampliar essa trava
+  // para "qualquer um dos dois" é uma decisão de produto maior, não pedida
+  // aqui. A Conta Banco (BANCO) é buscada só para saber se está disponível
+  // como destino no checkout (RegisterSelectionModal, abaixo).
   const { data: register, isLoading } = useQuery({
-    queryKey: ['cash-current'],
-    queryFn: () => api.get<CashRegister | null>('/api/cash/current'),
+    queryKey: ['cash-current', 'DIARIO'],
+    queryFn: () => api.get<CashRegister | null>('/api/cash/current?type=DIARIO'),
+  });
+  const { data: registerBanco } = useQuery({
+    queryKey: ['cash-current', 'BANCO'],
+    queryFn: () => api.get<CashRegister | null>('/api/cash/current?type=BANCO'),
   });
 
   // Tipos de recebimento configuráveis (Configurações → Recebimentos).
@@ -287,11 +304,16 @@ export function PdvPage() {
     }, 50);
   }
 
-  async function doSale(
+  /** Execução real da venda — chamada só depois que o caixa de destino (Físico
+   *  ou Conta Banco) já está resolvido, seja pela escolha do operador no
+   *  RegisterSelectionModal, seja pelo fallback silencioso de venda 100% "A
+   *  prazo" (ver doSale, abaixo). */
+  async function submitSale(
     payments: { method: string; amount: number }[],
-    installments?: { dueDate: string; amount: number }[],
+    installments: { dueDate: string; amount: number }[] | undefined,
+    cashRegisterId: string,
   ) {
-    if (!register || cart.length === 0) return;
+    if (cart.length === 0) return;
     const items = cart.map((c) => ({
       variantId: c.variantId,
       quantity: c.quantity,
@@ -299,7 +321,7 @@ export function PdvPage() {
     }));
 
     const basePayload = {
-      cashRegisterId: register.id,
+      cashRegisterId,
       paymentMethod: payments[0]!.method,
       payments,
       installments: installments?.map((i) => ({ dueDate: new Date(i.dueDate), amount: i.amount })),
@@ -349,9 +371,48 @@ export function PdvPage() {
     flash('Venda registrada ✓');
   }
 
+  /** Portão de decisão do destino financeiro (Caixa Físico vs Conta Banco).
+   *  Toda via de finalização do PDV (pagamento rápido, modal de split e
+   *  ChangeCalculatorModal) já converge para cá — interceptar aqui cobre as
+   *  três de uma vez, sem duplicar a lógica em cada botão. */
+  function doSale(
+    payments: { method: string; amount: number }[],
+    installments?: { dueDate: string; amount: number }[],
+  ) {
+    if (!register || cart.length === 0) return;
+
+    // Exceção: venda 100% "A prazo" não gera entrada de caixa agora (só
+    // contas a receber) — não faz sentido perguntar o destino. Envia
+    // silenciosamente para o Caixa Físico (padrão), só para satisfazer o
+    // vínculo obrigatório de Sale.cashRegisterId.
+    const isFullyAPrazo = payments.every((p) => p.method === 'A_PRAZO');
+    if (isFullyAPrazo) {
+      void submitSale(payments, installments, register.id);
+      return;
+    }
+
+    // Inteligência de UX: a forma predominante (maior soma, cobre o caso de
+    // split) decide o destino sugerido — Dinheiro sugere Caixa Físico;
+    // PIX/Débito/Crédito/outras sugerem Conta Banco. Se a Conta Banco
+    // sugerida não estiver aberta, cai para o Físico (sempre disponível
+    // aqui, é o portão de entrada do PDV).
+    const totals = new Map<string, number>();
+    for (const p of payments) totals.set(p.method, (totals.get(p.method) ?? 0) + p.amount);
+    let dominant = payments[0]!.method;
+    let max = -Infinity;
+    for (const [method, amount] of totals) {
+      if (amount > max) {
+        max = amount;
+        dominant = method;
+      }
+    }
+    const suggestBanco = dominant !== 'CASH' && !!registerBanco;
+    setDestinationModal({ defaultType: suggestBanco ? 'BANCO' : 'DIARIO', payments, installments });
+  }
+
   /** Caminho rápido: pagamento único à vista. */
   function finalize(method: string) {
-    void doSale([{ method, amount: round2(total) }]);
+    doSale([{ method, amount: round2(total) }]);
   }
 
   if (isLoading)
@@ -734,6 +795,21 @@ export function PdvPage() {
           total={changeConfig.amount}
           onClose={() => setChangeConfig(null)}
           onConfirm={changeConfig.onConfirm}
+        />
+      )}
+
+      {destinationModal && (
+        <RegisterSelectionModal
+          defaultType={destinationModal.defaultType}
+          diarioAvailable={!!register}
+          bancoAvailable={!!registerBanco}
+          onClose={() => setDestinationModal(null)}
+          onConfirm={(type) => {
+            const chosenId = type === 'DIARIO' ? register!.id : registerBanco!.id;
+            const { payments, installments } = destinationModal;
+            setDestinationModal(null);
+            void submitSale(payments, installments, chosenId);
+          }}
         />
       )}
 
