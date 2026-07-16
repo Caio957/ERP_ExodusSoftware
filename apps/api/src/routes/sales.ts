@@ -1,7 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { createSaleSchema, syncSalesSchema, updateSaleSchema, paginationQuery } from '@exodus/shared';
+import {
+  createSaleSchema,
+  syncSalesSchema,
+  updateSaleSchema,
+  paginationQuery,
+  regenerateSaleFinancialSchema,
+} from '@exodus/shared';
 import { prisma } from '../lib/prisma.js';
 import { serializeDecimals } from '../lib/serialize.js';
 import { createSale, updateSale, deleteSale, setSaleFinancialGenerated } from '../services/sales.js';
@@ -129,11 +135,19 @@ export async function saleRoutes(app: FastifyInstance) {
   );
 
   // Regera o financeiro da venda (volta a contar no caixa/recebimentos). Só ADMIN.
+  // `targetRegisterType` opcional: realoca a venda para o caixa aberto do
+  // usuário logado daquele tipo (DIARIO/BANCO) em vez do caixa de origem.
   r.post(
     '/:id/financial',
-    { preHandler: app.authorize(['ADMIN']), schema: { params: z.object({ id: z.string().uuid() }) } },
+    {
+      preHandler: app.authorize(['ADMIN']),
+      schema: { params: z.object({ id: z.string().uuid() }), body: regenerateSaleFinancialSchema },
+    },
     async (req) => {
-      const sale = await setSaleFinancialGenerated(req.params.id, true);
+      const sale = await setSaleFinancialGenerated(req.params.id, true, {
+        userId: req.user.sub,
+        targetRegisterType: req.body.targetRegisterType,
+      });
       return serializeDecimals(sale);
     },
   );

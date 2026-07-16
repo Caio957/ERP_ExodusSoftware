@@ -1,7 +1,7 @@
-import type { CreateSaleInput, UpdateSaleInput } from '@exodus/shared';
+import type { CreateSaleInput, UpdateSaleInput, CashRegisterType } from '@exodus/shared';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
-import { BusinessError, NotFoundError } from '../lib/errors.js';
+import { AppError, BusinessError, NotFoundError } from '../lib/errors.js';
 
 /** Soma os itens (subtotal bruto). */
 function sumItems(items: { unitPrice: number; quantity: number }[]) {
@@ -271,9 +271,20 @@ export async function updateSale(saleId: string, input: UpdateSaleInput) {
  *  - `generated = false`: a venda deixa de contar no caixa, nos recebimentos e
  *    no dashboard; as contas a receber vinculadas ficam ocultas. Bloqueado se
  *    houver título a receber já baixado (estorne antes).
- *  - `generated = true`: reverte, voltando a contar normalmente.
+ *  - `generated = true`: reverte, voltando a contar normalmente. Se
+ *    `targetRegisterType` for informado, a venda é realocada para o caixa
+ *    aberto daquele tipo (DIARIO/BANCO) do usuário logado (`userId`) — o
+ *    lançamento some da timeline do caixa antigo e passa a aparecer no novo,
+ *    já que `computeExpectedCash`/`/movements`/`/report` (routes/cash.ts)
+ *    escopam tudo por `Sale.cashRegisterId`. `SalePayment` não referencia
+ *    caixa nenhum (só `saleId`), então mover o `cashRegisterId` da venda é
+ *    suficiente — não há "pagamentos" para recriar.
  */
-export async function setSaleFinancialGenerated(saleId: string, generated: boolean) {
+export async function setSaleFinancialGenerated(
+  saleId: string,
+  generated: boolean,
+  options?: { userId: string; targetRegisterType?: CashRegisterType },
+) {
   const sale = await prisma.sale.findUnique({
     where: { id: saleId },
     include: { financialAccounts: { include: { settlements: true } } },
@@ -291,10 +302,28 @@ export async function setSaleFinancialGenerated(saleId: string, generated: boole
     }
   }
 
-  return prisma.sale.update({
-    where: { id: saleId },
-    data: { financialGenerated: generated },
-    include: { items: true, payments: true },
+  const targetRegisterType = generated ? options?.targetRegisterType : undefined;
+
+  return prisma.$transaction(async (tx) => {
+    let cashRegisterId: string | undefined;
+    if (targetRegisterType && options) {
+      const targetRegister = await tx.cashRegister.findFirst({
+        where: { userId: options.userId, status: 'OPEN', type: targetRegisterType },
+      });
+      if (!targetRegister) {
+        throw new AppError(
+          400,
+          `Não há um caixa ${targetRegisterType === 'DIARIO' ? 'Físico' : 'Conta Banco'} aberto para o usuário logado.`,
+        );
+      }
+      cashRegisterId = targetRegister.id;
+    }
+
+    return tx.sale.update({
+      where: { id: saleId },
+      data: { financialGenerated: generated, ...(cashRegisterId ? { cashRegisterId } : {}) },
+      include: { items: true, payments: true },
+    });
   });
 }
 
