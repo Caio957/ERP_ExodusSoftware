@@ -20,6 +20,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ArrowUp,
+  Wallet,
+  Landmark,
 } from 'lucide-react';
 import type { SalesSettings } from '@exodus/shared';
 import { api, ApiError } from '../lib/api';
@@ -77,6 +79,8 @@ interface SaleDetail {
   }>;
   payments: Array<{ method: string; amount: number }>;
   financialAccounts: Array<{ id: string; description: string; amount: number; dueDate: string; status: string }>;
+  /** Em qual caixa a venda foi registrada (4.13) — DIARIO (Físico) ou BANCO. */
+  cashRegister?: { type: 'DIARIO' | 'BANCO' } | null;
 }
 
 interface SalesFilterValues {
@@ -580,6 +584,24 @@ function FinancialBadge({ generated }: { generated: boolean }) {
   );
 }
 
+/** Rastreabilidade (4.13): em qual caixa a venda foi registrada — mesmas
+ *  cores/ícones do seletor de tipo em CashPage.tsx/PdvPage.tsx (Wallet+
+ *  azul para o Físico, Landmark+dourado para a Conta Banco). */
+function RegisterTypeBadge({ type }: { type: 'DIARIO' | 'BANCO' }) {
+  const isBank = type === 'BANCO';
+  const Icon = isBank ? Landmark : Wallet;
+  return (
+    <span
+      className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
+        isBank ? 'bg-accent-100 text-accent-700' : 'bg-brand-100 text-brand-700'
+      }`}
+    >
+      <Icon className="h-3 w-3" />
+      Destino: {isBank ? 'Conta Banco' : 'Caixa Físico'}
+    </span>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Visualização da venda (somente leitura) — decide se vai editar/imprimir.
 // ---------------------------------------------------------------------------
@@ -622,6 +644,7 @@ function ViewSaleModal({
               <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
                 <span>{new Date(sale.soldAt).toLocaleString('pt-BR')}</span>
                 <FinancialBadge generated={sale.financialGenerated} />
+                {sale.cashRegister && <RegisterTypeBadge type={sale.cashRegister.type} />}
               </div>
             )}
           </div>

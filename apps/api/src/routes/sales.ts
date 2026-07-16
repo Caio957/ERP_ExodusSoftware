@@ -79,6 +79,9 @@ export async function saleRoutes(app: FastifyInstance) {
           client: true,
           payments: true,
           financialAccounts: { orderBy: { dueDate: 'asc' } },
+          // Rastreabilidade (4.13): em qual caixa (DIARIO/BANCO) a venda foi
+          // registrada — exibido no ViewSaleModal (SalesPage.tsx).
+          cashRegister: { select: { type: true } },
         },
       });
       if (!sale) throw new NotFoundError('Venda');
