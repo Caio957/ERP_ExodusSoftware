@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
 import {
   openCashSchema,
@@ -16,10 +17,27 @@ const idParam = z.object({ id: z.string().uuid() });
 
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
-/** Caixa esperado = inicial + suprimentos - sangrias + vendas em dinheiro. */
+/**
+ * Filtro de SalePayment que compõe o saldo esperado — depende do tipo do
+ * caixa (4.12): DIARIO é a gaveta física, só dinheiro em espécie conta;
+ * BANCO é a conta digital, onde PIX/cartões SÃO o "dinheiro" do livro — só
+ * 'A_PRAZO' fica de fora (não é recebimento agora, é conta a receber).
+ */
+function liquidPaymentFilter(registerType: string): Prisma.SalePaymentWhereInput {
+  return registerType === 'DIARIO' ? { method: 'CASH' } : { method: { not: 'A_PRAZO' } };
+}
+
+/** Caixa esperado = inicial + suprimentos - sangrias + recebimentos líquidos
+ *  do tipo de caixa (dinheiro em espécie no DIARIO; tudo exceto A_PRAZO no
+ *  BANCO). Baixas do Financeiro já entram via CashTransaction SUPPLY/BLEED
+ *  (`requireOpenRegister`, routes/financial.ts) — esse model não tem campo
+ *  `method`, então já é agnóstico ao tipo de caixa, sem precisar de filtro
+ *  aqui. */
 async function computeExpectedCash(cashRegisterId: string) {
-  const [register, supplies, bleeds, cashSales] = await Promise.all([
-    prisma.cashRegister.findUnique({ where: { id: cashRegisterId } }),
+  const register = await prisma.cashRegister.findUnique({ where: { id: cashRegisterId } });
+  if (!register) throw new NotFoundError('Caixa');
+
+  const [supplies, bleeds, liquidSales] = await Promise.all([
     prisma.cashTransaction.aggregate({
       where: { cashRegisterId, type: 'SUPPLY' },
       _sum: { amount: true },
@@ -28,19 +46,18 @@ async function computeExpectedCash(cashRegisterId: string) {
       where: { cashRegisterId, type: 'BLEED' },
       _sum: { amount: true },
     }),
-    // Soma os PAGAMENTOS em dinheiro (não o total da venda) — trata split e a prazo.
+    // Soma os PAGAMENTOS líquidos (não o total da venda) — trata split e a prazo.
     // Ignora vendas com o financeiro excluído (financialGenerated = false).
     prisma.salePayment.aggregate({
-      where: { method: 'CASH', sale: { cashRegisterId, financialGenerated: true } },
+      where: { ...liquidPaymentFilter(register.type), sale: { cashRegisterId, financialGenerated: true } },
       _sum: { amount: true },
     }),
   ]);
-  if (!register) throw new NotFoundError('Caixa');
 
   const initial = toMoney(register.initialCash) ?? 0;
   const supply = toMoney(supplies._sum.amount) ?? 0;
   const bleed = toMoney(bleeds._sum.amount) ?? 0;
-  const cash = toMoney(cashSales._sum.amount) ?? 0;
+  const cash = toMoney(liquidSales._sum.amount) ?? 0;
   return { register, expectedCash: initial + supply - bleed + cash };
 }
 
@@ -250,16 +267,22 @@ export async function cashRoutes(app: FastifyInstance) {
 
       // Vendas e recebimentos por forma (só as com financeiro gerado). Vendas
       // legadas sem SalePayment usam paymentMethod + totalAmount como fallback.
+      // `registers` já está filtrado por um único `type` (query acima), então
+      // o predicado de liquidez é o mesmo para todo o período consultado —
+      // mesma regra de computeExpectedCash (DIARIO: só CASH; BANCO: tudo
+      // menos A_PRAZO).
+      const isLiquid = (method: string) =>
+        req.query.type === 'DIARIO' ? method === 'CASH' : method !== 'A_PRAZO';
       let totalSales = 0;
       let salesCount = 0;
-      let cashSales = 0;
+      let liquidSales = 0;
       const methodMap = new Map<string, { count: number; total: number }>();
       const addMethod = (method: string, amount: number) => {
         const cur = methodMap.get(method) ?? { count: 0, total: 0 };
         cur.count += 1;
         cur.total += amount;
         methodMap.set(method, cur);
-        if (method === 'CASH') cashSales += amount;
+        if (isLiquid(method)) liquidSales += amount;
       };
       for (const reg of registers) {
         for (const s of reg.sales) {
@@ -287,10 +310,13 @@ export async function cashRoutes(app: FastifyInstance) {
         .filter((r) => r.status === 'CLOSED')
         .reduce((acc, r) => acc + Number(r.finalCash || 0), 0);
 
-      // Dinheiro em gaveta = fundo inicial + vendas em dinheiro + suprimentos
-      // - sangrias - fechamentos (recolhimentos).
+      // Saldo do livro (nome da variável mantido por compatibilidade — o
+      // frontend rotula como "Dinheiro em gaveta" no DIARIO e "Saldo em
+      // Conta" no BANCO, ver CashPage.tsx) = fundo inicial + recebimentos
+      // líquidos do tipo (isLiquid acima) + suprimentos - sangrias -
+      // fechamentos (recolhimentos).
       const cashInDrawer = round2(
-        totalInitialCash + cashSales + totalSupply - totalBleed - totalCollected,
+        totalInitialCash + liquidSales + totalSupply - totalBleed - totalCollected,
       );
 
       return {

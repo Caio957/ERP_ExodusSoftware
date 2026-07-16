@@ -782,7 +782,19 @@ function PeriodicReport({ registerType }: { registerType: CashRegisterType }) {
             </h3>
             <div className="grid grid-cols-2 gap-3">
               <SummaryCard label="Total de vendas" value={brl(data.summary.totalSales)} hint={`${data.summary.salesCount} venda(s)`} tone="brand" />
-              <SummaryCard label="Dinheiro em gaveta" value={brl(data.summary.cashInDrawer)} hint="Fundo inc. + Vendas (Dinh) + Supr. − Sangrias − Fechamentos" tone="emerald" />
+              {/* Rótulo/legenda mudam por tipo de caixa (4.12) — o backend
+                  mantém o mesmo nome de variável (cashInDrawer) para os dois,
+                  só o cálculo por trás muda (ver cash.ts, isLiquid). */}
+              <SummaryCard
+                label={registerType === 'BANCO' ? 'Saldo em Conta' : 'Dinheiro em gaveta'}
+                value={brl(data.summary.cashInDrawer)}
+                hint={
+                  registerType === 'BANCO'
+                    ? 'Fundo inc. + Recebimentos (exceto A prazo) + Supr. − Sangrias − Fechamentos'
+                    : 'Fundo inc. + Vendas (Dinh) + Supr. − Sangrias − Fechamentos'
+                }
+                tone="emerald"
+              />
               <SummaryCard label="Suprimentos" value={brl(data.summary.totalSupply)} tone="emerald" />
               <SummaryCard label="Sangrias" value={brl(data.summary.totalBleed)} tone="rose" />
               <SummaryCard label="Fechamentos (Recolhido)" value={brl(data.summary.totalCollected)} hint="Valor físico recolhido nos fechamentos" tone="rose" />
