@@ -848,11 +848,17 @@ function PeriodicReport({ registerType }: { registerType: CashRegisterType }) {
                             ? `Venda #${m.code} · ${methodLabel[m.paymentMethod ?? ''] ?? m.paymentMethod}`
                             : m.type === 'SUPPLY'
                               ? 'Suprimento'
-                              : 'Sangria'}
+                              : m.type === 'BLEED'
+                                ? 'Sangria'
+                                : // REVERSAL (estorno virtual, ver saleTimelineEntries em
+                                  // cash.ts): a description já traz "Estorno: Venda #X" —
+                                  // usada como label principal em vez do genérico "Sangria",
+                                  // sem repeti-la de novo no sufixo abaixo.
+                                  (m.description ?? 'Estorno')}
                           {m.kind === 'SALE' && m.client && (
                             <span className="text-slate-400"> · {m.client}</span>
                           )}
-                          {m.kind === 'TRANSACTION' && m.description && (
+                          {m.kind === 'TRANSACTION' && m.type !== 'REVERSAL' && m.description && (
                             <span className="text-slate-400"> · {m.description}</span>
                           )}
                         </span>
@@ -864,10 +870,12 @@ function PeriodicReport({ registerType }: { registerType: CashRegisterType }) {
                     </div>
                     <span
                       className={`shrink-0 font-semibold ${
-                        m.kind === 'TRANSACTION' && m.type === 'BLEED' ? 'text-rose-600' : 'text-emerald-600'
+                        m.kind === 'TRANSACTION' && (m.type === 'BLEED' || m.type === 'REVERSAL')
+                          ? 'text-rose-600'
+                          : 'text-emerald-600'
                       }`}
                     >
-                      {m.kind === 'TRANSACTION' && m.type === 'BLEED' ? '−' : '+'}
+                      {m.kind === 'TRANSACTION' && (m.type === 'BLEED' || m.type === 'REVERSAL') ? '−' : '+'}
                       {brl(m.amount)}
                     </span>
                   </li>

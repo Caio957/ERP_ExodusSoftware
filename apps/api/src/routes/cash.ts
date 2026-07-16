@@ -27,6 +27,78 @@ function liquidPaymentFilter(registerType: string): Prisma.SalePaymentWhereInput
   return registerType === 'DIARIO' ? { method: 'CASH' } : { method: { not: 'A_PRAZO' } };
 }
 
+/**
+ * Timeline de uma venda: a linha original (`kind: 'SALE'`) e, quando o
+ * financeiro foi excluído (`financialGenerated: false`), uma SEGUNDA linha
+ * VIRTUAL de estorno (`kind: 'TRANSACTION'`, `type: 'REVERSAL'`) — só para a
+ * timeline justificar visualmente por que o saldo caiu. Nenhuma
+ * `CashTransaction` real é criada: `computeExpectedCash` já desconsidera a
+ * venda via `financialGenerated`, então gravar uma `CashTransaction` de
+ * verdade duplicaria a dedução ("dupla dedução", como o Comandante já
+ * identificou).
+ *
+ * `type: 'REVERSAL'`, não `'BLEED'` — de propósito: `CashPrintButton`
+ * (recibo de fechamento impresso, CashPage.tsx) soma `type === 'BLEED'`
+ * direto do array de `movements` para compor `totalBleed`/`expectedCash`
+ * local. Usar `'BLEED'` aqui infitaria essa soma com uma "sangria fantasma"
+ * no recibo físico impresso. `'REVERSAL'` fica de fora de qualquer filtro
+ * `=== 'BLEED'` existente automaticamente; só a renderização visual
+ * (ícone/cor vermelha) em PeriodicReport precisou tratar o novo tipo — o
+ * resto (RegisterMovements, ícone/trava de edição) já cai no mesmo branch
+ * visual via fallback (não é `'SUPPLY'` ⇒ vermelho) e já trava edição/exclusão
+ * por `description.startsWith('Estorno')`, a mesma regra que já protege
+ * baixas/estornos reais do Financeiro.
+ *
+ * O `id` sintético (`virtual-reversal-{id}`) nunca bate com um registro
+ * real — `PUT/DELETE /cash/transactions/:id` não encontra e responde 404 se
+ * alguém tentar (defesa redundante; a UI já nem mostra os botões).
+ *
+ * A data do estorno virtual é sintética (`soldAt + 1ms`): `Sale` não tem
+ * `updatedAt` nem qualquer campo que registre quando o financeiro foi
+ * excluído, só o estado atual (`financialGenerated`) — `soldAt + 1ms`
+ * garante que a linha apareça imediatamente após a venda na ordenação
+ * decrescente por data, sem inventar um "quando" que o sistema não sabe.
+ */
+function saleTimelineEntries(
+  s: {
+    id: string;
+    code: number;
+    paymentMethod: string;
+    totalAmount: Prisma.Decimal | number;
+    client?: { name: string } | null;
+    financialGenerated: boolean;
+    payments: { method: string; amount: Prisma.Decimal | number }[];
+    soldAt: Date;
+  },
+  operator?: string | null,
+) {
+  const amount = toMoney(s.totalAmount) ?? 0;
+  const saleEntry = {
+    kind: 'SALE' as const,
+    id: s.id,
+    code: s.code,
+    paymentMethod: s.paymentMethod,
+    amount,
+    client: s.client?.name ?? null,
+    ...(operator !== undefined ? { operator } : {}),
+    financialGenerated: s.financialGenerated,
+    payments: s.payments.map((p) => ({ method: p.method, amount: toMoney(p.amount) ?? 0 })),
+    at: s.soldAt,
+  };
+  if (s.financialGenerated) return [saleEntry];
+
+  const reversalEntry = {
+    kind: 'TRANSACTION' as const,
+    id: `virtual-reversal-${s.id}`,
+    type: 'REVERSAL' as const,
+    amount,
+    description: `Estorno: Venda #${s.code}`,
+    ...(operator !== undefined ? { operator } : {}),
+    at: new Date(s.soldAt.getTime() + 1),
+  };
+  return [saleEntry, reversalEntry];
+}
+
 /** Caixa esperado = inicial + suprimentos - sangrias + recebimentos líquidos
  *  do tipo de caixa (dinheiro em espécie no DIARIO; tudo exceto A_PRAZO no
  *  BANCO). Baixas do Financeiro já entram via CashTransaction SUPPLY/BLEED
@@ -229,6 +301,9 @@ export async function cashRoutes(app: FastifyInstance) {
       });
 
       // 1) Timeline consolidada (vendas + transações manuais), mais recente 1º.
+      // Cada venda vira 1 ou 2 linhas: a original, e — se o financeiro foi
+      // excluído — um estorno virtual injetado só para a timeline (ver
+      // saleTimelineEntries acima).
       const movements = registers
         .flatMap((reg) => [
           ...reg.transactions.map((t) => ({
@@ -240,18 +315,7 @@ export async function cashRoutes(app: FastifyInstance) {
             operator: reg.user?.name ?? null,
             at: t.createdAt,
           })),
-          ...reg.sales.map((s) => ({
-            kind: 'SALE' as const,
-            id: s.id,
-            code: s.code,
-            paymentMethod: s.paymentMethod,
-            amount: toMoney(s.totalAmount) ?? 0,
-            client: s.client?.name ?? null,
-            operator: reg.user?.name ?? null,
-            financialGenerated: s.financialGenerated,
-            payments: s.payments.map((p) => ({ method: p.method, amount: toMoney(p.amount) ?? 0 })),
-            at: s.soldAt,
-          })),
+          ...reg.sales.flatMap((s) => saleTimelineEntries(s, reg.user?.name ?? null)),
         ])
         .sort((a, b) => +new Date(b.at) - +new Date(a.at));
 
@@ -360,17 +424,10 @@ export async function cashRoutes(app: FastifyInstance) {
         description: t.description,
         at: t.createdAt,
       })),
-      ...sales.map((s) => ({
-        kind: 'SALE' as const,
-        id: s.id,
-        code: s.code,
-        paymentMethod: s.paymentMethod,
-        amount: toMoney(s.totalAmount) ?? 0,
-        client: s.client?.name ?? null,
-        financialGenerated: s.financialGenerated,
-        payments: s.payments.map((p) => ({ method: p.method, amount: toMoney(p.amount) ?? 0 })),
-        at: s.soldAt,
-      })),
+      // Cada venda vira 1 ou 2 linhas: a original, e — se o financeiro foi
+      // excluído — um estorno virtual injetado só para a timeline (não
+      // persiste no banco, ver saleTimelineEntries acima).
+      ...sales.flatMap((s) => saleTimelineEntries(s)),
     ].sort((a, b) => +new Date(b.at) - +new Date(a.at));
 
     return { register: serializeDecimals(register), movements };
