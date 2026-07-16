@@ -175,12 +175,18 @@ model CashRegister {
   initialCash Decimal   @db.Decimal(10, 2)
   finalCash   Decimal?  @db.Decimal(10, 2)
   status      String // 'OPEN' | 'CLOSED'
+  // Tipo de caixa: 'DIARIO' (caixa físico de balcão, comportamento original)
+  // ou 'BANCO' (conta bancária/digital) — mesma tabela, mesmas rotas de
+  // abrir/sangria/suprimento/fechar, só filtradas por tipo. Default garante
+  // que os registros já existentes continuam sendo 'DIARIO' sem migração de dados.
+  type        String    @default("DIARIO")
 
   transactions CashTransaction[]
   sales        Sale[]
 
   @@index([userId])
   @@index([status])
+  @@index([type])
 }
 
 model CashTransaction {

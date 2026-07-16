@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -16,6 +16,7 @@ import {
   PieChart,
   Printer,
   FileBarChart,
+  Landmark,
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../store/auth';
@@ -35,6 +36,9 @@ const methodLabel: Record<string, string> = {
 
 const statusLabel = (s: string) => (s === 'OPEN' ? 'Aberto' : s === 'CLOSED' ? 'Fechado' : s);
 
+/** DIARIO = caixa físico de balcão · BANCO = conta bancária/digital — mesma tabela/rotas, só filtradas por tipo. */
+type CashRegisterType = 'DIARIO' | 'BANCO';
+
 interface CashRegister {
   id: string;
   initialCash: number;
@@ -48,6 +52,7 @@ interface CashRegister {
 
 export function CashPage() {
   const [tab, setTab] = useState<'atual' | 'historico' | 'relatorio'>('atual');
+  const [registerType, setRegisterType] = useState<CashRegisterType>('DIARIO');
 
   return (
     <div className="mx-auto max-w-2xl space-y-4">
@@ -71,28 +76,64 @@ export function CashPage() {
         </div>
       </div>
 
-      {tab === 'atual' && <CurrentCash />}
-      {tab === 'historico' && <CashHistory />}
-      {tab === 'relatorio' && <PeriodicReport />}
+      <RegisterTypeToggle value={registerType} onChange={setRegisterType} />
+
+      {tab === 'atual' && <CurrentCash registerType={registerType} />}
+      {tab === 'historico' && <CashHistory registerType={registerType} />}
+      {tab === 'relatorio' && <PeriodicReport registerType={registerType} />}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-function CurrentCash() {
+// Alternador Caixa Físico / Conta Banco: mesma tabela/rotas de sempre (ver
+// apps/api/src/routes/cash.ts), só reage passando `type` para as três abas —
+// nenhuma estrutura de aba foi duplicada, elas só recebem o filtro por prop.
+function RegisterTypeToggle({
+  value,
+  onChange,
+}: {
+  value: CashRegisterType;
+  onChange: (t: CashRegisterType) => void;
+}) {
+  return (
+    <div className="inline-flex w-full gap-1 rounded-2xl border border-slate-200 bg-white p-1 shadow-sm sm:w-auto">
+      <button
+        className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition sm:flex-none ${
+          value === 'DIARIO' ? 'bg-brand-gradient text-white shadow-brand' : 'text-slate-500 hover:bg-slate-50'
+        }`}
+        onClick={() => onChange('DIARIO')}
+      >
+        <Wallet className="h-4 w-4" /> Caixa Físico
+      </button>
+      <button
+        className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition sm:flex-none ${
+          value === 'BANCO' ? 'bg-brand-gradient text-white shadow-brand' : 'text-slate-500 hover:bg-slate-50'
+        }`}
+        onClick={() => onChange('BANCO')}
+      >
+        <Landmark className="h-4 w-4" /> Conta Banco
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+function CurrentCash({ registerType }: { registerType: CashRegisterType }) {
   const qc = useQueryClient();
+  const isBank = registerType === 'BANCO';
   const [initialCash, setInitialCash] = useState('');
   const [txModal, setTxModal] = useState<{ type: 'SUPPLY' | 'BLEED' } | null>(null);
   const [closing, setClosing] = useState(false);
   const [closeResult, setCloseResult] = useState<{ expectedCash: number; difference: number } | null>(null);
 
   const { data: register, isLoading } = useQuery({
-    queryKey: ['cash-current'],
-    queryFn: () => api.get<CashRegister | null>('/api/cash/current'),
+    queryKey: ['cash-current', registerType],
+    queryFn: () => api.get<CashRegister | null>(`/api/cash/current?type=${registerType}`),
   });
 
   const open = useMutation({
-    mutationFn: () => api.post('/api/cash/open', { initialCash: Number(initialCash) }),
+    mutationFn: () => api.post('/api/cash/open', { initialCash: Number(initialCash), type: registerType }),
     onSuccess: () => {
       setInitialCash('');
       qc.invalidateQueries({ queryKey: ['cash-current'] });
@@ -112,14 +153,16 @@ function CurrentCash() {
       <div className="card animate-scale-in">
         <div className="mb-4 flex items-center gap-3">
           <span className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-gradient text-white shadow-brand">
-            <Wallet className="h-6 w-6" />
+            {isBank ? <Landmark className="h-6 w-6" /> : <Wallet className="h-6 w-6" />}
           </span>
           <div>
-            <h2 className="font-display text-xl font-bold">Abrir caixa</h2>
-            <p className="text-sm text-slate-500">Informe o fundo de troco inicial.</p>
+            <h2 className="font-display text-xl font-bold">{isBank ? 'Abrir conta banco' : 'Abrir caixa'}</h2>
+            <p className="text-sm text-slate-500">
+              {isBank ? 'Informe o saldo inicial da conta.' : 'Informe o fundo de troco inicial.'}
+            </p>
           </div>
         </div>
-        <label className="label">Valor inicial (R$)</label>
+        <label className="label">{isBank ? 'Saldo inicial (R$)' : 'Valor inicial (R$)'}</label>
         <input
           className="input mb-3 text-lg"
           type="number"
@@ -134,7 +177,7 @@ function CurrentCash() {
           </div>
         )}
         <button className="btn-primary w-full" disabled={!initialCash || open.isPending} onClick={() => open.mutate()}>
-          {open.isPending ? 'Abrindo...' : 'Abrir caixa'}
+          {open.isPending ? 'Abrindo...' : isBank ? 'Abrir conta banco' : 'Abrir caixa'}
         </button>
       </div>
     );
@@ -150,7 +193,7 @@ function CurrentCash() {
               <Clock className="h-4 w-4" />
               Aberto desde {new Date(register.openedAt).toLocaleString('pt-BR')}
             </div>
-            <div className="mt-3 text-sm text-white/70">Saldo atual em caixa</div>
+            <div className="mt-3 text-sm text-white/70">{isBank ? 'Saldo atual da conta' : 'Saldo atual em caixa'}</div>
             <div className="font-display text-4xl font-extrabold">
               {brl(register.expectedCash ?? register.initialCash)}
             </div>
@@ -485,11 +528,15 @@ function CashPrintButton({ register }: { register: CashRegister }) {
 }
 
 // ---------------------------------------------------------------------------
-function CashHistory() {
+function CashHistory({ registerType }: { registerType: CashRegisterType }) {
   const [selected, setSelected] = useState<CashRegister | null>(null);
+  // Volta para a lista ao trocar o toggle — evita ficar preso no detalhe de um
+  // registro do tipo anterior enquanto a lista de fundo já mudou de filtro.
+  useEffect(() => setSelected(null), [registerType]);
+
   const { data, isLoading } = useQuery({
-    queryKey: ['cash-registers'],
-    queryFn: () => api.get<CashRegister[]>('/api/cash/registers'),
+    queryKey: ['cash-registers', registerType],
+    queryFn: () => api.get<CashRegister[]>(`/api/cash/registers?type=${registerType}`),
   });
 
   if (isLoading) return <div className="grid h-40 place-items-center text-slate-500">Carregando...</div>;
@@ -693,14 +740,15 @@ const pad2 = (n: number) => String(n).padStart(2, '0');
 // yyyy-mm-dd em horário LOCAL (evita o shift de 1 dia do toISOString em UTC).
 const localISODate = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 
-function PeriodicReport() {
+function PeriodicReport({ registerType }: { registerType: CashRegisterType }) {
   const now = new Date();
   const [startDate, setStartDate] = useState(localISODate(new Date(now.getFullYear(), now.getMonth(), 1)));
   const [endDate, setEndDate] = useState(localISODate(now));
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['cash-report', startDate, endDate],
-    queryFn: () => api.get<CashReport>(`/api/cash/report?startDate=${startDate}&endDate=${endDate}`),
+    queryKey: ['cash-report', startDate, endDate, registerType],
+    queryFn: () =>
+      api.get<CashReport>(`/api/cash/report?startDate=${startDate}&endDate=${endDate}&type=${registerType}`),
     enabled: !!startDate && !!endDate,
   });
 

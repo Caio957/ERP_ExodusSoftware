@@ -26,6 +26,10 @@ export type SyncStatus = z.infer<typeof SyncStatus>;
 export const CashRegisterStatus = z.enum(['OPEN', 'CLOSED']);
 export type CashRegisterStatus = z.infer<typeof CashRegisterStatus>;
 
+/** DIARIO = caixa físico de balcão (padrão histórico) · BANCO = conta bancária/digital. */
+export const CashRegisterType = z.enum(['DIARIO', 'BANCO']);
+export type CashRegisterType = z.infer<typeof CashRegisterType>;
+
 export const CashTransactionType = z.enum(['SUPPLY', 'BLEED']);
 export type CashTransactionType = z.infer<typeof CashTransactionType>;
 
