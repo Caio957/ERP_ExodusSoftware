@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-07-13
+- **Última atualização:** 2026-07-15
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -42,9 +42,13 @@
   onda de Custo de Aquisição Real/Landed Cost em Compras: frete/outras despesas
   rateados, wizard de 2 etapas na Compra Manual, cadastro in-line de produto na
   importação de XML, e frete/despesas editáveis também no fluxo de XML — ver Onda
-  2026-07-12/13 em §11) — ver §11 para o histórico completo de commits de todas.
-  **`main` e `origin/main` estão em sincronia em `f18a5fe`.** Nenhuma branch de feature
-  ativa no momento — a próxima onda de trabalho deve criar uma nova
+  2026-07-12/13 em §11) e ✅ **`feature/conta-banco` mesclada via PR #21** (`1862448`,
+  2026-07-15 — separação Caixa Físico (DIARIO) / Conta Banco (BANCO) reaproveitando a
+  tabela `CashRegister` existente, ver Onda 2026-07-15 em §11) — ver §11 para o
+  histórico completo de commits de todas.
+  **`main` e `origin/main` estão em sincronia em `1862448`.** Nenhuma branch de feature
+  ativa no momento — a próxima onda de trabalho (propagar o seletor de caixa
+  Físico/Banco para o módulo Financeiro, ver §12/§14) deve criar uma nova
   `feature/*`/`fix/*`/`refinamento-*` a partir daqui.
   ⚠️ **Padrão observado na rodada de correções de impressão (PRs #14→#16)**: cada uma das 3 PRs
   seguidas (#14→#16) tentou resolver o mesmo sintoma relatado pelo Comandante (página em
@@ -222,6 +226,20 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   = `totalInitialCash + vendas em dinheiro + totalSupply - totalBleed -
   totalCollected` (`totalCollected` = soma do `finalCash` dos caixas já
   fechados — dinheiro recolhido sai da gaveta).
+  **Caixa Físico / Conta Banco** (`CashRegister.type`, onda 2026-07-15 — ver
+  §11): coluna `type String @default("DIARIO")` (`'DIARIO'` | `'BANCO'`, enum
+  `CashRegisterType` em `packages/shared/src/enums.ts`) reaproveita a **mesma
+  tabela e as mesmas rotas** de sempre — nenhuma tabela/rota nova. `/current`,
+  `/registers` e `/report` passaram a exigir `type` na querystring
+  (`cashRegisterTypeQuerySchema`, default `'DIARIO'`) e filtrar por ele **no
+  mesmo objeto `where` do RBAC já existente** (`{ ...rbac, type }`), sem alterar
+  a lógica de dono que essas rotas já tinham. `/current` continua
+  **estritamente individual** (sem bypass de ADMIN, como sempre foi).
+  `/open` agora recebe `type` no corpo (default `'DIARIO'`, então todo caller
+  antigo continua abrindo caixa físico sem precisar saber do campo novo) e
+  **escopa a checagem de "já aberto" por tipo** — um operador pode ter um caixa
+  físico e uma conta banco abertos ao mesmo tempo (são livros independentes);
+  só não pode abrir dois do mesmo tipo.
 - ✅ **Financeiro**: listar com **filtros avançados** — `orderBy`
   (`code`/`description`/`dueDate`/`amount`) + `orderDir`, e `statusFilter` semântico
   (`ALL`/`OPEN`/`OVERDUE`/`NOT_OVERDUE`/`PARTIAL`/`PAID`, este último com
@@ -421,6 +439,18 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   mês corrente), cards de resumo (Total de vendas, Dinheiro em gaveta,
   Suprimentos, Sangrias, Fechamentos/Recolhido) e timeline consolidada de
   todos os caixas do período (ícone + operador + valor com sinal).
+  **Alternador Caixa Físico / Conta Banco** (`RegisterTypeToggle`, onda
+  2026-07-15 — ver §11): pílula segmentada logo abaixo do cabeçalho da página
+  (ícone `Wallet`/`Landmark`, mesmo `bg-brand-gradient`/`shadow-brand` do
+  design system — nenhuma classe nova). Estado `registerType` mora só em
+  `CashPage` e é passado como **prop** para as três abas (`CurrentCash`,
+  `CashHistory`, `PeriodicReport`) — **nenhuma estrutura de aba foi
+  duplicada**, elas só reagem ao filtro (`queryKey`/querystring `type`
+  incorporados às queries React Query já existentes: `cash-current`,
+  `cash-registers`, `cash-report`). `CashHistory` reseta o detalhe selecionado
+  (`useEffect`) ao trocar o toggle, para não deixar o operador preso vendo o
+  detalhe de um registro do tipo anterior enquanto a lista de trás já mudou de
+  filtro. `POST /open` passa a enviar `type: registerType` no corpo.
 - ✅ **Compras**: **aba "Sugestão de compra"** (`PurchaseSuggestion`, componente
   próprio) com filtros (marca/grupo/subgrupo/janela/reposição), **paginação
   client-side** + **scroll-to-top**, produto exibido como `#código - nome` com a
@@ -617,6 +647,7 @@ Outras decisões:
 | — | Vendas: consulta + editar/excluir | `routes/sales.ts` (PUT/DELETE), `SalesPage.tsx` | ✅ |
 | — | Cadastros de clientes/fornecedores | `routes/persons.ts`, `RegistrationsPage.tsx` | 🟡 |
 | — | Caixa: timeline + editar/excluir + histórico + resumo | `routes/cash.ts`, `CashPage.tsx` | ✅ |
+| — | Caixa: Caixa Físico / Conta Banco (toggle por tipo) | `CashRegister.type`, `routes/cash.ts`, `CashPage.tsx` | ✅ |
 | — | Compra manual multi-produto + nº doc + contas a pagar | `routes/invoices.ts` (`/manual`), `PurchasesPage.tsx` | ✅ |
 | — | Financeiro: baixa parcial + estorno + filtros + código | `AccountSettlement`, `routes/financial.ts`, `FinancialPage.tsx` | ✅ |
 | — | Acerto de estoque (inventário) | `routes/products.ts` (`/adjust-stock`), `StockAdjustPage.tsx` | ✅ |
@@ -644,7 +675,9 @@ completo: `apps/api/prisma/schema.prisma`.
 `20260626000000_add_average_cost_to_variants`, `20260702000000_add_person_trade_name`,
 `20260710011551_add_invoice_nfe_number`, `20260710041311_add_code_to_stock_adjustments`,
 `20260713021023_add_invoice_expenses` (`Invoice.freight`/`Invoice.otherExpenses` —
-landed cost, ver §5 Compras e Onda 2026-07-13 em §11). Aplicadas automaticamente
+landed cost, ver §5 Compras e Onda 2026-07-13 em §11),
+`20260714020913_add_cash_register_type` (`CashRegister.type` — Caixa Físico/Conta
+Banco, ver §5 Caixa e Onda 2026-07-15 em §11). Aplicadas automaticamente
 no Railway a cada deploy (`prisma migrate deploy`).
 
 ---
@@ -1807,6 +1840,46 @@ no Railway a cada deploy (`prisma migrate deploy`).
   `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros** em todos
   os commits.
 
+- ✅ **Onda 2026-07-15 — Caixa Físico / Conta Banco** (2026-07-15): branch
+  `feature/conta-banco` — **mesclada via PR #21** (`1862448`), commit único
+  `7fb684e`. Regra arquitetural seguida à risca (pedido do Comandante): **sem
+  tabela nova, sem rota nova** — a distinção inteira vive numa única coluna a
+  mais na tabela `CashRegister` já existente.
+  - **Schema**: `CashRegister.type String @default("DIARIO")` + `@@index([type])`
+    (migração aditiva `20260714020913_add_cash_register_type`, sem migração de
+    dados — todo registro pré-existente já nasce `'DIARIO'` pelo default).
+  - **Shared**: enum `CashRegisterType = z.enum(['DIARIO', 'BANCO'])`
+    (`enums.ts`, mesmo padrão de `CashRegisterStatus`); `openCashSchema` ganhou
+    `type` (default `'DIARIO'`); novo `cashRegisterTypeQuerySchema` reutilizado
+    nas 3 rotas de leitura.
+  - **Backend** (`routes/cash.ts`): `/current`, `/registers` e `/report`
+    passaram a filtrar por `type` **no mesmo objeto `where` do RBAC já
+    existente**, sem tocar na lógica de dono (`ADMIN` vê tudo, `CASHIER` só o
+    próprio — auditado linha a linha nesta onda, nada regrediu). `/current`
+    permanece estritamente individual, sem bypass de ADMIN. `/open` escopa a
+    checagem de "já aberto" por tipo — operador pode ter um caixa físico e uma
+    conta banco abertos ao mesmo tempo (livros independentes); só não pode
+    abrir dois do mesmo tipo.
+  - **Frontend** (`CashPage.tsx`): `RegisterTypeToggle` (pílula segmentada,
+    ícones `Wallet`/`Landmark`) com estado único em `CashPage`, passado como
+    prop para as 3 abas (`CurrentCash`, `CashHistory`, `PeriodicReport`) — elas
+    só ganharam o filtro nas queries React Query já existentes
+    (`cash-current`/`cash-registers`/`cash-report` com `registerType` na
+    `queryKey` + querystring `type` na chamada), nenhuma estrutura de aba foi
+    duplicada. `CashHistory` reseta o detalhe selecionado ao trocar o toggle.
+  - **Ambiente local estava desatualizado no início desta onda**: `main` local
+    e a branch de trabalho anterior (`feature/xml-import-visual`) estavam 87
+    commits atrás do `origin/main` real (faltavam os PRs #7→#20 inteiros, já
+    mesclados em produção) — sincronizado (`git pull` + nova branch a partir do
+    `origin/main` atualizado) antes de iniciar qualquer alteração, para não
+    nascer a feature em cima de uma base obsoleta.
+  - **Testado ao vivo end-to-end** (2026-07-15): ambiente completo local
+    (Docker + Postgres + migrações + seed + API + Web) validado pelo
+    Comandante no navegador — abrir caixa físico e conta banco em paralelo,
+    alternar as 3 abas com o toggle, sangria/suprimento em cada tipo. **Já em
+    produção** (push do PR #21 disparou o auto-deploy do Railway).
+  `npm run typecheck` (shared+api+web) → **0 erros**.
+
 ---
 
 ## 12. Pendências, bloqueios e dívidas técnicas
@@ -1857,6 +1930,18 @@ no Railway a cada deploy (`prisma migrate deploy`).
     usuário chama `window.print()`, sem depender de rasterização client-side.
     Botão do PDV renomeado para "📄 Imprimir / Salvar PDF (A4)" para deixar essa
     rota explícita ao operador. Não reabrir sem alinhamento novo do Comandante.
+17. **[PRIORIDADE] Propagar Caixa Físico/Conta Banco para o Financeiro**: o
+    toggle da Onda 2026-07-15 (§11) só existe hoje na tela de Caixa. `/financial/:id/settle`
+    e `/:id/reverse` (routes/financial.ts) exigem um `CashRegister` `OPEN` do
+    operador mas pegam o **primeiro que encontrarem** (implícito, sem
+    distinguir tipo) para criar a `CashTransaction` de compensação — com dois
+    caixas do mesmo operador abertos ao mesmo tempo (DIARIO + BANCO, agora
+    possível), essa escolha implícita fica ambígua. Da mesma forma, os
+    lançamentos manuais do Financeiro (`/installments`) e as telas de
+    pagamento/recebimento não têm hoje nenhum seletor de "em qual caixa isso
+    entra". Próxima onda: dar ao operador a opção explícita de escolher
+    Caixa Físico ou Conta Banco em toda tela do Financeiro que gera uma
+    `CashTransaction` — ver §14.1 para o detalhamento do plano.
 
 ---
 
@@ -1884,8 +1969,33 @@ Gostaríamos de análise crítica especialmente sobre:
 
 ## 14. Próximos passos sugeridos (ordem proposta)
 
-> **Backlog de funcionalidades pedido pelos sócios: 100% concluído.** Os itens
-> abaixo são de **maturidade/robustez**, não solicitados ainda.
+### 14.1 Em andamento — pedido explícito do Comandante (PRIORIDADE)
+
+**Propagar o seletor Caixa Físico/Conta Banco (§11 Onda 2026-07-15) para o
+módulo Financeiro.** Toda tela do Financeiro que hoje gera uma
+`CashTransaction` de compensação precisa ganhar a opção explícita de escolher
+em qual caixa a movimentação entra:
+
+- `POST /financial/:id/settle` e `/:id/reverse` (`requireOpenRegister` em
+  `routes/financial.ts:35`): hoje pegam o primeiro `CashRegister OPEN` do
+  operador via `findFirst` **sem filtrar por `type`** — com dois caixas abertos
+  ao mesmo tempo (cenário que passou a ser possível nesta mesma onda), a
+  escolha é implícita/ambígua. Precisa de um parâmetro `registerType` (ou
+  `cashRegisterId` direto) vindo do frontend.
+- `POST /financial/installments` (lançamento manual a pagar/receber): não
+  toca no Caixa na criação (só na baixa), mas a tela devia deixar claro desde
+  já em qual "livro" aquele título vai refletir quando for baixado.
+- `FinancialPage.tsx` (`NewEntryModal`, `SettleModal`): precisam do mesmo
+  `RegisterTypeToggle`/seletor já usado em `CashPage.tsx` — reaproveitar o
+  componente em vez de duplicar.
+- Vale revisar se `PdvPage.tsx`/`SalesPage.tsx` (vendas em dinheiro/PIX/etc.
+  também geram `CashTransaction` implícita via `Sale.cashRegisterId`) precisam
+  do mesmo tratamento, ou se venda sempre é DIARIO por natureza (a decidir com
+  o Comandante).
+
+### 14.2 Maturidade/robustez (backlog de funcionalidades dos sócios: 100% concluído)
+
+> Os itens abaixo não foram solicitados ainda — são sugestões de maturidade.
 
 1. **Suíte de testes**: Vitest (unit em `pricing`/`nfe-parser` + vendas split/a prazo
    + financeiro baixa/estorno) e integração das rotas. **Prioridade alta** dado o tamanho.
