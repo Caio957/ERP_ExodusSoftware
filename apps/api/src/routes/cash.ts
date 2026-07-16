@@ -6,6 +6,7 @@ import {
   closeCashSchema,
   cashTransactionSchema,
   updateCashTransactionSchema,
+  cashRegisterTypeQuerySchema,
 } from '@exodus/shared';
 import { prisma } from '../lib/prisma.js';
 import { serializeDecimals, toMoney } from '../lib/serialize.js';
@@ -47,25 +48,42 @@ export async function cashRoutes(app: FastifyInstance) {
   const r = app.withTypeProvider<ZodTypeProvider>();
 
   // Caixa aberto do operador atual (com saldo esperado em tempo real).
-  r.get('/current', { preHandler: app.authenticate }, async (req) => {
-    const register = await prisma.cashRegister.findFirst({
-      where: { userId: req.user.sub, status: 'OPEN' },
-      include: { transactions: { orderBy: { createdAt: 'desc' } } },
-    });
-    if (!register) return null;
-    const { expectedCash } = await computeExpectedCash(register.id);
-    return { ...serializeDecimals(register), expectedCash };
-  });
+  // Permanece estritamente individual (sem bypass de ADMIN) — abrir/consultar
+  // "meu caixa atual" é sempre por userId, com ou sem Conta Banco no jogo.
+  r.get(
+    '/current',
+    { preHandler: app.authenticate, schema: { querystring: cashRegisterTypeQuerySchema } },
+    async (req) => {
+      const register = await prisma.cashRegister.findFirst({
+        where: { userId: req.user.sub, status: 'OPEN', type: req.query.type },
+        include: { transactions: { orderBy: { createdAt: 'desc' } } },
+      });
+      if (!register) return null;
+      const { expectedCash } = await computeExpectedCash(register.id);
+      return { ...serializeDecimals(register), expectedCash };
+    },
+  );
 
-  // Abertura
+  // Abertura. "Já aberto" é checado por tipo — um operador pode ter um caixa
+  // físico (DIARIO) e uma conta banco (BANCO) abertos ao mesmo tempo, são
+  // livros independentes; o que não pode é abrir dois do mesmo tipo.
   r.post('/open', { preHandler: app.authenticate, schema: { body: openCashSchema } }, async (req, reply) => {
     const existing = await prisma.cashRegister.findFirst({
-      where: { userId: req.user.sub, status: 'OPEN' },
+      where: { userId: req.user.sub, status: 'OPEN', type: req.body.type },
     });
-    if (existing) throw new BusinessError('Você já possui um caixa aberto');
+    if (existing) {
+      throw new BusinessError(
+        req.body.type === 'BANCO' ? 'Você já possui uma conta banco aberta' : 'Você já possui um caixa aberto',
+      );
+    }
 
     const register = await prisma.cashRegister.create({
-      data: { userId: req.user.sub, initialCash: req.body.initialCash, status: 'OPEN' },
+      data: {
+        userId: req.user.sub,
+        initialCash: req.body.initialCash,
+        status: 'OPEN',
+        type: req.body.type,
+      },
     });
     return reply.status(201).send(serializeDecimals(register));
   });
@@ -136,17 +154,23 @@ export async function cashRoutes(app: FastifyInstance) {
     },
   );
 
-  // Histórico de caixas (consulta de outros dias). ADMIN vê todos; operador, os seus.
-  r.get('/registers', { preHandler: app.authenticate }, async (req) => {
-    const where = req.user.role === 'ADMIN' ? {} : { userId: req.user.sub };
-    const registers = await prisma.cashRegister.findMany({
-      where,
-      orderBy: { openedAt: 'desc' },
-      take: 60,
-      include: { user: { select: { name: true } } },
-    });
-    return serializeDecimals(registers);
-  });
+  // Histórico de caixas (consulta de outros dias). ADMIN vê todos; operador, os
+  // seus — RBAC preservado; `type` é um filtro adicional no mesmo `where`, nunca
+  // substitui a checagem de dono.
+  r.get(
+    '/registers',
+    { preHandler: app.authenticate, schema: { querystring: cashRegisterTypeQuerySchema } },
+    async (req) => {
+      const rbac = req.user.role === 'ADMIN' ? {} : { userId: req.user.sub };
+      const registers = await prisma.cashRegister.findMany({
+        where: { ...rbac, type: req.query.type },
+        orderBy: { openedAt: 'desc' },
+        take: 60,
+        include: { user: { select: { name: true } } },
+      });
+      return serializeDecimals(registers);
+    },
+  );
 
   // Relatório periódico (extrato consolidado): unifica os movimentos de todos
   // os caixas do período (vendas + sangrias/suprimentos) e resume por forma de
@@ -156,7 +180,11 @@ export async function cashRoutes(app: FastifyInstance) {
     '/report',
     {
       preHandler: app.authenticate,
-      schema: { querystring: z.object({ startDate: z.coerce.date(), endDate: z.coerce.date() }) },
+      schema: {
+        querystring: z
+          .object({ startDate: z.coerce.date(), endDate: z.coerce.date() })
+          .merge(cashRegisterTypeQuerySchema),
+      },
     },
     async (req) => {
       const { startDate, endDate } = req.query;
@@ -173,8 +201,9 @@ export async function cashRoutes(app: FastifyInstance) {
       const rbac = req.user.role === 'ADMIN' ? {} : { userId: req.user.sub };
 
       // Sem filtro de status: traz caixas OPEN e CLOSED dentro do período.
+      // `type` some do RBAC de dono — é só mais uma cláusula no mesmo `where`.
       const registers = await prisma.cashRegister.findMany({
-        where: { openedAt: { gte: start, lte: end }, ...rbac },
+        where: { openedAt: { gte: start, lte: end }, type: req.query.type, ...rbac },
         include: {
           user: { select: { name: true } },
           transactions: true,
