@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { money, paginationQuery } from './common.js';
-import { FinancialAccountType, FinancialAccountStatus } from '../enums.js';
+import { FinancialAccountType, FinancialAccountStatus, CashRegisterType } from '../enums.js';
 
 export const createFinancialAccountSchema = z.object({
   type: FinancialAccountType, // PAYABLE | RECEIVABLE
@@ -17,11 +17,17 @@ export type CreateFinancialAccountInput = z.infer<typeof createFinancialAccountS
  *  - `amount` omitido baixa o saldo restante (quitação total).
  *  - `settleInFull` quita o título mesmo quando o valor pago é menor que o
  *    saldo (ex.: desconto concedido na negociação).
+ *  - `targetRegisterType` (DIARIO/BANCO) é obrigatório: define em qual caixa
+ *    aberto do usuário logado a `CashTransaction` de compensação é lançada —
+ *    substitui o antigo lookup implícito (primeiro caixa aberto encontrado),
+ *    ambíguo desde que passou a ser possível ter os dois tipos abertos ao
+ *    mesmo tempo.
  */
 export const settleAccountSchema = z.object({
   amount: money.optional(),
   settleInFull: z.boolean().default(false),
   paidAt: z.coerce.date().default(() => new Date()),
+  targetRegisterType: CashRegisterType,
 });
 export type SettleAccountInput = z.infer<typeof settleAccountSchema>;
 

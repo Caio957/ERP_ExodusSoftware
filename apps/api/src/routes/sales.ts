@@ -108,7 +108,7 @@ export async function saleRoutes(app: FastifyInstance) {
       schema: { params: z.object({ id: z.string().uuid() }), body: updateSaleSchema },
     },
     async (req) => {
-      const sale = await updateSale(req.params.id, req.body);
+      const sale = await updateSale(req.params.id, req.body, req.user.sub);
       return serializeDecimals(sale);
     },
   );

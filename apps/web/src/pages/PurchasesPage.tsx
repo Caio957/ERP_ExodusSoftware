@@ -17,6 +17,7 @@ import {
   RotateCcw,
   ShieldAlert,
   Pencil,
+  Ban,
   ChevronLeft,
   ChevronRight,
   ArrowUp,
@@ -1317,18 +1318,6 @@ function ViewPurchaseModal({
               <div className="rounded-xl border border-slate-200 p-3">
                 <div className="mb-2 flex items-center justify-between">
                   <span className="font-semibold text-sm">Contas a pagar</span>
-                  {hasFinancial && !hasPaid && (
-                    <button
-                      className="text-xs font-semibold text-rose-600 hover:underline disabled:opacity-50"
-                      disabled={deleteFinancial.isPending}
-                      onClick={() => {
-                        if (window.confirm('Excluir todos os títulos a pagar pendentes desta compra?'))
-                          deleteFinancial.mutate();
-                      }}
-                    >
-                      Excluir financeiro
-                    </button>
-                  )}
                   {!hasFinancial && !refazerMode && (
                     <button className="text-xs font-semibold text-brand-600 hover:underline" onClick={() => setRefazerMode(true)}>
                       Gerar financeiro
@@ -1393,6 +1382,27 @@ function ViewPurchaseModal({
             >
               <Trash2 className="h-4 w-4" /> Excluir
             </button>
+            {hasFinancial && (
+              <button
+                className="inline-flex items-center gap-1 rounded-xl border border-rose-300 bg-white px-3 py-2 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={deleteFinancial.isPending || hasPaid}
+                title={
+                  hasPaid
+                    ? 'Existem parcelas já baixadas. Estorne as baixas no Financeiro primeiro para poder excluir.'
+                    : 'Excluir financeiro'
+                }
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      'Deseja realmente excluir o financeiro desta compra? Isso removerá as contas a pagar pendentes.',
+                    )
+                  )
+                    deleteFinancial.mutate();
+                }}
+              >
+                <Ban className="h-4 w-4" /> Excluir financeiro
+              </button>
+            )}
             <button
               className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
               disabled={hasFinancial}

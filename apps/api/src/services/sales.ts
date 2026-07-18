@@ -160,13 +160,31 @@ export async function createSale(input: CreateSaleInput, userId: string) {
  *  2) remove o financeiro vinculado à venda (contas a receber),
  *  3) regrava itens + baixa de estoque e recalcula os totais,
  *  4) recria as formas de pagamento (split) e — se "A prazo" — as contas a receber.
- * Editar a venda sempre regenera o financeiro (financialGenerated = true).
+ * Editar a venda sempre regenera o financeiro (financialGenerated = true). Se
+ * `input.targetRegisterType` for informado, a venda também é realocada para o
+ * caixa aberto daquele tipo (DIARIO/BANCO) do usuário logado (`userId`) —
+ * mesmo mecanismo de `setSaleFinancialGenerated`, usado aqui pelo Mini-PDV de
+ * edição (`EditSaleModal`, sempre recria o financeiro ao salvar).
  * Tudo em uma única transação para não deixar dados inconsistentes.
  */
-export async function updateSale(saleId: string, input: UpdateSaleInput) {
+export async function updateSale(saleId: string, input: UpdateSaleInput, userId: string) {
   return prisma.$transaction(async (tx) => {
     const old = await tx.sale.findUnique({ where: { id: saleId }, include: { items: true } });
     if (!old) throw new NotFoundError('Venda');
+
+    let cashRegisterId: string | undefined;
+    if (input.targetRegisterType) {
+      const targetRegister = await tx.cashRegister.findFirst({
+        where: { userId, status: 'OPEN', type: input.targetRegisterType },
+      });
+      if (!targetRegister) {
+        throw new AppError(
+          400,
+          `Não há um caixa ${input.targetRegisterType === 'DIARIO' ? 'Físico' : 'Conta Banco'} aberto para o usuário logado.`,
+        );
+      }
+      cashRegisterId = targetRegister.id;
+    }
 
     // 1. Estorna o estoque dos itens antigos.
     for (const it of old.items) {
@@ -259,6 +277,7 @@ export async function updateSale(saleId: string, input: UpdateSaleInput) {
         totalAmount: total,
         notes: input.notes ?? null,
         financialGenerated: true,
+        ...(cashRegisterId ? { cashRegisterId } : {}),
         payments: { create: payments.map((p) => ({ method: p.method, amount: p.amount })) },
       },
       include: { items: true, payments: true },
