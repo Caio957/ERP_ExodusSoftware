@@ -7,7 +7,9 @@ import {
   createInstallmentsSchema,
   updateFinancialAccountSchema,
   settleAccountSchema,
+  reverseAccountSchema,
   listFinancialQuerySchema,
+  type CashRegisterType,
 } from '@exodus/shared';
 import { prisma } from '../lib/prisma.js';
 import { serializeDecimals } from '../lib/serialize.js';
@@ -28,14 +30,25 @@ function todayStartBr(): Date {
 }
 
 /**
- * Garante que o operador logado tem um caixa aberto antes de mexer em dinheiro
- * (baixa/estorno) — sem caixa aberto não há onde registrar a `CashTransaction`
- * de compensação.
+ * Garante que o operador logado tem, especificamente, o caixa do tipo
+ * escolhido (DIARIO/BANCO) aberto antes de mexer em dinheiro (baixa/estorno)
+ * — sem esse caixa aberto não há onde registrar a `CashTransaction` de
+ * compensação. Substitui o antigo `requireOpenRegister` (pegava o primeiro
+ * caixa aberto que encontrasse, sem distinguir tipo — ambíguo desde que
+ * passou a ser possível ter DIARIO e BANCO abertos ao mesmo tempo para o
+ * mesmo operador).
  */
-async function requireOpenRegister(tx: Prisma.TransactionClient, userId: string) {
-  const register = await tx.cashRegister.findFirst({ where: { userId, status: 'OPEN' } });
+async function requireRegisterOfType(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  type: CashRegisterType,
+) {
+  const register = await tx.cashRegister.findFirst({ where: { userId, status: 'OPEN', type } });
   if (!register) {
-    throw new AppError(400, 'É necessário ter um caixa aberto para realizar baixas financeiras.');
+    throw new AppError(
+      400,
+      `Não há um caixa ${type === 'DIARIO' ? 'Físico' : 'Conta Banco'} aberto para o usuário logado.`,
+    );
   }
   return register;
 }
@@ -191,7 +204,7 @@ export async function financialRoutes(app: FastifyInstance) {
     { preHandler: app.authorize(['ADMIN']), schema: { params: idParam, body: settleAccountSchema } },
     async (req) => {
       return prisma.$transaction(async (tx) => {
-        const openRegister = await requireOpenRegister(tx, req.user.sub);
+        const openRegister = await requireRegisterOfType(tx, req.user.sub, req.body.targetRegisterType);
 
         const account = await tx.financialAccount.findUnique({
           where: { id: req.params.id },
@@ -237,10 +250,10 @@ export async function financialRoutes(app: FastifyInstance) {
   // Estorno: remove a ÚLTIMA baixa e recalcula o status (E2).
   r.post(
     '/:id/reverse',
-    { preHandler: app.authorize(['ADMIN']), schema: { params: idParam } },
+    { preHandler: app.authorize(['ADMIN']), schema: { params: idParam, body: reverseAccountSchema } },
     async (req) => {
       return prisma.$transaction(async (tx) => {
-        const openRegister = await requireOpenRegister(tx, req.user.sub);
+        const openRegister = await requireRegisterOfType(tx, req.user.sub, req.body.targetRegisterType);
 
         const account = await tx.financialAccount.findUnique({
           where: { id: req.params.id },

@@ -19,6 +19,7 @@ import {
   ArrowUp,
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
+import { RegisterSelectionModal } from '../components/RegisterSelectionModal';
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -72,6 +73,18 @@ export function FinancialPage() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Account | null>(null);
   const [settling, setSettling] = useState<Account | null>(null);
+  // Estorno também precisa escolher o caixa de destino da CashTransaction
+  // compensatória (mesmo motivo da baixa) — guarda o título sendo estornado
+  // até o operador confirmar o caixa no RegisterSelectionModal.
+  const [reversing, setReversing] = useState<Account | null>(null);
+  const { data: registerDiario } = useQuery({
+    queryKey: ['cash-current', 'DIARIO'],
+    queryFn: () => api.get<{ id: string } | null>('/api/cash/current?type=DIARIO'),
+  });
+  const { data: registerBanco } = useQuery({
+    queryKey: ['cash-current', 'BANCO'],
+    queryFn: () => api.get<{ id: string } | null>('/api/cash/current?type=BANCO'),
+  });
 
   // Troca de filtro/tipo/ordenação/tamanho de página volta para a primeira página.
   const changeType = (t: AccountType) => { setType(t); setPage(1); };
@@ -107,7 +120,8 @@ export function FinancialPage() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ['financial'] });
 
   const reverse = useMutation({
-    mutationFn: (id: string) => api.post(`/api/financial/${id}/reverse`, {}),
+    mutationFn: ({ id, targetRegisterType }: { id: string; targetRegisterType: 'DIARIO' | 'BANCO' }) =>
+      api.post(`/api/financial/${id}/reverse`, { targetRegisterType }),
     onSuccess: invalidate,
     onError: (e) => window.alert(e instanceof ApiError ? e.message : 'Falha ao estornar'),
   });
@@ -275,9 +289,7 @@ export function FinancialPage() {
                         {hasSettlement && (
                           <button
                             className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition hover:bg-amber-50 hover:text-amber-600"
-                            onClick={() => {
-                              if (window.confirm('Estornar a última baixa deste título?')) reverse.mutate(a.id);
-                            }}
+                            onClick={() => setReversing(a)}
                             title="Estornar última baixa"
                           >
                             <RotateCcw className="h-4 w-4" />
@@ -376,6 +388,19 @@ export function FinancialPage() {
       )}
       {settling && (
         <SettleModal account={settling} onClose={() => setSettling(null)} onDone={() => { setSettling(null); invalidate(); }} />
+      )}
+      {reversing && (
+        <RegisterSelectionModal
+          defaultType="DIARIO"
+          diarioAvailable={!!registerDiario}
+          bancoAvailable={!!registerBanco}
+          onClose={() => setReversing(null)}
+          onConfirm={(type) => {
+            const id = reversing.id;
+            setReversing(null);
+            reverse.mutate({ id, targetRegisterType: type });
+          }}
+        />
       )}
 
       <ScrollToTopButton />
@@ -544,8 +569,32 @@ function SettleModal({ account, onClose, onDone }: { account: Account; onClose: 
   const val = parseFloat(amount.replace(',', '.')) || 0;
   const isPartial = val > 0 && val < saldo;
 
+  // Baixa também precisa escolher o caixa de destino da CashTransaction de
+  // compensação (mesmo mecanismo do estorno, do "Gerar financeiro" de Vendas
+  // e do checkout do PDV) — abre o RegisterSelectionModal em vez de baixar
+  // direto. `SettleModal` não tem (nem nunca teve) um seletor de forma de
+  // pagamento — a baixa de um título não registra "método" — então não há
+  // como sugerir DIARIO/BANCO pela forma escolhida; o padrão do projeto para
+  // esse caso (nenhum sinal forte disponível) é DIARIO, igual ao fallback já
+  // usado no checkout do PDV e nos defaults de `openCashSchema`/
+  // `cashRegisterTypeQuerySchema`.
+  const [showRegisterModal, setShowRegisterModal] = useState(false);
+  const { data: registerDiario } = useQuery({
+    queryKey: ['cash-current', 'DIARIO'],
+    queryFn: () => api.get<{ id: string } | null>('/api/cash/current?type=DIARIO'),
+  });
+  const { data: registerBanco } = useQuery({
+    queryKey: ['cash-current', 'BANCO'],
+    queryFn: () => api.get<{ id: string } | null>('/api/cash/current?type=BANCO'),
+  });
+
   const settle = useMutation({
-    mutationFn: () => api.post(`/api/financial/${account.id}/settle`, { amount: val, settleInFull: isPartial ? settleInFull : false }),
+    mutationFn: (targetRegisterType: 'DIARIO' | 'BANCO') =>
+      api.post(`/api/financial/${account.id}/settle`, {
+        amount: val,
+        settleInFull: isPartial ? settleInFull : false,
+        targetRegisterType,
+      }),
     onSuccess: onDone,
     onError: (e) => window.alert(e instanceof ApiError ? e.message : 'Falha na baixa'),
   });
@@ -598,11 +647,27 @@ function SettleModal({ account, onClose, onDone }: { account: Account; onClose: 
 
         <footer className="shrink-0 flex items-center justify-end gap-2 border-t border-slate-200 p-4 bg-slate-50">
           <button className="btn-ghost" onClick={onClose}>Cancelar</button>
-          <button className="btn-primary" disabled={settle.isPending || val <= 0 || val > saldo + 0.001} onClick={() => settle.mutate()}>
+          <button
+            className="btn-primary"
+            disabled={settle.isPending || val <= 0 || val > saldo + 0.001}
+            onClick={() => setShowRegisterModal(true)}
+          >
             {settle.isPending ? 'Baixando...' : isPartial && !settleInFull ? 'Baixar parcial' : 'Confirmar baixa'}
           </button>
         </footer>
       </div>
+      {showRegisterModal && (
+        <RegisterSelectionModal
+          defaultType="DIARIO"
+          diarioAvailable={!!registerDiario}
+          bancoAvailable={!!registerBanco}
+          onClose={() => setShowRegisterModal(false)}
+          onConfirm={(type) => {
+            setShowRegisterModal(false);
+            settle.mutate(type);
+          }}
+        />
+      )}
     </div>,
     document.body,
   );

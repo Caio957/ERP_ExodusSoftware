@@ -102,7 +102,7 @@ function saleTimelineEntries(
 /** Caixa esperado = inicial + suprimentos - sangrias + recebimentos líquidos
  *  do tipo de caixa (dinheiro em espécie no DIARIO; tudo exceto A_PRAZO no
  *  BANCO). Baixas do Financeiro já entram via CashTransaction SUPPLY/BLEED
- *  (`requireOpenRegister`, routes/financial.ts) — esse model não tem campo
+ *  (`requireRegisterOfType`, routes/financial.ts) — esse model não tem campo
  *  `method`, então já é agnóstico ao tipo de caixa, sem precisar de filtro
  *  aqui. */
 async function computeExpectedCash(cashRegisterId: string) {
