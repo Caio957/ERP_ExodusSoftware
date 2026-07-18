@@ -894,6 +894,19 @@ function EditSaleModal({
   const [firstDue, setFirstDue] = useState(() => new Date().toISOString().slice(0, 10));
   const [intervalDays, setIntervalDays] = useState(30);
   const [localError, setLocalError] = useState<string | null>(null);
+  // Seleção de destino financeiro (Caixa Físico vs Conta Banco) ao salvar —
+  // a edição sempre recria o financeiro, então segue o mesmo padrão do PDV/
+  // "Gerar financeiro" (ViewSaleModal): pergunta em qual caixa creditar antes
+  // de confirmar. `null` = fechado (mesmo padrão de `changeConfig`, abaixo).
+  const [registerSelection, setRegisterSelection] = useState<{ defaultType: 'DIARIO' | 'BANCO' } | null>(null);
+  const { data: registerDiario } = useQuery({
+    queryKey: ['cash-current', 'DIARIO'],
+    queryFn: () => api.get<{ id: string } | null>('/api/cash/current?type=DIARIO'),
+  });
+  const { data: registerBanco } = useQuery({
+    queryKey: ['cash-current', 'BANCO'],
+    queryFn: () => api.get<{ id: string } | null>('/api/cash/current?type=BANCO'),
+  });
 
   // Cliente padrão configurado em Configurações → Vendas — usado como
   // fallback no lugar do antigo "Balcão" quando nenhum cliente é selecionado.
@@ -972,7 +985,7 @@ function EditSaleModal({
   }
 
   const save = useMutation({
-    mutationFn: () =>
+    mutationFn: (targetRegisterType?: 'DIARIO' | 'BANCO') =>
       api.put(`/api/sales/${saleId}`, {
         paymentMethod,
         // Sem cliente selecionado: usa o cliente padrão configurado em vez
@@ -982,6 +995,7 @@ function EditSaleModal({
         discount: round2(discount),
         surcharge: round2(surcharge),
         notes: notes.trim() || undefined,
+        targetRegisterType,
         ...(isAprazo
           ? {
               payments: [{ method: 'A_PRAZO', amount: total }],
@@ -993,28 +1007,30 @@ function EditSaleModal({
     onError: (e) => window.alert(e instanceof ApiError ? e.message : 'Falha ao salvar'),
   });
 
-  function executeSave() {
+  function executeSave(targetRegisterType?: 'DIARIO' | 'BANCO') {
     setLocalError(null);
     if (items.length === 0) return setLocalError('A venda precisa de ao menos um item.');
     if (isAprazo && !client) return setLocalError('Venda a prazo exige um cliente.');
-    save.mutate();
+    save.mutate(targetRegisterType);
   }
 
-  // Intercepta o clique em "Salvar alterações": se o pagamento for em
-  // dinheiro, abre a calculadora de troco (mesmo fluxo maduro do PDV) antes
-  // de disparar a API; caso contrário, pede confirmação padrão.
+  // Intercepta o clique em "Salvar alterações": a edição sempre recria o
+  // financeiro (services/sales.ts: updateSale), então segue o mesmo padrão do
+  // PDV/"Gerar financeiro" — pergunta em qual caixa creditar antes de
+  // confirmar, em vez do antigo window.confirm genérico. Pagamento em
+  // dinheiro passa primeiro pela calculadora de troco (fluxo maduro do PDV);
+  // só depois de confirmado o troco é que o RegisterSelectionModal abre.
   function handleSaveClick() {
     if (items.length === 0) {
       setLocalError('A venda precisa de ao menos um item.');
       return;
     }
+    const defaultType: 'DIARIO' | 'BANCO' = paymentMethod === 'CASH' ? 'DIARIO' : 'BANCO';
     if (paymentMethod === 'CASH') {
-      setChangeConfig({ amount: total, onConfirm: executeSave });
+      setChangeConfig({ amount: total, onConfirm: () => setRegisterSelection({ defaultType }) });
       return;
     }
-    if (window.confirm('Deseja realmente salvar as alterações desta venda?')) {
-      executeSave();
-    }
+    setRegisterSelection({ defaultType });
   }
 
   // Guarda de segurança: bloqueia a edição se a venda ainda tiver financeiro
@@ -1296,6 +1312,18 @@ function EditSaleModal({
         onConfirm={() => {
           setChangeConfig(null);
           changeConfig.onConfirm();
+        }}
+      />
+    )}
+    {registerSelection && (
+      <RegisterSelectionModal
+        defaultType={registerSelection.defaultType}
+        diarioAvailable={!!registerDiario}
+        bancoAvailable={!!registerBanco}
+        onClose={() => setRegisterSelection(null)}
+        onConfirm={(type) => {
+          setRegisterSelection(null);
+          executeSave(type);
         }}
       />
     )}

@@ -84,6 +84,13 @@ export const updateSaleSchema = z.object({
   payments: z.array(salePaymentSchema).optional(),
   /** Parcelas da parte "A prazo" (contas a receber). Exige clientId. */
   installments: z.array(saleInstallmentSchema).optional(),
+  /**
+   * Caixa de destino do financeiro recriado pela edição (DIARIO/BANCO).
+   * Opcional: quando informado, move a venda para o caixa aberto do usuário
+   * logado daquele tipo antes de regravar o financeiro (mesmo mecanismo de
+   * `regenerateSaleFinancialSchema`, usado aqui pelo Mini-PDV de edição).
+   */
+  targetRegisterType: CashRegisterType.optional(),
 });
 export type UpdateSaleInput = z.infer<typeof updateSaleSchema>;
 
