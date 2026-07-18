@@ -32,16 +32,6 @@ export const settleAccountSchema = z.object({
 export type SettleAccountInput = z.infer<typeof settleAccountSchema>;
 
 /**
- * Estorno da última baixa de um título — exige o mesmo `targetRegisterType`
- * da baixa (o estorno cria uma nova `CashTransaction` compensatória, então
- * também precisa saber em qual livro lançar).
- */
-export const reverseAccountSchema = z.object({
-  targetRegisterType: CashRegisterType,
-});
-export type ReverseAccountInput = z.infer<typeof reverseAccountSchema>;
-
-/**
  * Lançamento manual com geração de parcelas. O valor total é dividido em N
  * parcelas (a última absorve o arredondamento) com vencimentos espaçados por
  * `intervalDays` a partir do primeiro vencimento.

@@ -73,18 +73,6 @@ export function FinancialPage() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Account | null>(null);
   const [settling, setSettling] = useState<Account | null>(null);
-  // Estorno também precisa escolher o caixa de destino da CashTransaction
-  // compensatória (mesmo motivo da baixa) — guarda o título sendo estornado
-  // até o operador confirmar o caixa no RegisterSelectionModal.
-  const [reversing, setReversing] = useState<Account | null>(null);
-  const { data: registerDiario } = useQuery({
-    queryKey: ['cash-current', 'DIARIO'],
-    queryFn: () => api.get<{ id: string } | null>('/api/cash/current?type=DIARIO'),
-  });
-  const { data: registerBanco } = useQuery({
-    queryKey: ['cash-current', 'BANCO'],
-    queryFn: () => api.get<{ id: string } | null>('/api/cash/current?type=BANCO'),
-  });
 
   // Troca de filtro/tipo/ordenação/tamanho de página volta para a primeira página.
   const changeType = (t: AccountType) => { setType(t); setPage(1); };
@@ -120,8 +108,7 @@ export function FinancialPage() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ['financial'] });
 
   const reverse = useMutation({
-    mutationFn: ({ id, targetRegisterType }: { id: string; targetRegisterType: 'DIARIO' | 'BANCO' }) =>
-      api.post(`/api/financial/${id}/reverse`, { targetRegisterType }),
+    mutationFn: (id: string) => api.post(`/api/financial/${id}/reverse`, {}),
     onSuccess: invalidate,
     onError: (e) => window.alert(e instanceof ApiError ? e.message : 'Falha ao estornar'),
   });
@@ -289,7 +276,9 @@ export function FinancialPage() {
                         {hasSettlement && (
                           <button
                             className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition hover:bg-amber-50 hover:text-amber-600"
-                            onClick={() => setReversing(a)}
+                            onClick={() => {
+                              if (window.confirm('Deseja realmente estornar a última baixa?')) reverse.mutate(a.id);
+                            }}
                             title="Estornar última baixa"
                           >
                             <RotateCcw className="h-4 w-4" />
@@ -388,19 +377,6 @@ export function FinancialPage() {
       )}
       {settling && (
         <SettleModal account={settling} onClose={() => setSettling(null)} onDone={() => { setSettling(null); invalidate(); }} />
-      )}
-      {reversing && (
-        <RegisterSelectionModal
-          defaultType="DIARIO"
-          diarioAvailable={!!registerDiario}
-          bancoAvailable={!!registerBanco}
-          onClose={() => setReversing(null)}
-          onConfirm={(type) => {
-            const id = reversing.id;
-            setReversing(null);
-            reverse.mutate({ id, targetRegisterType: type });
-          }}
-        />
       )}
 
       <ScrollToTopButton />

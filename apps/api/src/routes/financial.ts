@@ -7,7 +7,6 @@ import {
   createInstallmentsSchema,
   updateFinancialAccountSchema,
   settleAccountSchema,
-  reverseAccountSchema,
   listFinancialQuerySchema,
   type CashRegisterType,
 } from '@exodus/shared';
@@ -51,6 +50,42 @@ async function requireRegisterOfType(
     );
   }
   return register;
+}
+
+/**
+ * Descobre em qual TIPO de caixa (DIARIO/BANCO) uma baixa foi originalmente
+ * lançada — o estorno precisa sair do mesmo "livro" onde o dinheiro entrou,
+ * nunca de um escolhido livremente pelo operador (principio de partidas
+ * dobradas: perguntar abriria margem para furo contábil). `AccountSettlement`
+ * não tem FK direta para `CashTransaction` (o `/settle` grava as duas em
+ * paralelo, sem vínculo formal no schema) — a correlação é feita pela
+ * assinatura exata que o `/settle` sempre grava para a baixa: mesma descrição
+ * (`Baixa: {descrição do título}`), mesmo valor e mesmo `type` (SUPPLY para
+ * RECEIVABLE, BLEED para PAYABLE). `orderBy: createdAt desc` porque estamos
+ * sempre estornando a baixa mais recente do título — a `CashTransaction` mais
+ * recente com essa assinatura é a correspondente.
+ */
+async function findOriginalRegisterType(
+  tx: Prisma.TransactionClient,
+  account: { type: string; description: string },
+  settlement: { amount: Prisma.Decimal },
+): Promise<CashRegisterType> {
+  const original = await tx.cashTransaction.findFirst({
+    where: {
+      description: `Baixa: ${account.description}`,
+      amount: settlement.amount,
+      type: account.type === 'RECEIVABLE' ? 'SUPPLY' : 'BLEED',
+    },
+    orderBy: { createdAt: 'desc' },
+    include: { cashRegister: { select: { type: true } } },
+  });
+  if (!original) {
+    throw new AppError(
+      400,
+      'Não foi possível identificar o caixa onde esta baixa foi originalmente lançada.',
+    );
+  }
+  return original.cashRegister.type as CashRegisterType;
 }
 
 export async function financialRoutes(app: FastifyInstance) {
@@ -247,14 +282,15 @@ export async function financialRoutes(app: FastifyInstance) {
     },
   );
 
-  // Estorno: remove a ÚLTIMA baixa e recalcula o status (E2).
+  // Estorno: remove a ÚLTIMA baixa e recalcula o status (E2). O caixa de
+  // destino da compensação NÃO é escolhido pelo operador — é inferido a
+  // partir de onde a baixa original entrou (findOriginalRegisterType), para
+  // preservar a rastreabilidade contábil (partidas dobradas).
   r.post(
     '/:id/reverse',
-    { preHandler: app.authorize(['ADMIN']), schema: { params: idParam, body: reverseAccountSchema } },
+    { preHandler: app.authorize(['ADMIN']), schema: { params: idParam } },
     async (req) => {
       return prisma.$transaction(async (tx) => {
-        const openRegister = await requireRegisterOfType(tx, req.user.sub, req.body.targetRegisterType);
-
         const account = await tx.financialAccount.findUnique({
           where: { id: req.params.id },
           include: { settlements: { orderBy: { createdAt: 'desc' } } },
@@ -262,6 +298,9 @@ export async function financialRoutes(app: FastifyInstance) {
         if (!account) throw new NotFoundError('Lançamento');
         const last = account.settlements[0];
         if (!last) throw new BusinessError('Não há baixa para estornar');
+
+        const originalType = await findOriginalRegisterType(tx, account, last);
+        const openRegister = await requireRegisterOfType(tx, req.user.sub, originalType);
 
         await tx.accountSettlement.delete({ where: { id: last.id } });
 
