@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-07-15
+- **Última atualização:** 2026-07-16
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -44,12 +44,18 @@
   importação de XML, e frete/despesas editáveis também no fluxo de XML — ver Onda
   2026-07-12/13 em §11) e ✅ **`feature/conta-banco` mesclada via PR #21** (`1862448`,
   2026-07-15 — separação Caixa Físico (DIARIO) / Conta Banco (BANCO) reaproveitando a
-  tabela `CashRegister` existente, ver Onda 2026-07-15 em §11) — ver §11 para o
-  histórico completo de commits de todas.
-  **`main` e `origin/main` estão em sincronia em `1862448`.** Nenhuma branch de feature
-  ativa no momento — a próxima onda de trabalho (propagar o seletor de caixa
-  Físico/Banco para o módulo Financeiro, ver §12/§14) deve criar uma nova
-  `feature/*`/`fix/*`/`refinamento-*` a partir daqui.
+  tabela `CashRegister` existente, ver Onda 2026-07-15 em §11) e ✅ **`feature/pdv-
+  selecao-caixa` mesclada via PR #22** (`e708158`, 2026-07-16 — propaga o seletor
+  Caixa Físico/Conta Banco para o PDV e para Vendas: seleção de destino no checkout,
+  cálculo de saldo condicional por tipo, rastreabilidade de caixa + injeção virtual de
+  estorno na timeline, e seleção de destino ao recriar o financeiro de uma venda; ver
+  Onda 2026-07-15/16 em §11) — ver §11 para o histórico completo de commits de todas.
+  **`main` e `origin/main` estão em sincronia em `e708158`.** Nenhuma branch de
+  feature ativa no momento — a próxima onda de trabalho (propagar o mesmo seletor
+  para o módulo Financeiro propriamente dito — `/financial/:id/settle`/`/reverse`,
+  `NewEntryModal`/`SettleModal` em `FinancialPage.tsx` — ver §12 item 17/§14.1, que
+  **continua em aberto**) deve criar uma nova `feature/*`/`fix/*`/`refinamento-*` a
+  partir daqui.
   ⚠️ **Padrão observado na rodada de correções de impressão (PRs #14→#16)**: cada uma das 3 PRs
   seguidas (#14→#16) tentou resolver o mesmo sintoma relatado pelo Comandante (página em
   branco/layout quebrado ao imprimir no Android) com uma causa raiz diferente — cada
@@ -210,6 +216,20 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   (`ADMIN` vê tudo; `CASHIER` só `Sale.userId === req.user.sub`) na listagem;
   `GET /:id` retorna 403 se o dono não bater (checado após o fetch, já que
   `findUnique` só aceita campo com constraint única no `where`).
+  **Rastreabilidade de caixa + realocação dinâmica** (onda 2026-07-15/16 — ver
+  §11): `GET /:id` inclui `cashRegister: { select: { type } } }` (exibido como
+  `RegisterTypeBadge` no `ViewSaleModal`). `POST /:id/financial` (regerar
+  financeiro) aceita `targetRegisterType: 'DIARIO'|'BANCO'` opcional
+  (`regenerateSaleFinancialSchema`, shared): quando informado, busca o
+  `CashRegister` `OPEN` daquele tipo do usuário logado (`findFirst({userId,
+  status:'OPEN',type})`, mesmo padrão de `requireOpenRegister` em
+  `financial.ts`), lança `AppError(400)` se não achar, e move
+  `Sale.cashRegisterId` para o caixa encontrado na mesma transação que reativa
+  `financialGenerated` — o lançamento some da timeline do caixa antigo e passa a
+  contar na do novo automaticamente (todo o resto — `expectedCash`,
+  `/movements`, `/report` — já era escopado por `cashRegisterId`).
+  `SalePayment` não referencia caixa nenhum (só `saleId`), então mover o
+  `cashRegisterId` da venda basta — não há "pagamentos" para recriar.
 - ✅ **Caixa**: abrir, sangria/suprimento, fechar; `/current` com `expectedCash`
   (somado por `SalePayment` em dinheiro); **`/cash/registers`** (histórico),
   **`/cash/:id/movements`** (timeline vendas+manuais), **`PUT/DELETE /cash/transactions/:id`**
@@ -240,6 +260,25 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   **escopa a checagem de "já aberto" por tipo** — um operador pode ter um caixa
   físico e uma conta banco abertos ao mesmo tempo (são livros independentes);
   só não pode abrir dois do mesmo tipo.
+  **Cálculo de saldo condicional por tipo** (`liquidPaymentFilter(registerType)`,
+  onda 2026-07-15 — ver §11): `computeExpectedCash` (`/current`, `/:id/close`,
+  `/:id/summary`) e o `cashInDrawer` de `/report` distinguem DIARIO (só
+  `method: 'CASH'` conta — gaveta física só soma dinheiro de verdade) de BANCO
+  (`method: { not: 'A_PRAZO' }` — PIX/débito/crédito contam como "líquido" da
+  conta, só "a prazo" fica de fora por virar conta a receber, não
+  caixa-equivalente). `AccountSettlement`/`CashTransaction` não precisaram do
+  mesmo tratamento — `CashTransaction` não tem coluna `method`, já era
+  agnóstica ao tipo do caixa.
+  **Injeção virtual de estorno na timeline** (`saleTimelineEntries(sale,
+  operator?)`, onda 2026-07-16 — ver §11): quando `Sale.financialGenerated`
+  é `false`, `GET /:id/movements` e `GET /report` passam a devolver, além da
+  entrada normal da venda, uma entrada **sintética** (`type: 'REVERSAL'` —
+  deliberadamente **não** `'BLEED'`, para não inflar a soma de sangrias que
+  `CashPrintButton` usa no recibo impresso de fechamento) com descrição
+  `"Estorno: Venda #{code}"`, timestamp `soldAt + 1ms` — não é uma
+  `CashTransaction` real gravada (evita dupla dedução), só um recurso visual
+  para o operador entender por que o saldo caiu quando o financeiro de uma
+  venda é excluído.
 - ✅ **Financeiro**: listar com **filtros avançados** — `orderBy`
   (`code`/`description`/`dueDate`/`amount`) + `orderDir`, e `statusFilter` semântico
   (`ALL`/`OPEN`/`OVERDUE`/`NOT_OVERDUE`/`PARTIAL`/`PAID`, este último com
@@ -305,6 +344,17 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   celular, que esmagava a folha A4 via `maxWidth:100%` do template antes do
   `@page` escalar); botões "Bobina"/"Papel A4" ficam `disabled` durante a janela
   assíncrona de medição + clonagem para o iframe de impressão, evitando cliques repetidos.
+  **Seleção de destino no checkout** (`RegisterSelectionModal`, componente
+  compartilhado em `components/`, onda 2026-07-15/16 — ver §11): venda que não
+  seja 100% "A prazo" abre esse modal antes de ser efetivamente registrada,
+  para o operador escolher Caixa Físico ou Conta Banco quando os dois estão
+  abertos ao mesmo tempo — sugestão inteligente por forma de pagamento
+  predominante (Dinheiro → Físico; PIX/Débito/Crédito/outras → Conta Banco,
+  com fallback para Físico se a Conta Banco sugerida não estiver aberta).
+  Venda 100% "A prazo" pula o modal silenciosamente (não gera lançamento de
+  caixa nenhum). A trava de entrada do PDV continua sendo só o Caixa Físico
+  aberto — a Conta Banco só é consultada para saber se está disponível como
+  destino no checkout.
 - 🟡 **Cadastros** (`/cadastros`, autenticado): CRUD de **clientes e fornecedores**
   (nome, CPF/CNPJ, telefone, e-mail, endereço) com exclusão protegida por origem.
   **Modal via React Portal** no mesmo padrão ouro de Produtos/Caixa (header com
@@ -378,6 +428,19 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   da data final via `T23:59:59`) e `sortField` (`code`/`date`/`items`) +
   `sortDir`, incorporados ao mesmo objeto `SalesFilterValues`/`updateFilter` já
   existente — "Limpar filtros" já reseta tudo de graça.
+  **Rastreabilidade + realocação de caixa** (onda 2026-07-15/16 — ver §11):
+  `ViewSaleModal` mostra `RegisterTypeBadge` ("Destino: Caixa Físico"/"Conta
+  Banco", ícone `Wallet`/`Landmark` — mesma convenção visual de `CashPage.tsx`/
+  `PdvPage.tsx`) ao lado do `FinancialBadge` quando a venda tem
+  `cashRegister` vinculado. **"Gerar financeiro" não dispara mais a mutation
+  direto** — abre o `RegisterSelectionModal` (mesmo componente compartilhado do
+  PDV, `components/RegisterSelectionModal.tsx`) para o operador escolher em
+  qual caixa a venda volta a contar quando tem os dois abertos; tipo sugerido
+  parte de `sale.cashRegister?.type` (fallback pela forma de pagamento). Ao
+  confirmar, `targetRegisterType` vai no corpo de `POST /:id/financial` — o
+  backend realoca `Sale.cashRegisterId`, então o lançamento some da timeline
+  do caixa antigo e aparece na do novo automaticamente. "Excluir financeiro"
+  não pede destino (não precisa).
 - ✅ **Produtos**: filtros (marca/grupo/subgrupo) + busca + **ordenação** (Descrição,
   Código, SKU, Preço de venda — crescente/decrescente via selects no painel de filtros);
   editar produto e variantes (asteriscos `*` também no modal Editar); excluir (com
@@ -451,6 +514,19 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   (`useEffect`) ao trocar o toggle, para não deixar o operador preso vendo o
   detalhe de um registro do tipo anterior enquanto a lista de trás já mudou de
   filtro. `POST /open` passa a enviar `type: registerType` no corpo.
+  **Rótulos condicionais por tipo de saldo** (onda 2026-07-15/16 — ver §11): a
+  aba "Caixa Atual" já distinguia "Saldo atual da conta"/"Saldo atual em
+  caixa"; o `SummaryCard` da aba "Relatório" (antes fixo em "Dinheiro em
+  gaveta") agora lê "Saldo em Conta" quando `registerType === 'BANCO'`, para
+  bater com o cálculo condicional do backend (`liquidPaymentFilter`, acima).
+  **Timeline com estorno virtual visível**: quando uma venda tem o financeiro
+  excluído, a linha sintética `type: 'REVERSAL'` injetada pelo backend aparece
+  como saída (vermelho/menos) tanto em `RegisterMovements` (Caixa Atual/
+  Histórico — nenhuma mudança necessária, o ícone/cor já caem no branch
+  genérico de "não-SUPPLY") quanto em `PeriodicReport` (precisou alargar o
+  `type === 'BLEED'` explícito para também casar com `REVERSAL`, e trocar o
+  rótulo fixo "Sangria" pela própria descrição do lançamento — "Estorno: Venda
+  #X" — nesse caso específico).
 - ✅ **Compras**: **aba "Sugestão de compra"** (`PurchaseSuggestion`, componente
   próprio) com filtros (marca/grupo/subgrupo/janela/reposição), **paginação
   client-side** + **scroll-to-top**, produto exibido como `#código - nome` com a
@@ -1880,6 +1956,125 @@ no Railway a cada deploy (`prisma migrate deploy`).
     produção** (push do PR #21 disparou o auto-deploy do Railway).
   `npm run typecheck` (shared+api+web) → **0 erros**.
 
+- ✅ **Onda 2026-07-15/16 — Propagação Caixa Físico/Conta Banco para PDV e
+  Vendas** (2026-07-15 a 2026-07-16): branch `feature/pdv-selecao-caixa`
+  (criada a partir da `main` pós-merge da PR #21) — **mesclada via PR #22**
+  (`e708158`, 2026-07-16). 5 commits (`8cd99a9`→`cd9b105`). Continuação
+  direta do §14.1 (propagar o
+  toggle da onda anterior para além da tela de Caixa) — cobre PDV e Vendas;
+  o Financeiro propriamente dito (`/financial/:id/settle`/`/reverse`,
+  `NewEntryModal`/`SettleModal`) **fica pendente para a próxima onda** (ver
+  §12 item 17). Nenhuma migração/mudança de schema nesta branch.
+  - **`8cd99a9`** (seleção de destino no checkout do PDV): **achado de
+    premissa** — a missão original propunha rotear a venda no backend por
+    `targetRegisterType` (`findFirst({userId, status:'OPEN'})`), mas
+    `createSale` já recebia `cashRegisterId` direto no payload e resolvia por
+    `findUnique({where:{id}})` — nunca fez lookup implícito, então não havia
+    nada para "rotear" no servidor; a lacuna era 100% frontend. `PdvPage.tsx`
+    passou a buscar também `/api/cash/current?type=BANCO`; `doSale` decide o
+    destino antes de `submitSale` (renomeado do antigo `doSale` monolítico):
+    venda 100% "A prazo" pula direto (sem lançamento de caixa); as demais
+    calculam a forma de pagamento dominante (por soma, cobre split) e abrem o
+    novo `RegisterSelectionModal` com sugestão inteligente (Dinheiro→Físico,
+    resto→Conta Banco, com fallback para Físico se a Conta Banco sugerida não
+    estiver aberta). Os três caminhos de finalização (pagamento rápido, modal
+    de confirmação, split) já convergiam para essa função, então um único
+    ponto de interceptação bastou. **Testado ao vivo**: com os dois caixas
+    abertos, `POST /api/sales` com `cashRegisterId` da Conta Banco criou a
+    venda corretamente atribuída a ela (confirmado via
+    `GET /cash/:id/movements`); venda de teste excluída depois.
+  - **`9e36a78`** (cálculo de saldo condicional por tipo): `computeExpectedCash`
+    filtrava `SalePayment` só por `method: 'CASH'` **incondicionalmente** —
+    uma Conta Banco nunca contava PIX/cartão no próprio saldo, mesmo esses
+    sendo o "dinheiro" daquele livro. Novo `liquidPaymentFilter(registerType)`:
+    DIARIO mantém a regra estrita (`method: 'CASH'`); BANCO passa a usar
+    `method: { not: 'A_PRAZO' }` (tudo entra, só "a prazo" fica de fora por
+    virar conta a receber, não caixa-equivalente). `AccountSettlement`/
+    `CashTransaction` **não precisaram do mesmo tratamento** — checado e
+    confirmado que `CashTransaction` não tem coluna `method`, então a
+    agregação já era agnóstica ao tipo de caixa. `GET /report`'s
+    `cashInDrawer` sofria do mesmo viés — corrigido com um `isLiquid(method)`
+    equivalente. Frontend: `SummaryCard` da aba Relatório (antes fixo em
+    "Dinheiro em gaveta") passou a ler "Saldo em Conta" quando
+    `registerType === 'BANCO'` (a aba Caixa Atual já tinha essa distinção de
+    uma onda anterior). **Testado ao vivo**: venda PIX vinculada ao BANCO
+    moveu `expectedCash` 410→670 (+260 exato); uma venda PIX de controle
+    vinculada ao DIARIO deixou o saldo físico intacto (360→360);
+    `GET /report?type=BANCO` bateu exatamente com `/current` (670). Vendas de
+    teste excluídas depois.
+  - **`3bdceee`** (rastreabilidade + investigação de bug inexistente): a
+    missão original alegava que excluir o financeiro de uma venda vinculada
+    ao BANCO não revertia o saldo corretamente — **premissa falsa**,
+    verificada ao vivo antes de tocar em qualquer código: `DELETE
+    /:id/financial` já só alterna `financialGenerated`, e a agregação de
+    `computeExpectedCash` já filtra por esse flag independente do tipo de
+    caixa (fix do commit anterior nesta mesma branch já cobria isso). Uma
+    venda PIX de teste no BANCO confirmou o ciclo exato: criar moveu
+    410→670, excluir o financeiro voltou para 410 em ponto, `cashRegisterId`
+    intacto. O que era real: `GET /sales/:id` não incluía `cashRegister`
+    (frontend não tinha como saber a qual caixa uma venda pertencia) e
+    `ViewSaleModal` não tinha indicador visual nenhum para isso — corrigido
+    com `cashRegister: { select: { type } } }` no include e um novo
+    `RegisterTypeBadge` (mesma convenção de ícone/cor de `CashPage.tsx`/
+    `PdvPage.tsx`) ao lado do `FinancialBadge`.
+  - **`239af17`** (injeção virtual de estorno na timeline): quando uma venda
+    tem o financeiro excluído, o saldo do caixa cai mas a timeline não
+    mostrava nenhum motivo visível — só a venda original (agora "sem
+    financeiro"), sem nenhuma linha explicando o porquê da queda. Novo
+    `saleTimelineEntries(sale, operator?)` (compartilhado por
+    `GET /:id/movements` e `GET /report`, substituindo `.map()`s quase
+    duplicados) injeta uma entrada sintética adicional quando
+    `financialGenerated === false` — **não é uma `CashTransaction` real**
+    (evita dupla dedução), só um objeto formatado para a UI. **Desvio
+    deliberado da missão**: o `type` sugerido era `'BLEED'`, mas
+    `CashPrintButton` (recibo impresso de fechamento) soma movimentos com um
+    filtro explícito `type === 'BLEED'` — usar o mesmo valor inflaria essa
+    soma com uma "sangria" fantasma no papel impresso. Usado `type:
+    'REVERSAL'` (valor distinto, automaticamente fora de todo filtro
+    `=== 'BLEED'` já existente); `PeriodicReport` precisou de um alargamento
+    pontual (`type === 'BLEED'` → também casa `REVERSAL`) e troca do rótulo
+    fixo "Sangria" pela descrição real do lançamento nesse caso
+    (`"Estorno: Venda #X"`); `RegisterMovements` não precisou de nenhuma
+    mudança (o ícone/cor já cai no branch genérico "não-SUPPLY"). Também:
+    `Sale` não tem `updatedAt` (só `createdAt`/`soldAt`) — o timestamp da
+    entrada virtual é `soldAt + 1ms` (marcador sintético de "logo depois",
+    não um evento real registrado). **Testado ao vivo**: venda PIX no BANCO
+    apareceu como uma entrada só; após excluir o financeiro, a mesma consulta
+    passou a trazer a venda (agora `financialGenerated: false`) **e** a
+    entrada virtual `REVERSAL` com a descrição/valor batendo — confirmado
+    também no timeline consolidado de `/report`.
+  - **`cd9b105`** (seleção de destino na recriação do financeiro de Vendas):
+    o botão "Gerar financeiro" (`ViewSaleModal`, `SalesPage.tsx`) sempre
+    recriava o financeiro no mesmo caixa de origem da venda. `RegisterSelectionModal`
+    **extraído** do PdvPage.tsx para `components/RegisterSelectionModal.tsx`
+    (componente global, mesmas props/convenção já usada em todo o app —
+    `onClose`, não `onCancel`; renderização condicional pelo pai, sem prop
+    `isOpen` — a sugestão de nomenclatura da missão foi adaptada ao padrão
+    real do codebase, não ao inverso); reaproveitado no PDV sem mudar
+    comportamento. Novo `regenerateSaleFinancialSchema` (shared,
+    `{ targetRegisterType: CashRegisterType.optional() }`) no body de
+    `POST /:id/financial`; `setSaleFinancialGenerated` passou a aceitar
+    `{ userId, targetRegisterType }` — quando informado, busca o
+    `CashRegister` `OPEN` daquele tipo do usuário logado (mesmo padrão
+    `findFirst` de `requireOpenRegister` em `financial.ts`), lança
+    `AppError(400)` se não achar, e move `Sale.cashRegisterId` na mesma
+    transação que reativa `financialGenerated`. **Achado de premissa**:
+    "recriar os pagamentos" (texto da missão) não corresponde a nenhum
+    comportamento real — `SalePayment` só referencia `saleId`, nunca um
+    caixa; mover só o `cashRegisterId` da venda já é suficiente, e é
+    exatamente isso que faz o lançamento sumir/aparecer nas timelines (todas
+    já escopadas por esse campo). `SalesPage.tsx`: clique em "Gerar
+    financeiro" agora abre o `RegisterSelectionModal` em vez de disparar a
+    mutation direto; tipo sugerido vem de `sale.cashRegister?.type` (fallback
+    pela forma de pagamento). **Testado ao vivo**: venda de teste de R$10 no
+    DIARIO — excluir financeiro tirou os R$10 do DIARIO (370→360); regerar
+    com destino BANCO moveu `cashRegisterId` para o caixa Conta Banco, manteve
+    o DIARIO em 360 e somou os R$10 no BANCO (430→440) — exatamente "some de
+    um caixa, aparece no outro". Venda de teste excluída ao final, saldos
+    restaurados.
+  `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros** em
+  todos os commits.
+
 ---
 
 ## 12. Pendências, bloqueios e dívidas técnicas
@@ -1930,18 +2125,34 @@ no Railway a cada deploy (`prisma migrate deploy`).
     usuário chama `window.print()`, sem depender de rasterização client-side.
     Botão do PDV renomeado para "📄 Imprimir / Salvar PDF (A4)" para deixar essa
     rota explícita ao operador. Não reabrir sem alinhamento novo do Comandante.
-17. **[PRIORIDADE] Propagar Caixa Físico/Conta Banco para o Financeiro**: o
-    toggle da Onda 2026-07-15 (§11) só existe hoje na tela de Caixa. `/financial/:id/settle`
-    e `/:id/reverse` (routes/financial.ts) exigem um `CashRegister` `OPEN` do
-    operador mas pegam o **primeiro que encontrarem** (implícito, sem
-    distinguir tipo) para criar a `CashTransaction` de compensação — com dois
-    caixas do mesmo operador abertos ao mesmo tempo (DIARIO + BANCO, agora
-    possível), essa escolha implícita fica ambígua. Da mesma forma, os
-    lançamentos manuais do Financeiro (`/installments`) e as telas de
-    pagamento/recebimento não têm hoje nenhum seletor de "em qual caixa isso
-    entra". Próxima onda: dar ao operador a opção explícita de escolher
-    Caixa Físico ou Conta Banco em toda tela do Financeiro que gera uma
-    `CashTransaction` — ver §14.1 para o detalhamento do plano.
+17. **[PRIORIDADE, PARCIALMENTE RESOLVIDO] Propagar Caixa Físico/Conta Banco
+    para o Financeiro**: a Onda 2026-07-15/16 (§11, branch
+    `feature/pdv-selecao-caixa`, **mesclada via PR #22**, `e708158`) já
+    propagou o toggle para o **PDV** (seleção de destino no checkout) e para
+    **Vendas** (badge de rastreabilidade no `ViewSaleModal` + seleção de
+    destino ao recriar o financeiro de uma venda via
+    `RegisterSelectionModal`, agora componente compartilhado em
+    `components/`). **O que ainda falta** (Financeiro propriamente dito):
+    - `/financial/:id/settle` e `/:id/reverse` (`requireOpenRegister` em
+      `routes/financial.ts:35`) continuam pegando o **primeiro** `CashRegister
+      OPEN` do operador via `findFirst` **sem filtrar por `type`** — com dois
+      caixas abertos ao mesmo tempo (cenário real desde a Onda 2026-07-15),
+      a escolha continua implícita/ambígua. Precisa de um parâmetro
+      `registerType` (ou `cashRegisterId` direto) vindo do frontend, mesmo
+      padrão de lookup já usado em `setSaleFinancialGenerated`
+      (`services/sales.ts`, onda 2026-07-16).
+    - `POST /financial/installments` (lançamento manual a pagar/receber):
+      ainda não toca no Caixa na criação (só na baixa), mas a tela devia
+      deixar claro desde já em qual "livro" aquele título vai refletir quando
+      for baixado.
+    - `FinancialPage.tsx` (`NewEntryModal`, `SettleModal`): ainda não têm o
+      `RegisterSelectionModal` — é reaproveitar o componente já compartilhado
+      (não duplicar).
+    - Ainda vale revisar se `PdvPage.tsx`/`SalesPage.tsx` (vendas em dinheiro/
+      PIX/etc. já geram `CashTransaction` implícita via `Sale.cashRegisterId`,
+      resolvido nesta onda) cobrem tudo, ou se falta algum caminho — a
+      decidir com o Comandante antes da próxima onda. Ver §14.1 para o
+      detalhamento do que resta.
 
 ---
 
@@ -1972,26 +2183,33 @@ Gostaríamos de análise crítica especialmente sobre:
 ### 14.1 Em andamento — pedido explícito do Comandante (PRIORIDADE)
 
 **Propagar o seletor Caixa Físico/Conta Banco (§11 Onda 2026-07-15) para o
-módulo Financeiro.** Toda tela do Financeiro que hoje gera uma
-`CashTransaction` de compensação precisa ganhar a opção explícita de escolher
-em qual caixa a movimentação entra:
+módulo Financeiro.** A Onda 2026-07-15/16 (branch `feature/pdv-selecao-caixa`,
+mesclada via PR #22, `e708158`) já resolveu a parte de **PDV** (seleção de
+destino no checkout) e **Vendas** (badge de rastreabilidade + seleção de
+destino ao recriar o financeiro). Falta o **Financeiro propriamente dito** —
+toda tela que hoje gera uma `CashTransaction` de compensação precisa ganhar a
+opção explícita de escolher em qual caixa a movimentação entra:
 
 - `POST /financial/:id/settle` e `/:id/reverse` (`requireOpenRegister` em
   `routes/financial.ts:35`): hoje pegam o primeiro `CashRegister OPEN` do
   operador via `findFirst` **sem filtrar por `type`** — com dois caixas abertos
-  ao mesmo tempo (cenário que passou a ser possível nesta mesma onda), a
+  ao mesmo tempo (cenário que passou a ser possível na Onda 2026-07-15), a
   escolha é implícita/ambígua. Precisa de um parâmetro `registerType` (ou
-  `cashRegisterId` direto) vindo do frontend.
+  `cashRegisterId` direto) vindo do frontend — mesmo padrão de lookup já
+  implementado em `setSaleFinancialGenerated` (`services/sales.ts`, onda
+  2026-07-16): `findFirst({userId, status:'OPEN', type})` +
+  `AppError(400)` se não achar.
 - `POST /financial/installments` (lançamento manual a pagar/receber): não
   toca no Caixa na criação (só na baixa), mas a tela devia deixar claro desde
   já em qual "livro" aquele título vai refletir quando for baixado.
-- `FinancialPage.tsx` (`NewEntryModal`, `SettleModal`): precisam do mesmo
-  `RegisterTypeToggle`/seletor já usado em `CashPage.tsx` — reaproveitar o
-  componente em vez de duplicar.
+- `FinancialPage.tsx` (`NewEntryModal`, `SettleModal`): precisam do
+  `RegisterSelectionModal` (já extraído para `components/
+  RegisterSelectionModal.tsx` na onda 2026-07-16, reaproveitado por PDV e
+  Vendas) — só falta importar e integrar aqui, sem duplicar componente.
 - Vale revisar se `PdvPage.tsx`/`SalesPage.tsx` (vendas em dinheiro/PIX/etc.
-  também geram `CashTransaction` implícita via `Sale.cashRegisterId`) precisam
-  do mesmo tratamento, ou se venda sempre é DIARIO por natureza (a decidir com
-  o Comandante).
+  já geram `CashTransaction` implícita via `Sale.cashRegisterId`, resolvido
+  na onda 2026-07-15/16) cobrem tudo, ou se falta algum caminho — a decidir
+  com o Comandante antes de iniciar esta próxima onda.
 
 ### 14.2 Maturidade/robustez (backlog de funcionalidades dos sócios: 100% concluído)
 
