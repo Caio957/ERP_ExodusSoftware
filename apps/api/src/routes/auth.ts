@@ -32,12 +32,19 @@ export async function authRoutes(app: FastifyInstance) {
       email: user.email,
       name: user.name,
       role: user.role as JwtPayload['role'],
+      companyId: user.companyId,
     };
     const token = await r.jwt.sign(payload);
 
     return {
       token,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        companyId: user.companyId,
+      },
     };
   });
 
@@ -56,13 +63,15 @@ export async function authRoutes(app: FastifyInstance) {
   );
 
   // GET /api/auth/me — retorna dados do usuário logado incluindo allowedPages
+  // e companyId sempre lidos frescos do banco (não confia na claim do JWT,
+  // que pode ter até 12h — mesmo raciocínio já aplicado a allowedPages).
   r.get('/me', { preHandler: app.authenticate }, async (req) => {
     const user = await prisma.user.findUnique({
       where: { id: req.user.sub },
-      select: { id: true, name: true, email: true, role: true, allowedPages: true },
+      select: { id: true, name: true, email: true, role: true, allowedPages: true, companyId: true },
     });
     if (!user) throw new UnauthorizedError('Usuário não encontrado');
-    return { ...req.user, allowedPages: user.allowedPages ?? null };
+    return { ...req.user, allowedPages: user.allowedPages ?? null, companyId: user.companyId };
   });
 
   // GET /api/auth/users — lista todos os usuários (ADMIN)
