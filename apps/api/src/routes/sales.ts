@@ -8,17 +8,18 @@ import {
   paginationQuery,
   regenerateSaleFinancialSchema,
 } from '@exodus/shared';
-import { prisma } from '../lib/prisma.js';
 import { serializeDecimals } from '../lib/serialize.js';
 import { createSale, updateSale, deleteSale, setSaleFinancialGenerated } from '../services/sales.js';
 import { ForbiddenError, NotFoundError } from '../lib/errors.js';
+import { tenantDb } from '../lib/tenant.js';
 
 export async function saleRoutes(app: FastifyInstance) {
   const r = app.withTypeProvider<ZodTypeProvider>();
 
   // Venda unitária (online)
   r.post('/', { preHandler: app.authenticate, schema: { body: createSaleSchema } }, async (req, reply) => {
-    const { sale, deduped } = await createSale(req.body, req.user.sub);
+    const { db, companyId } = tenantDb(req);
+    const { sale, deduped } = await createSale(db, companyId, req.body, req.user.sub);
     return reply.status(deduped ? 200 : 201).send(serializeDecimals(sale));
   });
 
@@ -32,10 +33,11 @@ export async function saleRoutes(app: FastifyInstance) {
     '/sync',
     { preHandler: app.authenticate, schema: { body: syncSalesSchema } },
     async (req) => {
+      const { db, companyId } = tenantDb(req);
       const results = [];
       for (const sale of req.body.sales) {
         try {
-          const { sale: saved, deduped } = await createSale(sale, req.user.sub);
+          const { sale: saved, deduped } = await createSale(db, companyId, sale, req.user.sub);
           results.push({
             clientRef: sale.clientRef ?? null,
             status: deduped ? 'DUPLICATE' : 'CREATED',
@@ -58,12 +60,15 @@ export async function saleRoutes(app: FastifyInstance) {
   // as próprias (Sale.userId — operador que registrou). A tela /vendas é
   // ADMIN-only no frontend, mas o endpoint em si não tinha nenhuma trava —
   // um CASHIER chamando a API diretamente enxergava vendas de todo mundo.
+  // Agora combinado com o escopo por tenant (withTenant), que já garante
+  // isolamento entre empresas por baixo desse filtro de papel.
   r.get('/', { preHandler: app.authenticate, schema: { querystring: paginationQuery } }, async (req) => {
+    const { db } = tenantDb(req);
     const { page, pageSize } = req.query;
     const userFilter = req.user.role === 'ADMIN' ? {} : { userId: req.user.sub };
     const [total, items] = await Promise.all([
-      prisma.sale.count({ where: userFilter }),
-      prisma.sale.findMany({
+      db.sale.count({ where: userFilter }),
+      db.sale.findMany({
         where: userFilter,
         include: { items: true, client: true },
         orderBy: { soldAt: 'desc' },
@@ -78,7 +83,8 @@ export async function saleRoutes(app: FastifyInstance) {
     '/:id',
     { preHandler: app.authenticate, schema: { params: z.object({ id: z.string().uuid() }) } },
     async (req) => {
-      const sale = await prisma.sale.findUnique({
+      const { db } = tenantDb(req);
+      const sale = await db.sale.findFirst({
         where: { id: req.params.id },
         include: {
           items: { include: { variant: { include: { product: true } } } },
@@ -91,8 +97,10 @@ export async function saleRoutes(app: FastifyInstance) {
         },
       });
       if (!sale) throw new NotFoundError('Venda');
-      // findUnique só aceita campos com constraint única no where — a checagem
-      // de posse acontece depois de buscar, não dá pra combinar id+userId ali.
+      // findFirst já escopa por tenant (companyId injetado pela extensão); a
+      // checagem de posse por operador (ADMIN vê tudo, CASHIER só o próprio)
+      // continua sendo pós-fetch, já que não dá pra combinar id+userId+companyId
+      // num único seletor único do Prisma.
       if (req.user.role !== 'ADMIN' && sale.userId !== req.user.sub) {
         throw new ForbiddenError('Você só pode visualizar suas próprias vendas');
       }
@@ -108,7 +116,8 @@ export async function saleRoutes(app: FastifyInstance) {
       schema: { params: z.object({ id: z.string().uuid() }), body: updateSaleSchema },
     },
     async (req) => {
-      const sale = await updateSale(req.params.id, req.body, req.user.sub);
+      const { db, companyId } = tenantDb(req);
+      const sale = await updateSale(db, companyId, req.params.id, req.body, req.user.sub);
       return serializeDecimals(sale);
     },
   );
@@ -118,7 +127,8 @@ export async function saleRoutes(app: FastifyInstance) {
     '/:id',
     { preHandler: app.authorize(['ADMIN']), schema: { params: z.object({ id: z.string().uuid() }) } },
     async (req, reply) => {
-      await deleteSale(req.params.id);
+      const { db, companyId } = tenantDb(req);
+      await deleteSale(db, req.params.id, companyId);
       return reply.status(204).send();
     },
   );
@@ -129,7 +139,8 @@ export async function saleRoutes(app: FastifyInstance) {
     '/:id/financial',
     { preHandler: app.authorize(['ADMIN']), schema: { params: z.object({ id: z.string().uuid() }) } },
     async (req) => {
-      const sale = await setSaleFinancialGenerated(req.params.id, false);
+      const { db } = tenantDb(req);
+      const sale = await setSaleFinancialGenerated(db, req.params.id, false);
       return serializeDecimals(sale);
     },
   );
@@ -144,7 +155,8 @@ export async function saleRoutes(app: FastifyInstance) {
       schema: { params: z.object({ id: z.string().uuid() }), body: regenerateSaleFinancialSchema },
     },
     async (req) => {
-      const sale = await setSaleFinancialGenerated(req.params.id, true, {
+      const { db } = tenantDb(req);
+      const sale = await setSaleFinancialGenerated(db, req.params.id, true, {
         userId: req.user.sub,
         targetRegisterType: req.body.targetRegisterType,
       });

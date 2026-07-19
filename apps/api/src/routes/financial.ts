@@ -10,12 +10,32 @@ import {
   listFinancialQuerySchema,
   type CashRegisterType,
 } from '@exodus/shared';
-import { prisma } from '../lib/prisma.js';
 import { serializeDecimals } from '../lib/serialize.js';
 import { AppError, BusinessError, NotFoundError } from '../lib/errors.js';
+import { tenantDb, type TenantClient } from '../lib/tenant.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+// Formato mínimo que o `tx` de um `db.$transaction` (client escopado por
+// tenant) precisa satisfazer para estes dois helpers — evita lutar contra os
+// tipos genéricos internos que o Prisma Client Extensions cunha (branding),
+// que fazem `Prisma.TransactionClient` e o `tx` estendido não serem
+// diretamente atribuíveis um ao outro mesmo tendo os mesmos métodos na prática.
+type FinancialTxClient = {
+  cashRegister: {
+    findFirst(args: {
+      where: { userId: string; status: string; type: CashRegisterType };
+    }): Promise<{ id: string } | null>;
+  };
+  cashTransaction: {
+    findFirst(args: {
+      where: { description: string; amount: Prisma.Decimal; type: string };
+      orderBy: { createdAt: 'desc' };
+      include: { cashRegister: { select: { type: true } } };
+    }): Promise<{ cashRegister: { type: string } } | null>;
+  };
+};
 
 /**
  * Meia-noite de hoje no horário da loja (America/Sao_Paulo, UTC-3) — não usa
@@ -38,7 +58,7 @@ function todayStartBr(): Date {
  * mesmo operador).
  */
 async function requireRegisterOfType(
-  tx: Prisma.TransactionClient,
+  tx: FinancialTxClient,
   userId: string,
   type: CashRegisterType,
 ) {
@@ -66,7 +86,7 @@ async function requireRegisterOfType(
  * recente com essa assinatura é a correspondente.
  */
 async function findOriginalRegisterType(
-  tx: Prisma.TransactionClient,
+  tx: FinancialTxClient,
   account: { type: string; description: string },
   settlement: { amount: Prisma.Decimal },
 ): Promise<CashRegisterType> {
@@ -88,30 +108,31 @@ async function findOriginalRegisterType(
   return original.cashRegister.type as CashRegisterType;
 }
 
+/**
+ * Garante que o título pode ser alterado/excluído. Bloqueia títulos de origem
+ * nota/entrada (invoiceId), de venda (saleId) e os que já têm baixa registrada
+ * (precisam ser estornados antes) — preserva a integridade (E7). `findFirst`
+ * (em vez de `findUnique`) escopa por tenant via a extensão `db`.
+ */
+async function assertEditable(db: TenantClient, id: string) {
+  const account = await db.financialAccount.findFirst({
+    where: { id },
+    include: { settlements: true },
+  });
+  if (!account) throw new NotFoundError('Lançamento');
+  if (account.invoiceId || account.saleId) {
+    throw new BusinessError(
+      'Lançamento originado de nota/venda e não pode ser editado ou excluído manualmente.',
+    );
+  }
+  if (account.status !== 'PENDING' || account.settlements.length > 0) {
+    throw new BusinessError('Título com baixa não pode ser alterado. Estorne a baixa antes.');
+  }
+  return account;
+}
+
 export async function financialRoutes(app: FastifyInstance) {
   const r = app.withTypeProvider<ZodTypeProvider>();
-
-  /**
-   * Garante que o título pode ser alterado/excluído. Bloqueia títulos de origem
-   * nota/entrada (invoiceId), de venda (saleId) e os que já têm baixa registrada
-   * (precisam ser estornados antes) — preserva a integridade (E7).
-   */
-  async function assertEditable(id: string) {
-    const account = await prisma.financialAccount.findUnique({
-      where: { id },
-      include: { settlements: true },
-    });
-    if (!account) throw new NotFoundError('Lançamento');
-    if (account.invoiceId || account.saleId) {
-      throw new BusinessError(
-        'Lançamento originado de nota/venda e não pode ser editado ou excluído manualmente.',
-      );
-    }
-    if (account.status !== 'PENDING' || account.settlements.length > 0) {
-      throw new BusinessError('Título com baixa não pode ser alterado. Estorne a baixa antes.');
-    }
-    return account;
-  }
 
   // Resumo financeiro é sensível: somente ADMIN (Requisito 4.5)
   r.get(
@@ -121,6 +142,7 @@ export async function financialRoutes(app: FastifyInstance) {
       schema: { querystring: listFinancialQuerySchema },
     },
     async (req) => {
+      const { db } = tenantDb(req);
       const { page, pageSize, type, status, personId, search, dueFrom, dueTo, orderBy, orderDir, statusFilter } =
         req.query;
 
@@ -172,8 +194,8 @@ export async function financialRoutes(app: FastifyInstance) {
       if (orderBy !== 'code') orderByClauses.push({ code: 'asc' });
 
       const [total, items] = await Promise.all([
-        prisma.financialAccount.count({ where }),
-        prisma.financialAccount.findMany({
+        db.financialAccount.count({ where }),
+        db.financialAccount.findMany({
           where,
           include: { person: true, settlements: true },
           orderBy: orderByClauses,
@@ -195,8 +217,9 @@ export async function financialRoutes(app: FastifyInstance) {
     '/',
     { preHandler: app.authorize(['ADMIN']), schema: { body: createFinancialAccountSchema } },
     async (req, reply) => {
-      const account = await prisma.financialAccount.create({
-        data: { ...req.body, status: 'PENDING' },
+      const { db, companyId } = tenantDb(req);
+      const account = await db.financialAccount.create({
+        data: { ...req.body, status: 'PENDING', companyId },
       });
       return reply.status(201).send(serializeDecimals(account));
     },
@@ -207,6 +230,7 @@ export async function financialRoutes(app: FastifyInstance) {
     '/installments',
     { preHandler: app.authorize(['ADMIN']), schema: { body: createInstallmentsSchema } },
     async (req, reply) => {
+      const { db, companyId } = tenantDb(req);
       const { type, description, totalAmount, firstDueDate, installments, intervalDays, personId } =
         req.body;
 
@@ -225,10 +249,11 @@ export async function financialRoutes(app: FastifyInstance) {
           dueDate: due,
           status: 'PENDING',
           personId: personId ?? null,
+          companyId,
         };
       });
 
-      await prisma.financialAccount.createMany({ data });
+      await db.financialAccount.createMany({ data });
       return reply.status(201).send({ created: data.length });
     },
   );
@@ -238,10 +263,11 @@ export async function financialRoutes(app: FastifyInstance) {
     '/:id/settle',
     { preHandler: app.authorize(['ADMIN']), schema: { params: idParam, body: settleAccountSchema } },
     async (req) => {
-      return prisma.$transaction(async (tx) => {
+      const { db, companyId } = tenantDb(req);
+      return db.$transaction(async (tx) => {
         const openRegister = await requireRegisterOfType(tx, req.user.sub, req.body.targetRegisterType);
 
-        const account = await tx.financialAccount.findUnique({
+        const account = await tx.financialAccount.findFirst({
           where: { id: req.params.id },
           include: { settlements: true },
         });
@@ -256,7 +282,7 @@ export async function financialRoutes(app: FastifyInstance) {
         if (valor > saldo + 0.001) throw new BusinessError('Valor maior que o saldo do título');
 
         await tx.accountSettlement.create({
-          data: { financialAccountId: account.id, amount: valor, paidAt: req.body.paidAt },
+          data: { financialAccountId: account.id, amount: valor, paidAt: req.body.paidAt, companyId },
         });
 
         // Reflete a baixa no caixa aberto: recebimento (RECEIVABLE) entra como
@@ -267,6 +293,7 @@ export async function financialRoutes(app: FastifyInstance) {
             type: account.type === 'RECEIVABLE' ? 'SUPPLY' : 'BLEED',
             amount: valor,
             description: `Baixa: ${account.description}`,
+            companyId,
           },
         });
 
@@ -290,8 +317,9 @@ export async function financialRoutes(app: FastifyInstance) {
     '/:id/reverse',
     { preHandler: app.authorize(['ADMIN']), schema: { params: idParam } },
     async (req) => {
-      return prisma.$transaction(async (tx) => {
-        const account = await tx.financialAccount.findUnique({
+      const { db, companyId } = tenantDb(req);
+      return db.$transaction(async (tx) => {
+        const account = await tx.financialAccount.findFirst({
           where: { id: req.params.id },
           include: { settlements: { orderBy: { createdAt: 'desc' } } },
         });
@@ -313,6 +341,7 @@ export async function financialRoutes(app: FastifyInstance) {
             type: account.type === 'RECEIVABLE' ? 'BLEED' : 'SUPPLY',
             amount: Number(last.amount),
             description: `Estorno de Baixa: ${account.description}`,
+            companyId,
           },
         });
 
@@ -334,8 +363,9 @@ export async function financialRoutes(app: FastifyInstance) {
       schema: { params: idParam, body: updateFinancialAccountSchema },
     },
     async (req) => {
-      await assertEditable(req.params.id);
-      const account = await prisma.financialAccount.update({
+      const { db } = tenantDb(req);
+      await assertEditable(db, req.params.id);
+      const account = await db.financialAccount.update({
         where: { id: req.params.id },
         data: req.body,
       });
@@ -348,8 +378,9 @@ export async function financialRoutes(app: FastifyInstance) {
     '/:id',
     { preHandler: app.authorize(['ADMIN']), schema: { params: idParam } },
     async (req, reply) => {
-      await assertEditable(req.params.id);
-      await prisma.financialAccount.delete({ where: { id: req.params.id } });
+      const { db } = tenantDb(req);
+      await assertEditable(db, req.params.id);
+      await db.financialAccount.delete({ where: { id: req.params.id } });
       return reply.status(204).send();
     },
   );

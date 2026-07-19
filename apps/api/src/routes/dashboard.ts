@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { prisma } from '../lib/prisma.js';
+import { tenantDb } from '../lib/tenant.js';
 
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
@@ -20,12 +20,13 @@ export async function dashboardRoutes(app: FastifyInstance) {
       schema: { querystring: z.object({ from: z.coerce.date(), to: z.coerce.date() }) },
     },
     async (req) => {
+      const { db } = tenantDb(req);
       const { from, to } = req.query;
       const toEnd = new Date(to);
       toEnd.setHours(23, 59, 59, 999);
 
       // Apenas vendas com financeiro gerado contam como receita/recebimento.
-      const sales = await prisma.sale.findMany({
+      const sales = await db.sale.findMany({
         where: { soldAt: { gte: from, lte: toEnd }, financialGenerated: true },
         include: { payments: true },
       });
@@ -60,7 +61,7 @@ export async function dashboardRoutes(app: FastifyInstance) {
 
       // Situação atual de contas a pagar/receber (saldo aberto e vencido).
       // Oculta títulos a receber de vendas com o financeiro excluído.
-      const accounts = await prisma.financialAccount.findMany({
+      const accounts = await db.financialAccount.findMany({
         where: {
           status: { not: 'PAID' },
           OR: [{ saleId: null }, { sale: { financialGenerated: true } }],
@@ -87,7 +88,7 @@ export async function dashboardRoutes(app: FastifyInstance) {
 
       // Resultado do período (Receitas − Despesas): vendas do período como
       // receita; contas a pagar (dívidas) com vencimento no período como despesa.
-      const payables = await prisma.financialAccount.findMany({
+      const payables = await db.financialAccount.findMany({
         where: { type: 'PAYABLE', dueDate: { gte: from, lte: toEnd } },
         select: { amount: true },
       });

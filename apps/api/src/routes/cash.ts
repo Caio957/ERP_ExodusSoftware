@@ -9,9 +9,9 @@ import {
   updateCashTransactionSchema,
   cashRegisterTypeQuerySchema,
 } from '@exodus/shared';
-import { prisma } from '../lib/prisma.js';
 import { serializeDecimals, toMoney } from '../lib/serialize.js';
 import { AppError, BusinessError, ForbiddenError, NotFoundError } from '../lib/errors.js';
+import { tenantDb, type TenantClient } from '../lib/tenant.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 
@@ -104,23 +104,24 @@ function saleTimelineEntries(
  *  BANCO). Baixas do Financeiro já entram via CashTransaction SUPPLY/BLEED
  *  (`requireRegisterOfType`, routes/financial.ts) — esse model não tem campo
  *  `method`, então já é agnóstico ao tipo de caixa, sem precisar de filtro
- *  aqui. */
-async function computeExpectedCash(cashRegisterId: string) {
-  const register = await prisma.cashRegister.findUnique({ where: { id: cashRegisterId } });
+ *  aqui. `db` já vem escopado por tenant (findFirst em vez de findUnique
+ *  fecha o IDOR de referenciar o caixa de outra empresa por id). */
+async function computeExpectedCash(db: TenantClient, cashRegisterId: string) {
+  const register = await db.cashRegister.findFirst({ where: { id: cashRegisterId } });
   if (!register) throw new NotFoundError('Caixa');
 
   const [supplies, bleeds, liquidSales] = await Promise.all([
-    prisma.cashTransaction.aggregate({
+    db.cashTransaction.aggregate({
       where: { cashRegisterId, type: 'SUPPLY' },
       _sum: { amount: true },
     }),
-    prisma.cashTransaction.aggregate({
+    db.cashTransaction.aggregate({
       where: { cashRegisterId, type: 'BLEED' },
       _sum: { amount: true },
     }),
     // Soma os PAGAMENTOS líquidos (não o total da venda) — trata split e a prazo.
     // Ignora vendas com o financeiro excluído (financialGenerated = false).
-    prisma.salePayment.aggregate({
+    db.salePayment.aggregate({
       where: { ...liquidPaymentFilter(register.type), sale: { cashRegisterId, financialGenerated: true } },
       _sum: { amount: true },
     }),
@@ -143,12 +144,13 @@ export async function cashRoutes(app: FastifyInstance) {
     '/current',
     { preHandler: app.authenticate, schema: { querystring: cashRegisterTypeQuerySchema } },
     async (req) => {
-      const register = await prisma.cashRegister.findFirst({
+      const { db } = tenantDb(req);
+      const register = await db.cashRegister.findFirst({
         where: { userId: req.user.sub, status: 'OPEN', type: req.query.type },
         include: { transactions: { orderBy: { createdAt: 'desc' } } },
       });
       if (!register) return null;
-      const { expectedCash } = await computeExpectedCash(register.id);
+      const { expectedCash } = await computeExpectedCash(db, register.id);
       return { ...serializeDecimals(register), expectedCash };
     },
   );
@@ -157,7 +159,8 @@ export async function cashRoutes(app: FastifyInstance) {
   // físico (DIARIO) e uma conta banco (BANCO) abertos ao mesmo tempo, são
   // livros independentes; o que não pode é abrir dois do mesmo tipo.
   r.post('/open', { preHandler: app.authenticate, schema: { body: openCashSchema } }, async (req, reply) => {
-    const existing = await prisma.cashRegister.findFirst({
+    const { db, companyId } = tenantDb(req);
+    const existing = await db.cashRegister.findFirst({
       where: { userId: req.user.sub, status: 'OPEN', type: req.body.type },
     });
     if (existing) {
@@ -166,12 +169,13 @@ export async function cashRoutes(app: FastifyInstance) {
       );
     }
 
-    const register = await prisma.cashRegister.create({
+    const register = await db.cashRegister.create({
       data: {
         userId: req.user.sub,
         initialCash: req.body.initialCash,
         status: 'OPEN',
         type: req.body.type,
+        companyId,
       },
     });
     return reply.status(201).send(serializeDecimals(register));
@@ -182,12 +186,13 @@ export async function cashRoutes(app: FastifyInstance) {
     '/:id/transactions',
     { preHandler: app.authenticate, schema: { params: idParam, body: cashTransactionSchema } },
     async (req, reply) => {
-      const register = await prisma.cashRegister.findUnique({ where: { id: req.params.id } });
+      const { db, companyId } = tenantDb(req);
+      const register = await db.cashRegister.findFirst({ where: { id: req.params.id } });
       if (!register) throw new NotFoundError('Caixa');
       if (register.status !== 'OPEN') throw new BusinessError('Caixa não está aberto');
 
-      const tx = await prisma.cashTransaction.create({
-        data: { cashRegisterId: register.id, ...req.body },
+      const tx = await db.cashTransaction.create({
+        data: { cashRegisterId: register.id, ...req.body, companyId },
       });
       return reply.status(201).send(serializeDecimals(tx));
     },
@@ -198,14 +203,15 @@ export async function cashRoutes(app: FastifyInstance) {
     '/:id/close',
     { preHandler: app.authenticate, schema: { params: idParam, body: closeCashSchema } },
     async (req) => {
-      const { register, expectedCash } = await computeExpectedCash(req.params.id);
+      const { db } = tenantDb(req);
+      const { register, expectedCash } = await computeExpectedCash(db, req.params.id);
       if (register.status !== 'OPEN') throw new BusinessError('Caixa já está fechado');
       if (register.userId !== req.user.sub && req.user.role !== 'ADMIN') {
         throw new ForbiddenError('Você só pode fechar o seu próprio caixa');
       }
 
       const finalCash = req.body.finalCash;
-      const updated = await prisma.cashRegister.update({
+      const updated = await db.cashRegister.update({
         where: { id: register.id },
         data: { status: 'CLOSED', closedAt: new Date(), finalCash },
       });
@@ -223,8 +229,9 @@ export async function cashRoutes(app: FastifyInstance) {
     '/:id/summary',
     { preHandler: app.authorize(['ADMIN']), schema: { params: idParam } },
     async (req) => {
-      const { register, expectedCash } = await computeExpectedCash(req.params.id);
-      const byMethod = await prisma.salePayment.groupBy({
+      const { db } = tenantDb(req);
+      const { register, expectedCash } = await computeExpectedCash(db, req.params.id);
+      const byMethod = await db.salePayment.groupBy({
         by: ['method'],
         where: { sale: { cashRegisterId: register.id, financialGenerated: true } },
         _sum: { amount: true },
@@ -250,8 +257,9 @@ export async function cashRoutes(app: FastifyInstance) {
     '/registers',
     { preHandler: app.authenticate, schema: { querystring: cashRegisterTypeQuerySchema } },
     async (req) => {
+      const { db } = tenantDb(req);
       const rbac = req.user.role === 'ADMIN' ? {} : { userId: req.user.sub };
-      const registers = await prisma.cashRegister.findMany({
+      const registers = await db.cashRegister.findMany({
         where: { ...rbac, type: req.query.type },
         orderBy: { openedAt: 'desc' },
         take: 60,
@@ -276,6 +284,7 @@ export async function cashRoutes(app: FastifyInstance) {
       },
     },
     async (req) => {
+      const { db } = tenantDb(req);
       const { startDate, endDate } = req.query;
       // Força o timezone UTC-3 (Horário de Brasília) nas fronteiras do relatório.
       // O servidor roda em UTC: uma venda às 23:50 locais de 30/06 é gravada como
@@ -291,7 +300,7 @@ export async function cashRoutes(app: FastifyInstance) {
 
       // Sem filtro de status: traz caixas OPEN e CLOSED dentro do período.
       // `type` some do RBAC de dono — é só mais uma cláusula no mesmo `where`.
-      const registers = await prisma.cashRegister.findMany({
+      const registers = await db.cashRegister.findMany({
         where: { openedAt: { gte: start, lte: end }, type: req.query.type, ...rbac },
         include: {
           user: { select: { name: true } },
@@ -404,12 +413,13 @@ export async function cashRoutes(app: FastifyInstance) {
   // Timeline unificada: sangrias/suprimentos (manuais) + vendas (origem). As
   // vendas vêm como leitura — só podem ser alteradas pela tela de Vendas (C5).
   r.get('/:id/movements', { preHandler: app.authenticate, schema: { params: idParam } }, async (req) => {
-    const register = await prisma.cashRegister.findUnique({ where: { id: req.params.id } });
+    const { db } = tenantDb(req);
+    const register = await db.cashRegister.findFirst({ where: { id: req.params.id } });
     if (!register) throw new NotFoundError('Caixa');
 
     const [transactions, sales] = await Promise.all([
-      prisma.cashTransaction.findMany({ where: { cashRegisterId: register.id } }),
-      prisma.sale.findMany({
+      db.cashTransaction.findMany({ where: { cashRegisterId: register.id } }),
+      db.sale.findMany({
         where: { cashRegisterId: register.id },
         include: { client: { select: { name: true } }, payments: true },
       }),
@@ -438,7 +448,8 @@ export async function cashRoutes(app: FastifyInstance) {
     '/transactions/:id',
     { preHandler: app.authenticate, schema: { params: idParam, body: updateCashTransactionSchema } },
     async (req) => {
-      const tx = await prisma.cashTransaction.findUnique({
+      const { db } = tenantDb(req);
+      const tx = await db.cashTransaction.findFirst({
         where: { id: req.params.id },
         include: { cashRegister: true },
       });
@@ -452,7 +463,7 @@ export async function cashRoutes(app: FastifyInstance) {
       if (tx.cashRegister.status !== 'OPEN') {
         throw new BusinessError('Caixa fechado não pode ser alterado');
       }
-      const updated = await prisma.cashTransaction.update({ where: { id: tx.id }, data: req.body });
+      const updated = await db.cashTransaction.update({ where: { id: tx.id }, data: req.body });
       return serializeDecimals(updated);
     },
   );
@@ -462,7 +473,8 @@ export async function cashRoutes(app: FastifyInstance) {
     '/transactions/:id',
     { preHandler: app.authenticate, schema: { params: idParam } },
     async (req, reply) => {
-      const tx = await prisma.cashTransaction.findUnique({
+      const { db } = tenantDb(req);
+      const tx = await db.cashTransaction.findFirst({
         where: { id: req.params.id },
         include: { cashRegister: true },
       });
@@ -476,13 +488,14 @@ export async function cashRoutes(app: FastifyInstance) {
       if (tx.cashRegister.status !== 'OPEN') {
         throw new BusinessError('Caixa fechado não pode ser alterado');
       }
-      await prisma.cashTransaction.delete({ where: { id: tx.id } });
+      await db.cashTransaction.delete({ where: { id: tx.id } });
       return reply.status(204).send();
     },
   );
 
   r.get('/:id', { preHandler: app.authenticate, schema: { params: idParam } }, async (req) => {
-    const register = await prisma.cashRegister.findUnique({
+    const { db } = tenantDb(req);
+    const register = await db.cashRegister.findFirst({
       where: { id: req.params.id },
       include: { transactions: true, sales: true },
     });

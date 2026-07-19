@@ -1,7 +1,7 @@
 import type { CreateSaleInput, UpdateSaleInput, CashRegisterType } from '@exodus/shared';
 import { Prisma } from '@prisma/client';
-import { prisma } from '../lib/prisma.js';
 import { AppError, BusinessError, NotFoundError } from '../lib/errors.js';
+import type { TenantClient } from '../lib/tenant.js';
 
 /** Soma os itens (subtotal bruto). */
 function sumItems(items: { unitPrice: number; quantity: number }[]) {
@@ -11,6 +11,15 @@ function sumItems(items: { unitPrice: number; quantity: number }[]) {
   );
 }
 
+/** Confere que todos os variantId do carrinho pertencem ao tenant (fecha um
+ * IDOR real: sem essa checagem, um payload malicioso poderia referenciar
+ * `variantId` de OUTRA empresa e decrementar o estoque dela). */
+async function assertVariantsBelongToTenant(db: TenantClient, variantIds: string[]) {
+  const unique = [...new Set(variantIds)];
+  const found = await db.productVariant.findMany({ where: { id: { in: unique } } });
+  if (found.length !== unique.length) throw new NotFoundError('Produto');
+}
+
 /**
  * Cria uma venda de forma idempotente e atômica.
  *  - O total é recalculado no servidor (não confia no cliente).
@@ -18,21 +27,28 @@ function sumItems(items: { unitPrice: number; quantity: number }[]) {
  *  - Se `clientRef` já existir, retorna a venda existente (evita duplicar na
  *    sincronização da fila offline - Requisito 4.4).
  */
-export async function createSale(input: CreateSaleInput, userId: string) {
+export async function createSale(
+  db: TenantClient,
+  companyId: string,
+  input: CreateSaleInput,
+  userId: string,
+) {
   // Idempotência: venda já sincronizada anteriormente.
   if (input.clientRef) {
-    const existing = await prisma.sale.findUnique({
+    const existing = await db.sale.findFirst({
       where: { clientRef: input.clientRef },
       include: { items: true },
     });
     if (existing) return { sale: existing, deduped: true };
   }
 
-  const register = await prisma.cashRegister.findUnique({
+  const register = await db.cashRegister.findFirst({
     where: { id: input.cashRegisterId },
   });
   if (!register) throw new NotFoundError('Caixa');
   if (register.status !== 'OPEN') throw new BusinessError('Caixa não está aberto');
+
+  await assertVariantsBelongToTenant(db, input.items.map((it) => it.variantId));
 
   const subtotal = input.items.reduce(
     (acc, it) => acc.add(new Prisma.Decimal(it.unitPrice).mul(it.quantity)),
@@ -71,7 +87,7 @@ export async function createSale(input: CreateSaleInput, userId: string) {
   const legacyMethod = payments.length === 1 ? payments[0]!.method : 'SPLIT';
 
   try {
-    const sale = await prisma.$transaction(async (tx) => {
+    const sale = await db.$transaction(async (tx) => {
       const created = await tx.sale.create({
         data: {
           cashRegisterId: input.cashRegisterId,
@@ -86,15 +102,17 @@ export async function createSale(input: CreateSaleInput, userId: string) {
           syncStatus: 'SYNCED',
           clientRef: input.clientRef ?? null,
           soldAt: input.soldAt ?? new Date(),
+          companyId,
           items: {
             create: input.items.map((it) => ({
               variantId: it.variantId,
               quantity: it.quantity,
               unitPrice: it.unitPrice,
+              companyId,
             })),
           },
           payments: {
-            create: payments.map((p) => ({ method: p.method, amount: p.amount })),
+            create: payments.map((p) => ({ method: p.method, amount: p.amount, companyId })),
           },
         },
         include: { items: true, payments: true },
@@ -111,6 +129,7 @@ export async function createSale(input: CreateSaleInput, userId: string) {
             status: 'PENDING',
             saleId: created.id,
             personId: input.clientId!,
+            companyId,
           })),
         });
       }
@@ -129,6 +148,7 @@ export async function createSale(input: CreateSaleInput, userId: string) {
             quantity: -it.quantity,
             reason: 'SALE',
             refId: created.id,
+            companyId,
           },
         });
       }
@@ -144,7 +164,7 @@ export async function createSale(input: CreateSaleInput, userId: string) {
       err.code === 'P2002' &&
       input.clientRef
     ) {
-      const existing = await prisma.sale.findUnique({
+      const existing = await db.sale.findFirst({
         where: { clientRef: input.clientRef },
         include: { items: true },
       });
@@ -167,9 +187,17 @@ export async function createSale(input: CreateSaleInput, userId: string) {
  * edição (`EditSaleModal`, sempre recria o financeiro ao salvar).
  * Tudo em uma única transação para não deixar dados inconsistentes.
  */
-export async function updateSale(saleId: string, input: UpdateSaleInput, userId: string) {
-  return prisma.$transaction(async (tx) => {
-    const old = await tx.sale.findUnique({ where: { id: saleId }, include: { items: true } });
+export async function updateSale(
+  db: TenantClient,
+  companyId: string,
+  saleId: string,
+  input: UpdateSaleInput,
+  userId: string,
+) {
+  await assertVariantsBelongToTenant(db, input.items.map((it) => it.variantId));
+
+  return db.$transaction(async (tx) => {
+    const old = await tx.sale.findFirst({ where: { id: saleId }, include: { items: true } });
     if (!old) throw new NotFoundError('Venda');
 
     let cashRegisterId: string | undefined;
@@ -193,7 +221,14 @@ export async function updateSale(saleId: string, input: UpdateSaleInput, userId:
         data: { stockQty: { increment: it.quantity } },
       });
       await tx.stockMovement.create({
-        data: { variantId: it.variantId, type: 'IN', quantity: it.quantity, reason: 'SALE_EDIT', refId: saleId },
+        data: {
+          variantId: it.variantId,
+          type: 'IN',
+          quantity: it.quantity,
+          reason: 'SALE_EDIT',
+          refId: saleId,
+          companyId,
+        },
       });
     }
 
@@ -242,10 +277,17 @@ export async function updateSale(saleId: string, input: UpdateSaleInput, userId:
         data: { stockQty: { decrement: it.quantity } },
       });
       await tx.stockMovement.create({
-        data: { variantId: it.variantId, type: 'OUT', quantity: -it.quantity, reason: 'SALE', refId: saleId },
+        data: {
+          variantId: it.variantId,
+          type: 'OUT',
+          quantity: -it.quantity,
+          reason: 'SALE',
+          refId: saleId,
+          companyId,
+        },
       });
       await tx.saleItem.create({
-        data: { saleId, variantId: it.variantId, quantity: it.quantity, unitPrice: it.unitPrice },
+        data: { saleId, variantId: it.variantId, quantity: it.quantity, unitPrice: it.unitPrice, companyId },
       });
     }
 
@@ -260,6 +302,7 @@ export async function updateSale(saleId: string, input: UpdateSaleInput, userId:
           status: 'PENDING',
           saleId,
           personId: input.clientId!,
+          companyId,
         })),
       });
     }
@@ -278,7 +321,7 @@ export async function updateSale(saleId: string, input: UpdateSaleInput, userId:
         notes: input.notes ?? null,
         financialGenerated: true,
         ...(cashRegisterId ? { cashRegisterId } : {}),
-        payments: { create: payments.map((p) => ({ method: p.method, amount: p.amount })) },
+        payments: { create: payments.map((p) => ({ method: p.method, amount: p.amount, companyId })) },
       },
       include: { items: true, payments: true },
     });
@@ -300,11 +343,12 @@ export async function updateSale(saleId: string, input: UpdateSaleInput, userId:
  *    suficiente — não há "pagamentos" para recriar.
  */
 export async function setSaleFinancialGenerated(
+  db: TenantClient,
   saleId: string,
   generated: boolean,
   options?: { userId: string; targetRegisterType?: CashRegisterType },
 ) {
-  const sale = await prisma.sale.findUnique({
+  const sale = await db.sale.findFirst({
     where: { id: saleId },
     include: { financialAccounts: { include: { settlements: true } } },
   });
@@ -323,7 +367,7 @@ export async function setSaleFinancialGenerated(
 
   const targetRegisterType = generated ? options?.targetRegisterType : undefined;
 
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     let cashRegisterId: string | undefined;
     if (targetRegisterType && options) {
       const targetRegister = await tx.cashRegister.findFirst({
@@ -350,9 +394,9 @@ export async function setSaleFinancialGenerated(
  * Exclui uma venda: estorna o estoque, remove o financeiro vinculado e apaga a
  * venda (itens em cascata). Operação atômica.
  */
-export async function deleteSale(saleId: string) {
-  return prisma.$transaction(async (tx) => {
-    const sale = await tx.sale.findUnique({ where: { id: saleId }, include: { items: true } });
+export async function deleteSale(db: TenantClient, saleId: string, companyId: string) {
+  return db.$transaction(async (tx) => {
+    const sale = await tx.sale.findFirst({ where: { id: saleId }, include: { items: true } });
     if (!sale) throw new NotFoundError('Venda');
 
     for (const it of sale.items) {
@@ -361,7 +405,14 @@ export async function deleteSale(saleId: string) {
         data: { stockQty: { increment: it.quantity } },
       });
       await tx.stockMovement.create({
-        data: { variantId: it.variantId, type: 'IN', quantity: it.quantity, reason: 'SALE_DELETE', refId: saleId },
+        data: {
+          variantId: it.variantId,
+          type: 'IN',
+          quantity: it.quantity,
+          reason: 'SALE_DELETE',
+          refId: saleId,
+          companyId,
+        },
       });
     }
 

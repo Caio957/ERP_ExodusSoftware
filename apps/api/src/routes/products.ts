@@ -10,78 +10,88 @@ import {
   listProductsQuerySchema,
   productFormSettingsSchema,
 } from '@exodus/shared';
-import { prisma } from '../lib/prisma.js';
 import { serializeDecimals } from '../lib/serialize.js';
 import { BusinessError, NotFoundError } from '../lib/errors.js';
 import { getSetting } from '../lib/settings.js';
+import { tenantDb } from '../lib/tenant.js';
 
 export async function productRoutes(app: FastifyInstance) {
   const r = app.withTypeProvider<ZodTypeProvider>();
 
   // Lista paginada com busca livre (nome/marca/SKU/código) + filtros + ordenação.
   // Sem nenhum filtro, retorna TODOS os produtos cadastrados.
-  r.get('/', { schema: { querystring: listProductsQuerySchema } }, async (req) => {
-    const { page, pageSize, search, brand, group, subgroup, orderBy, orderDir } = req.query;
-    const and: Prisma.ProductWhereInput[] = [];
-    if (search) {
-      and.push({
-        OR: [
-          { name: { contains: search, mode: 'insensitive' } },
-          { brand: { contains: search, mode: 'insensitive' } },
-          { variants: { some: { sku: { contains: search, mode: 'insensitive' } } } },
-          { variants: { some: { barcode: { contains: search } } } },
-        ],
-      });
-    }
-    if (brand) and.push({ brand: { contains: brand, mode: 'insensitive' } });
-    if (group) and.push({ group: { contains: group, mode: 'insensitive' } });
-    if (subgroup) and.push({ subgroup: { contains: subgroup, mode: 'insensitive' } });
-    const where: Prisma.ProductWhereInput = and.length ? { AND: and } : {};
+  // Ganhou `preHandler: app.authenticate` nesta rodada — este e os outros 2
+  // GETs abaixo (by-barcode, /:id) não tinham NENHUMA autenticação antes
+  // (achado ao mapear rotas para a Fase 4): sem req.user não há companyId
+  // para escopar, então virar autenticado é pré-requisito, não só reforço.
+  r.get(
+    '/',
+    { preHandler: app.authenticate, schema: { querystring: listProductsQuerySchema } },
+    async (req) => {
+      const { db } = tenantDb(req);
+      const { page, pageSize, search, brand, group, subgroup, orderBy, orderDir } = req.query;
+      const and: Prisma.ProductWhereInput[] = [];
+      if (search) {
+        and.push({
+          OR: [
+            { name: { contains: search, mode: 'insensitive' } },
+            { brand: { contains: search, mode: 'insensitive' } },
+            { variants: { some: { sku: { contains: search, mode: 'insensitive' } } } },
+            { variants: { some: { barcode: { contains: search } } } },
+          ],
+        });
+      }
+      if (brand) and.push({ brand: { contains: brand, mode: 'insensitive' } });
+      if (group) and.push({ group: { contains: group, mode: 'insensitive' } });
+      if (subgroup) and.push({ subgroup: { contains: subgroup, mode: 'insensitive' } });
+      const where: Prisma.ProductWhereInput = and.length ? { AND: and } : {};
 
-    // name/code → ordenação direta no Prisma; sku/price → em memória após
-    // o fetch (Prisma não expõe _min em relações 1-N via TypeScript types).
-    const dir = orderDir;
-    const prismaOrderBy: Prisma.ProductOrderByWithRelationInput =
-      orderBy === 'code' ? { code: dir } :
-      orderBy === 'name' ? { name: dir } :
-      { name: 'asc' }; // fallback neutro para sku/price
+      // name/code → ordenação direta no Prisma; sku/price → em memória após
+      // o fetch (Prisma não expõe _min em relações 1-N via TypeScript types).
+      const dir = orderDir;
+      const prismaOrderBy: Prisma.ProductOrderByWithRelationInput =
+        orderBy === 'code' ? { code: dir } :
+        orderBy === 'name' ? { name: dir } :
+        { name: 'asc' }; // fallback neutro para sku/price
 
-    const [total, rawItems] = await Promise.all([
-      prisma.product.count({ where }),
-      prisma.product.findMany({
-        where,
-        include: { variants: true },
-        orderBy: prismaOrderBy,
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-      }),
-    ]);
+      const [total, rawItems] = await Promise.all([
+        db.product.count({ where }),
+        db.product.findMany({
+          where,
+          include: { variants: true },
+          orderBy: prismaOrderBy,
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+      ]);
 
-    let items = rawItems;
-    if (orderBy === 'sku') {
-      items = [...rawItems].sort((a, b) => {
-        const av = a.variants[0]?.sku ?? '';
-        const bv = b.variants[0]?.sku ?? '';
-        const cmp = av.localeCompare(bv);
-        return dir === 'desc' ? -cmp : cmp;
-      });
-    } else if (orderBy === 'price') {
-      items = [...rawItems].sort((a, b) => {
-        const av = Number(a.variants[0]?.salePrice ?? 0);
-        const bv = Number(b.variants[0]?.salePrice ?? 0);
-        return dir === 'asc' ? av - bv : bv - av;
-      });
-    }
+      let items = rawItems;
+      if (orderBy === 'sku') {
+        items = [...rawItems].sort((a, b) => {
+          const av = a.variants[0]?.sku ?? '';
+          const bv = b.variants[0]?.sku ?? '';
+          const cmp = av.localeCompare(bv);
+          return dir === 'desc' ? -cmp : cmp;
+        });
+      } else if (orderBy === 'price') {
+        items = [...rawItems].sort((a, b) => {
+          const av = Number(a.variants[0]?.salePrice ?? 0);
+          const bv = Number(b.variants[0]?.salePrice ?? 0);
+          return dir === 'asc' ? av - bv : bv - av;
+        });
+      }
 
-    return { total, page, pageSize, items: serializeDecimals(items) };
-  });
+      return { total, page, pageSize, items: serializeDecimals(items) };
+    },
+  );
 
   // Busca de variante por código de barras (usado pelo PDV / leitor)
   r.get(
     '/variants/by-barcode/:barcode',
-    { schema: { params: z.object({ barcode: z.string().min(1) }) } },
+    { preHandler: app.authenticate, schema: { params: z.object({ barcode: z.string().min(1) }) } },
     async (req) => {
-      const variant = await prisma.productVariant.findUnique({
+      const { db } = tenantDb(req);
+      const variant = await db.productVariant.findFirst({
         where: { barcode: req.params.barcode },
         include: { product: true },
       });
@@ -92,9 +102,10 @@ export async function productRoutes(app: FastifyInstance) {
 
   r.get(
     '/:id',
-    { schema: { params: z.object({ id: z.string().uuid() }) } },
+    { preHandler: app.authenticate, schema: { params: z.object({ id: z.string().uuid() }) } },
     async (req) => {
-      const product = await prisma.product.findUnique({
+      const { db } = tenantDb(req);
+      const product = await db.product.findFirst({
         where: { id: req.params.id },
         include: { variants: true },
       });
@@ -108,10 +119,11 @@ export async function productRoutes(app: FastifyInstance) {
     '/',
     { preHandler: app.authorize(['ADMIN']), schema: { body: createProductSchema } },
     async (req, reply) => {
+      const { db, companyId } = tenantDb(req);
       const { variants, ...productData } = req.body;
 
       // Obrigatoriedade configurável (Configurações da loja).
-      const setting = await getSetting('product_form');
+      const setting = await getSetting(companyId, 'product_form', db);
       const cfg = productFormSettingsSchema.parse(setting?.value ?? {});
       if (cfg.brandRequired && !productData.brand) throw new BusinessError('Marca é obrigatória');
       if (cfg.groupRequired && !productData.group) throw new BusinessError('Grupo é obrigatório');
@@ -120,7 +132,7 @@ export async function productRoutes(app: FastifyInstance) {
       if (cfg.barcodeRequired && variants.some((v) => !v.barcode))
         throw new BusinessError('Código de barras é obrigatório');
 
-      const product = await prisma.$transaction(async (tx) => {
+      const product = await db.$transaction(async (tx) => {
         const created = await tx.product.create({
           data: {
             name: productData.name,
@@ -128,6 +140,7 @@ export async function productRoutes(app: FastifyInstance) {
             group: productData.group ?? '',
             subgroup: productData.subgroup ?? null,
             tracksLotValidity: productData.tracksLotValidity,
+            companyId,
             variants: {
               create: variants.map((v) => ({
                 sku: v.sku,
@@ -140,6 +153,7 @@ export async function productRoutes(app: FastifyInstance) {
                 stockQty: v.stockQty,
                 batch: v.batch,
                 validity: v.validity,
+                companyId,
               })),
             },
           },
@@ -154,6 +168,7 @@ export async function productRoutes(app: FastifyInstance) {
             type: 'IN',
             quantity: v.stockQty,
             reason: 'MANUAL',
+            companyId,
           }));
         if (movements.length) await tx.stockMovement.createMany({ data: movements });
 
@@ -171,7 +186,10 @@ export async function productRoutes(app: FastifyInstance) {
       schema: { params: z.object({ id: z.string().uuid() }), body: updateProductSchema },
     },
     async (req) => {
-      const product = await prisma.product.update({
+      const { db } = tenantDb(req);
+      const existing = await db.product.findFirst({ where: { id: req.params.id } });
+      if (!existing) throw new NotFoundError('Produto');
+      const product = await db.product.update({
         where: { id: req.params.id },
         data: req.body,
         include: { variants: true },
@@ -187,7 +205,10 @@ export async function productRoutes(app: FastifyInstance) {
       schema: { params: z.object({ id: z.string().uuid() }), body: updateVariantSchema },
     },
     async (req) => {
-      const variant = await prisma.productVariant.update({
+      const { db } = tenantDb(req);
+      const existing = await db.productVariant.findFirst({ where: { id: req.params.id } });
+      if (!existing) throw new NotFoundError('Produto');
+      const variant = await db.productVariant.update({
         where: { id: req.params.id },
         data: req.body,
       });
@@ -201,12 +222,13 @@ export async function productRoutes(app: FastifyInstance) {
     '/adjust-stock',
     { preHandler: app.authorize(['ADMIN']), schema: { body: stockAdjustSchema } },
     async (req) => {
+      const { db, companyId } = tenantDb(req);
       const { variantId, newQuantity, reason } = req.body;
-      const variant = await prisma.productVariant.findUnique({ where: { id: variantId } });
+      const variant = await db.productVariant.findFirst({ where: { id: variantId } });
       if (!variant) throw new NotFoundError('Produto');
 
       const diff = newQuantity - variant.stockQty;
-      const updated = await prisma.$transaction(async (tx) => {
+      const updated = await db.$transaction(async (tx) => {
         const v = await tx.productVariant.update({
           where: { id: variantId },
           data: { stockQty: newQuantity },
@@ -215,13 +237,21 @@ export async function productRoutes(app: FastifyInstance) {
           // Código sequencial só dos acertos (type='ADJUST') — StockMovement é
           // um razão compartilhado com vendas/notas, então não dá pra usar um
           // autoincrement de banco sem misturar a numeração com outros tipos.
+          // Escopado por tenant: cada empresa tem sua própria sequência #1, #2...
           const last = await tx.stockMovement.aggregate({
             _max: { code: true },
             where: { type: 'ADJUST' },
           });
           const code = (last._max.code ?? 0) + 1;
           await tx.stockMovement.create({
-            data: { variantId, type: 'ADJUST', quantity: diff, reason: `ADJUST: ${reason}`, code },
+            data: {
+              variantId,
+              type: 'ADJUST',
+              quantity: diff,
+              reason: `ADJUST: ${reason}`,
+              code,
+              companyId,
+            },
           });
         }
         return v;
@@ -231,8 +261,9 @@ export async function productRoutes(app: FastifyInstance) {
   );
 
   // Histórico de acertos de estoque (StockMovement ADJUST). Só ADMIN.
-  r.get('/stock-adjustments', { preHandler: app.authorize(['ADMIN']) }, async () => {
-    const movements = await prisma.stockMovement.findMany({
+  r.get('/stock-adjustments', { preHandler: app.authorize(['ADMIN']) }, async (req) => {
+    const { db } = tenantDb(req);
+    const movements = await db.stockMovement.findMany({
       where: { type: 'ADJUST' },
       include: { variant: { include: { product: true } } },
       orderBy: { createdAt: 'desc' },
@@ -267,9 +298,10 @@ export async function productRoutes(app: FastifyInstance) {
       },
     },
     async (req) => {
+      const { db } = tenantDb(req);
       const { quantity, reason } = req.body;
-      return prisma.$transaction(async (tx) => {
-        const m = await tx.stockMovement.findUnique({ where: { id: req.params.id } });
+      return db.$transaction(async (tx) => {
+        const m = await tx.stockMovement.findFirst({ where: { id: req.params.id } });
         if (!m || m.type !== 'ADJUST') throw new NotFoundError('Acerto de estoque');
         const delta = quantity - m.quantity;
         if (delta !== 0) {
@@ -292,8 +324,9 @@ export async function productRoutes(app: FastifyInstance) {
     '/stock-adjustments/:id',
     { preHandler: app.authorize(['ADMIN']), schema: { params: z.object({ id: z.string().uuid() }) } },
     async (req, reply) => {
-      await prisma.$transaction(async (tx) => {
-        const m = await tx.stockMovement.findUnique({ where: { id: req.params.id } });
+      const { db } = tenantDb(req);
+      await db.$transaction(async (tx) => {
+        const m = await tx.stockMovement.findFirst({ where: { id: req.params.id } });
         if (!m || m.type !== 'ADJUST') throw new NotFoundError('Acerto de estoque');
         await tx.productVariant.update({
           where: { id: m.variantId },
@@ -311,7 +344,8 @@ export async function productRoutes(app: FastifyInstance) {
     '/:id',
     { preHandler: app.authorize(['ADMIN']), schema: { params: z.object({ id: z.string().uuid() }) } },
     async (req, reply) => {
-      const product = await prisma.product.findUnique({
+      const { db } = tenantDb(req);
+      const product = await db.product.findFirst({
         where: { id: req.params.id },
         select: { id: true, variants: { select: { id: true } } },
       });
@@ -320,8 +354,8 @@ export async function productRoutes(app: FastifyInstance) {
       const variantIds = product.variants.map((v) => v.id);
       if (variantIds.length) {
         const [saleCount, invoiceCount] = await Promise.all([
-          prisma.saleItem.count({ where: { variantId: { in: variantIds } } }),
-          prisma.invoiceItem.count({ where: { variantId: { in: variantIds } } }),
+          db.saleItem.count({ where: { variantId: { in: variantIds } } }),
+          db.invoiceItem.count({ where: { variantId: { in: variantIds } } }),
         ]);
         if (saleCount > 0 || invoiceCount > 0) {
           throw new BusinessError(
@@ -331,7 +365,7 @@ export async function productRoutes(app: FastifyInstance) {
       }
 
       // Cascade remove variantes, movimentos de estoque e mapeamentos De/Para.
-      await prisma.product.delete({ where: { id: req.params.id } });
+      await db.product.delete({ where: { id: req.params.id } });
       return reply.status(204).send();
     },
   );

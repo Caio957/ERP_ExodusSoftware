@@ -11,16 +11,25 @@
 //  [+] Relações faltantes           -> Invoice→supplier, CashRegister→user,
 //                                       Sale→user/client, FinancialAccount→invoice/person
 //  [+] StockMovement                -> razão (ledger) de estoque p/ auditoria e 4.6
-//  [+] Company + companyId opcional -> preparação Multi-Tenant (Plano Mestre V2.0,
-//                                       Fase 1: coluna nullable em todas as tabelas
-//                                       vitais, sem quebrar nada em produção; a
-//                                       obrigatoriedade só entra na Fase 4, depois
-//                                       do backfill e do dreno da fila offline do
-//                                       PDV). Constraints @unique existentes
-//                                       (email, sku, document, accessKey etc.)
-//                                       permanecem globais nesta fase — passarão a
-//                                       ser escopadas por tenant só quando o campo
-//                                       virar obrigatório.
+//  [+] Company + companyId          -> Multi-Tenant (Plano Mestre V2.0):
+//                                       Fase 1 introduziu a coluna como nullable
+//                                       em todas as tabelas vitais (zero-impacto);
+//                                       Fase 2 fez o backfill de todo dado
+//                                       pré-existente para o tenant "Inquilino
+//                                       Zero"; Fase 4 (ESTA) torna `companyId`
+//                                       OBRIGATÓRIO em todas as tabelas de dados
+//                                       de negócio. Exceção deliberada: `User`
+//                                       continua com `companyId` opcional — ver
+//                                       nota no próprio model, abaixo, sobre o
+//                                       papel SYSTEM_ADMIN (§4 do Plano Mestre).
+//                                       Constraints @unique pré-existentes
+//                                       (email, sku, barcode, document,
+//                                       accessKey) permanecem GLOBAIS mesmo
+//                                       após a Fase 4 — não foram tocadas nesta
+//                                       rodada; ver ressalva no relatório da
+//                                       Fase 4 (risco real de colisão entre
+//                                       tenants, ex.: dois lojistas com o mesmo
+//                                       código de barras de fabricante).
 // ============================================================================
 
 generator client {
@@ -32,7 +41,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// 0. MULTI-TENANT (preparação — Plano Mestre V2.0) ---------------------------
+// 0. MULTI-TENANT (Plano Mestre V2.0) ----------------------------------------
 model Company {
   id        String   @id @default(uuid())
   name      String
@@ -64,14 +73,20 @@ model User {
   email        String   @unique
   name         String
   passwordHash String
-  role         String   // 'ADMIN' | 'CASHIER'
+  role         String   // 'ADMIN' | 'CASHIER' (futuro: 'SYSTEM_ADMIN')
   // null = usa padrão do papel; array de chaves de páginas para restringir CASHIER
   allowedPages Json?
   createdAt    DateTime @default(now())
 
-  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
+  // Multi-tenant — DELIBERADAMENTE continua opcional na Fase 4 (diferente das
+  // outras 15 tabelas). O Plano Mestre V2.0 (§4, Governança/Auditoria) prevê
+  // um papel SYSTEM_ADMIN capaz de "Assumir Identidade" (impersonate) entre
+  // MÚLTIPLOS tenants — esse usuário, por definição, não pertence a uma única
+  // empresa. Forçar `companyId` obrigatório aqui inviabilizaria esse papel
+  // futuro. Todo usuário ADMIN/CASHIER real hoje já tem `companyId` preenchido
+  // pelo backfill (Fase 2); `null` fica reservado para contas globais.
   companyId String?
-  company   Company? @relation(fields: [companyId], references: [id])
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   cashRegisters CashRegister[]
   sales         Sale[]
@@ -94,9 +109,9 @@ model Product {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
-  companyId String?
-  company   Company? @relation(fields: [companyId], references: [id])
+  // Multi-tenant — obrigatório a partir da Fase 4 (ver cabeçalho do arquivo)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   @@index([name])
   @@index([brand])
@@ -117,9 +132,9 @@ model ProductVariant {
   batch       String? // lote (obrigatório só quando Product.tracksLotValidity)
   validity    DateTime?
 
-  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
-  companyId String?
-  company   Company? @relation(fields: [companyId], references: [id])
+  // Multi-tenant — obrigatório a partir da Fase 4 (ver cabeçalho do arquivo)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   invoiceItems    InvoiceItem[]
   saleItems       SaleItem[]
@@ -150,9 +165,9 @@ model Person {
   city     String?
   state    String?
 
-  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
-  companyId String?
-  company   Company? @relation(fields: [companyId], references: [id])
+  // Multi-tenant — obrigatório a partir da Fase 4 (ver cabeçalho do arquivo)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   invoices          Invoice[]                @relation("SupplierInvoices")
   sales             Sale[]                   @relation("ClientSales")
@@ -186,9 +201,9 @@ model Invoice {
   otherExpenses  Decimal  @default(0) @db.Decimal(10, 2)
   createdAt      DateTime @default(now())
 
-  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
-  companyId String?
-  company   Company? @relation(fields: [companyId], references: [id])
+  // Multi-tenant — obrigatório a partir da Fase 4 (ver cabeçalho do arquivo)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   items             InvoiceItem[]
   financialAccounts FinancialAccount[]
@@ -208,9 +223,9 @@ model InvoiceItem {
   unitCost  Decimal        @db.Decimal(10, 2)
   cfop      String // registrado como veio no XML (flexível) - 4.3
 
-  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
-  companyId String?
-  company   Company? @relation(fields: [companyId], references: [id])
+  // Multi-tenant — obrigatório a partir da Fase 4 (ver cabeçalho do arquivo)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   @@index([invoiceId])
   @@index([variantId])
@@ -228,9 +243,9 @@ model SupplierProductMapping {
   variant          ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
   createdAt        DateTime       @default(now())
 
-  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
-  companyId String?
-  company   Company? @relation(fields: [companyId], references: [id])
+  // Multi-tenant — obrigatório a partir da Fase 4 (ver cabeçalho do arquivo)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   @@unique([supplierId, supplierItemCode])
   @@index([variantId])
@@ -253,9 +268,9 @@ model CashRegister {
   // que os registros já existentes continuam sendo 'DIARIO' sem migração de dados.
   type        String    @default("DIARIO")
 
-  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
-  companyId String?
-  company   Company? @relation(fields: [companyId], references: [id])
+  // Multi-tenant — obrigatório a partir da Fase 4 (ver cabeçalho do arquivo)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   transactions CashTransaction[]
   sales        Sale[]
@@ -275,9 +290,9 @@ model CashTransaction {
   description    String
   createdAt      DateTime     @default(now())
 
-  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
-  companyId String?
-  company   Company? @relation(fields: [companyId], references: [id])
+  // Multi-tenant — obrigatório a partir da Fase 4 (ver cabeçalho do arquivo)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   @@index([cashRegisterId])
   @@index([companyId])
@@ -307,9 +322,9 @@ model Sale {
   soldAt         DateTime     @default(now())
   createdAt      DateTime     @default(now())
 
-  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
-  companyId String?
-  company   Company? @relation(fields: [companyId], references: [id])
+  // Multi-tenant — obrigatório a partir da Fase 4 (ver cabeçalho do arquivo)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   items             SaleItem[]
   payments          SalePayment[] // formas de pagamento (split / múltiplas)
@@ -329,9 +344,9 @@ model SaleItem {
   quantity  Int
   unitPrice Decimal        @db.Decimal(10, 2)
 
-  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
-  companyId String?
-  company   Company? @relation(fields: [companyId], references: [id])
+  // Multi-tenant — obrigatório a partir da Fase 4 (ver cabeçalho do arquivo)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   @@index([saleId])
   @@index([variantId])
@@ -347,9 +362,9 @@ model SalePayment {
   amount    Decimal  @db.Decimal(10, 2)
   createdAt DateTime @default(now())
 
-  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
-  companyId String?
-  company   Company? @relation(fields: [companyId], references: [id])
+  // Multi-tenant — obrigatório a partir da Fase 4 (ver cabeçalho do arquivo)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   @@index([saleId])
   @@index([companyId])
@@ -366,15 +381,15 @@ model StockMovement {
   refId     String? // id da venda/nota de origem
   // Código sequencial só para acertos de estoque (type='ADJUST') — nulo nos
   // demais tipos. StockMovement é um razão compartilhado por vendas/notas/
-  // acertos, então um autoincrement de banco numeraria tudo junto; o código
-  // é calculado manualmente (aggregate max + 1 escopado a type='ADJUST') na
-  // rota /adjust-stock, mesmo padrão de Invoice.documentNumber.
+  // acertos, então um autoincrement de banco misturaria a numeração; o
+  // código é calculado manualmente (aggregate max + 1 escopado a type='ADJUST')
+  // na rota /adjust-stock, mesmo padrão de Invoice.documentNumber.
   code      Int?
   createdAt DateTime       @default(now())
 
-  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
-  companyId String?
-  company   Company? @relation(fields: [companyId], references: [id])
+  // Multi-tenant — obrigatório a partir da Fase 4 (ver cabeçalho do arquivo)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   @@index([variantId])
   @@index([createdAt])
@@ -382,22 +397,21 @@ model StockMovement {
 }
 
 // Configurações da loja (chave/valor JSON) — ex.: campos obrigatórios do produto.
-// Multi-tenant: `key` deixou de ser a chave primária (era @id) — agora a PK é
-// um `id` uuid próprio, e a unicidade de `key` passou a ser composta com
-// `companyId` (`@@unique([companyId, key])`), permitindo que cada empresa
-// tenha sua própria "company_profile"/"product_form"/etc. Consultas no código
-// (routes/settings.ts, invoices.ts, products.ts) usam a chave composta
-// `companyId_key` (com `companyId: null` enquanto o contexto de tenant ainda
-// não é resolvido por requisição — fases seguintes do Plano Mestre).
+// Multi-tenant: `key` deixou de ser a chave primária (era @id) — a PK é um
+// `id` uuid próprio, e a unicidade de `key` é composta com `companyId`
+// (`@@unique([companyId, key])`), permitindo que cada empresa tenha sua
+// própria "company_profile"/"product_form"/etc. `companyId` obrigatório a
+// partir da Fase 4 — `lib/settings.ts` (getSetting/upsertSetting) recebe o
+// companyId real de cada requisição.
 model Setting {
   id        String   @id @default(uuid())
   key       String
   value     Json
   updatedAt DateTime @updatedAt
 
-  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo; ver nota acima)
-  companyId String?
-  company   Company? @relation(fields: [companyId], references: [id])
+  // Multi-tenant — obrigatório a partir da Fase 4 (ver cabeçalho do arquivo)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   @@unique([companyId, key])
   @@index([companyId])
@@ -423,9 +437,9 @@ model FinancialAccount {
   saleId    String?
   sale      Sale?    @relation(fields: [saleId], references: [id], onDelete: SetNull)
 
-  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
-  companyId String?
-  company   Company? @relation(fields: [companyId], references: [id])
+  // Multi-tenant — obrigatório a partir da Fase 4 (ver cabeçalho do arquivo)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   settlements AccountSettlement[]
 
@@ -445,9 +459,9 @@ model AccountSettlement {
   paidAt             DateTime         @default(now())
   createdAt          DateTime         @default(now())
 
-  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
-  companyId String?
-  company   Company? @relation(fields: [companyId], references: [id])
+  // Multi-tenant — obrigatório a partir da Fase 4 (ver cabeçalho do arquivo)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   @@index([financialAccountId])
   @@index([companyId])

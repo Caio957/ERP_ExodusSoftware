@@ -11,12 +11,12 @@ import {
   apportionLandedCost,
   productFormSettingsSchema,
 } from '@exodus/shared';
-import { prisma } from '../lib/prisma.js';
 import { serializeDecimals } from '../lib/serialize.js';
 import { parseNfeXml } from '../services/nfe-parser.js';
 import { BusinessError, ConflictError, NotFoundError } from '../lib/errors.js';
 import { calcWeightedAverageCost } from '../lib/inventory.js';
 import { getSetting } from '../lib/settings.js';
+import { tenantDb } from '../lib/tenant.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 
@@ -31,10 +31,16 @@ export async function invoiceRoutes(app: FastifyInstance) {
    * associar na modal (Requisito 4.3).
    */
   r.post('/parse', { preHandler: app.authenticate, schema: { body: parseNfeSchema } }, async (req) => {
+    const { db } = tenantDb(req);
     const raw = parseNfeXml(req.body.xml);
 
+    // `document`/`accessKey`/`barcode` continuam @unique GLOBAIS no schema
+    // (decisão da Fase 1, ainda não revisitada — ver cabeçalho de
+    // schema.prisma), mas as buscas aqui são escopadas por tenant: um
+    // fornecedor/produto/nota cadastrado por OUTRA empresa não pode ser
+    // enxergado como "já existe" por esta.
     const supplier = raw.supplier.document
-      ? await prisma.person.findUnique({ where: { document: raw.supplier.document } })
+      ? await db.person.findFirst({ where: { document: raw.supplier.document } })
       : null;
 
     const codes = raw.items.map((i) => i.supplierItemCode);
@@ -42,12 +48,12 @@ export async function invoiceRoutes(app: FastifyInstance) {
 
     const [mappings, variantsByBarcode] = await Promise.all([
       supplier
-        ? prisma.supplierProductMapping.findMany({
+        ? db.supplierProductMapping.findMany({
             where: { supplierId: supplier.id, supplierItemCode: { in: codes } },
           })
         : Promise.resolve([]),
       barcodes.length
-        ? prisma.productVariant.findMany({ where: { barcode: { in: barcodes } } })
+        ? db.productVariant.findMany({ where: { barcode: { in: barcodes } } })
         : Promise.resolve([]),
     ]);
 
@@ -69,7 +75,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
       ...new Set(matchedVariantIds.map((m) => m.matchedVariantId).filter((id): id is string => !!id)),
     ];
     const matchedVariants = uniqueMatchedIds.length
-      ? await prisma.productVariant.findMany({
+      ? await db.productVariant.findMany({
           where: { id: { in: uniqueMatchedIds } },
           include: { product: { select: { name: true, brand: true, group: true } } },
         })
@@ -113,7 +119,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
       items,
       duplicates: raw.duplicates,
       alreadyImported: raw.accessKey
-        ? !!(await prisma.invoice.findUnique({ where: { accessKey: raw.accessKey } }))
+        ? !!(await db.invoice.findFirst({ where: { accessKey: raw.accessKey } }))
         : false,
     };
   });
@@ -127,9 +133,10 @@ export async function invoiceRoutes(app: FastifyInstance) {
     '/confirm',
     { preHandler: app.authenticate, schema: { body: confirmInvoiceSchema } },
     async (req, reply) => {
+      const { db, companyId } = tenantDb(req);
       const { supplierId, accessKey, nfeNumber, issueDate, entryDate, freight, otherExpenses, items, duplicates, customInstallments } = req.body;
 
-      const exists = await prisma.invoice.findUnique({ where: { accessKey } });
+      const exists = await db.invoice.findFirst({ where: { accessKey } });
       if (exists) throw new ConflictError('Nota fiscal já importada', { accessKey });
 
       // Landed cost (4.9): custo unitário rateado (embute a fatia de
@@ -141,8 +148,9 @@ export async function invoiceRoutes(app: FastifyInstance) {
       const apportioned = apportionLandedCost(items, freight, otherExpenses);
       const totalAmount = Math.round((productsTotal + freight + otherExpenses) * 100) / 100;
 
-      const invoice = await prisma.$transaction(async (tx) => {
-        // Nº de documento sequencial (mesma lógica de /manual — D4).
+      const invoice = await db.$transaction(async (tx) => {
+        // Nº de documento sequencial (mesma lógica de /manual — D4). Escopado
+        // por tenant: cada empresa tem sua própria sequência de documentos.
         const last = await tx.invoice.aggregate({ _max: { documentNumber: true } });
         const documentNumber = (last._max.documentNumber ?? 0) + 1;
 
@@ -150,15 +158,23 @@ export async function invoiceRoutes(app: FastifyInstance) {
         // item ANTES de gravar a nota — itens com `newProductData` criam
         // Produto+Variante aqui, na mesma transação, para que uma falha em
         // qualquer ponto (ex.: item seguinte) desfaça tanto a nota quanto os
-        // produtos já criados (nunca fica "produto pela metade").
+        // produtos já criados (nunca fica "produto pela metade"). Itens com
+        // `variantId` vindo do cliente são validados aqui via findFirst
+        // escopado — se pertencerem a outro tenant, a busca falha e a
+        // transação inteira é abortada (fecha um IDOR real que existia
+        // antes de o multi-tenant entrar em vigor).
         let productFormCfg: ReturnType<typeof productFormSettingsSchema.parse> | null = null;
         const resolvedItems = await Promise.all(
           items.map(async (it, i) => {
-            if (it.variantId) return { ...it, resolvedVariantId: it.variantId };
+            if (it.variantId) {
+              const owned = await tx.productVariant.findFirst({ where: { id: it.variantId } });
+              if (!owned) throw new NotFoundError('Produto');
+              return { ...it, resolvedVariantId: owned.id };
+            }
 
             const draft = it.newProductData!;
             if (!productFormCfg) {
-              const setting = await getSetting('product_form', tx);
+              const setting = await getSetting(companyId, 'product_form', tx);
               productFormCfg = productFormSettingsSchema.parse(setting?.value ?? {});
             }
             if (productFormCfg.brandRequired && !draft.brand)
@@ -179,6 +195,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
                 brand: draft.brand ?? '',
                 group: draft.group ?? '',
                 subgroup: draft.subgroup ?? null,
+                companyId,
                 variants: {
                   create: [
                     {
@@ -190,6 +207,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
                       // Validado no Zod (superRefine): obrigatório quando há newProductData.
                       salePrice: it.newSalePrice!,
                       stockQty: 0,
+                      companyId,
                     },
                   ],
                 },
@@ -211,12 +229,14 @@ export async function invoiceRoutes(app: FastifyInstance) {
             totalAmount,
             freight,
             otherExpenses,
+            companyId,
             items: {
               create: resolvedItems.map((it) => ({
                 variantId: it.resolvedVariantId,
                 quantity: it.quantity,
                 unitCost: it.unitCost,
                 cfop: it.cfop,
+                companyId,
               })),
             },
           },
@@ -230,7 +250,11 @@ export async function invoiceRoutes(app: FastifyInstance) {
         // único código para os dois casos, sem bifurcar a lógica.
         for (const [i, it] of resolvedItems.entries()) {
           const landedCost = apportioned[i]!;
-          const current = await tx.productVariant.findUniqueOrThrow({ where: { id: it.resolvedVariantId }, select: { stockQty: true, averageCost: true } });
+          const current = await tx.productVariant.findFirst({
+            where: { id: it.resolvedVariantId },
+            select: { stockQty: true, averageCost: true },
+          });
+          if (!current) throw new NotFoundError('Produto');
           const newAvg = calcWeightedAverageCost(current.stockQty, Number(current.averageCost), it.quantity, landedCost);
           await tx.productVariant.update({
             where: { id: it.resolvedVariantId },
@@ -251,6 +275,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
               // Ledger reflete quando a mercadoria entrou fisicamente na loja
               // (entryDate), não a emissão da NFe nem o instante do confirm.
               createdAt: entryDate,
+              companyId,
             },
           });
         }
@@ -258,23 +283,29 @@ export async function invoiceRoutes(app: FastifyInstance) {
         // Persistir De/Para para notas futuras — funciona também para
         // produtos recém-criados: a próxima nota do mesmo fornecedor com o
         // mesmo cProd/cEAN já chega auto-mapeada.
+        // `upsert` não é coberto pela extensão withTenant (seletor único) —
+        // refeito manualmente como findFirst (escopado) + create/update.
         const toMap = resolvedItems.filter((it) => it.saveMapping && it.supplierItemCode);
         for (const it of toMap) {
-          await tx.supplierProductMapping.upsert({
-            where: {
-              supplierId_supplierItemCode: {
+          const existingMapping = await tx.supplierProductMapping.findFirst({
+            where: { supplierId, supplierItemCode: it.supplierItemCode! },
+          });
+          if (existingMapping) {
+            await tx.supplierProductMapping.update({
+              where: { id: existingMapping.id },
+              data: { variantId: it.resolvedVariantId, supplierBarcode: it.supplierBarcode ?? null },
+            });
+          } else {
+            await tx.supplierProductMapping.create({
+              data: {
                 supplierId,
                 supplierItemCode: it.supplierItemCode!,
+                supplierBarcode: it.supplierBarcode ?? null,
+                variantId: it.resolvedVariantId,
+                companyId,
               },
-            },
-            create: {
-              supplierId,
-              supplierItemCode: it.supplierItemCode!,
-              supplierBarcode: it.supplierBarcode ?? null,
-              variantId: it.resolvedVariantId,
-            },
-            update: { variantId: it.resolvedVariantId, supplierBarcode: it.supplierBarcode ?? null },
-          });
+            });
+          }
         }
 
         // Contas a Pagar: customInstallments tem prioridade; fallback para duplicatas do XML
@@ -287,6 +318,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
               status: 'PENDING',
               invoiceId: created.id,
               personId: supplierId,
+              companyId,
             }))
           : duplicates.map((d) => ({
               type: 'PAYABLE' as const,
@@ -296,6 +328,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
               status: 'PENDING',
               invoiceId: created.id,
               personId: supplierId,
+              companyId,
             }));
 
         if (financialRows.length) {
@@ -319,10 +352,11 @@ export async function invoiceRoutes(app: FastifyInstance) {
     '/manual',
     { preHandler: app.authorize(['ADMIN']), schema: { body: manualPurchaseSchema } },
     async (req, reply) => {
+      const { db, companyId } = tenantDb(req);
       const { supplierId, supplierName, purchaseDate, notes, items, freight, otherExpenses, installments } = req.body;
 
       const variantIds = [...new Set(items.map((i) => i.variantId))];
-      const variants = await prisma.productVariant.findMany({ where: { id: { in: variantIds } } });
+      const variants = await db.productVariant.findMany({ where: { id: { in: variantIds } } });
       if (variants.length !== variantIds.length) throw new NotFoundError('Produto');
       const variantById = new Map(variants.map((v) => [v.id, v]));
 
@@ -341,11 +375,13 @@ export async function invoiceRoutes(app: FastifyInstance) {
         }
       }
 
-      const invoice = await prisma.$transaction(async (tx) => {
+      const invoice = await db.$transaction(async (tx) => {
         // Fornecedor: usa o existente ou cria um novo.
         let supId = supplierId;
         if (!supId) {
-          const created = await tx.person.create({ data: { type: 'SUPPLIER', name: supplierName! } });
+          const created = await tx.person.create({
+            data: { type: 'SUPPLIER', name: supplierName!, companyId },
+          });
           supId = created.id;
         }
 
@@ -363,12 +399,14 @@ export async function invoiceRoutes(app: FastifyInstance) {
             totalAmount: total,
             freight,
             otherExpenses,
+            companyId,
             items: {
               create: items.map((it) => ({
                 variantId: it.variantId,
                 quantity: it.quantity,
                 unitCost: it.unitCost,
                 cfop: 'MANUAL',
+                companyId,
               })),
             },
           },
@@ -396,7 +434,14 @@ export async function invoiceRoutes(app: FastifyInstance) {
             });
           }
           await tx.stockMovement.create({
-            data: { variantId: it.variantId, type: 'IN', quantity: it.quantity, reason: 'INVOICE', refId: created.id },
+            data: {
+              variantId: it.variantId,
+              type: 'IN',
+              quantity: it.quantity,
+              reason: 'INVOICE',
+              refId: created.id,
+              companyId,
+            },
           });
         }
 
@@ -411,6 +456,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
               status: 'PENDING',
               invoiceId: created.id,
               personId: supId,
+              companyId,
             })),
           });
         }
@@ -424,7 +470,8 @@ export async function invoiceRoutes(app: FastifyInstance) {
 
   // Detalhe de uma compra/nota.
   r.get('/:id', { preHandler: app.authenticate, schema: { params: idParam } }, async (req) => {
-    const invoice = await prisma.invoice.findUnique({
+    const { db } = tenantDb(req);
+    const invoice = await db.invoice.findFirst({
       where: { id: req.params.id },
       include: {
         supplier: true,
@@ -450,10 +497,13 @@ export async function invoiceRoutes(app: FastifyInstance) {
     '/:id',
     { preHandler: app.authorize(['ADMIN']), schema: { params: idParam, body: updateInvoiceSchema } },
     async (req) => {
+      const { db, companyId } = tenantDb(req);
       const { notes, purchaseDate, documentNumber, supplierId, items, freight, otherExpenses, installments } = req.body;
 
       if (!items) {
-        const invoice = await prisma.invoice.update({
+        const existingMeta = await db.invoice.findFirst({ where: { id: req.params.id } });
+        if (!existingMeta) throw new NotFoundError('Compra');
+        const invoice = await db.invoice.update({
           where: { id: req.params.id },
           data: {
             ...(notes !== undefined ? { notes } : {}),
@@ -465,7 +515,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
         return serializeDecimals(invoice);
       }
 
-      const existing = await prisma.invoice.findUnique({
+      const existing = await db.invoice.findFirst({
         where: { id: req.params.id },
         include: { items: true, financialAccounts: { include: { settlements: true } } },
       });
@@ -494,7 +544,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
         }
       }
 
-      const updated = await prisma.$transaction(async (tx) => {
+      const updated = await db.$transaction(async (tx) => {
         // 1. Estorna o estoque dos itens antigos (mesma simplificação já usada
         //    no DELETE: não tenta reverter o CMP, só o saldo físico — reverter
         //    a média ponderada exigiria conhecer o estoque/custo médio de
@@ -505,7 +555,14 @@ export async function invoiceRoutes(app: FastifyInstance) {
             data: { stockQty: { decrement: it.quantity } },
           });
           await tx.stockMovement.create({
-            data: { variantId: it.variantId, type: 'OUT', quantity: -it.quantity, reason: 'INVOICE_EDIT', refId: existing.id },
+            data: {
+              variantId: it.variantId,
+              type: 'OUT',
+              quantity: -it.quantity,
+              reason: 'INVOICE_EDIT',
+              refId: existing.id,
+              companyId,
+            },
           });
         }
 
@@ -513,7 +570,8 @@ export async function invoiceRoutes(app: FastifyInstance) {
         await tx.invoiceItem.deleteMany({ where: { invoiceId: existing.id } });
         await tx.financialAccount.deleteMany({ where: { invoiceId: existing.id } });
 
-        // 3. Valida as variantes novas e captura o estoque já estornado (passo 1).
+        // 3. Valida as variantes novas (escopadas por tenant) e captura o
+        //    estoque já estornado (passo 1).
         const variantIds = [...new Set(items.map((i) => i.variantId))];
         const variants = await tx.productVariant.findMany({ where: { id: { in: variantIds } } });
         if (variants.length !== variantIds.length) throw new NotFoundError('Produto');
@@ -536,6 +594,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
                 quantity: it.quantity,
                 unitCost: it.unitCost,
                 cfop: 'MANUAL',
+                companyId,
               })),
             },
           },
@@ -563,7 +622,14 @@ export async function invoiceRoutes(app: FastifyInstance) {
             });
           }
           await tx.stockMovement.create({
-            data: { variantId: it.variantId, type: 'IN', quantity: it.quantity, reason: 'INVOICE', refId: invoice.id },
+            data: {
+              variantId: it.variantId,
+              type: 'IN',
+              quantity: it.quantity,
+              reason: 'INVOICE',
+              refId: invoice.id,
+              companyId,
+            },
           });
         }
 
@@ -578,6 +644,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
               status: 'PENDING',
               invoiceId: invoice.id,
               personId: invoice.supplierId,
+              companyId,
             })),
           });
         }
@@ -595,7 +662,8 @@ export async function invoiceRoutes(app: FastifyInstance) {
     '/:id',
     { preHandler: app.authorize(['ADMIN']), schema: { params: idParam } },
     async (req, reply) => {
-      const invoice = await prisma.invoice.findUnique({
+      const { db, companyId } = tenantDb(req);
+      const invoice = await db.invoice.findFirst({
         where: { id: req.params.id },
         include: { items: true, financialAccounts: true },
       });
@@ -604,14 +672,21 @@ export async function invoiceRoutes(app: FastifyInstance) {
         throw new BusinessError('Compra possui contas a pagar já baixadas e não pode ser excluída.');
       }
 
-      await prisma.$transaction(async (tx) => {
+      await db.$transaction(async (tx) => {
         for (const it of invoice.items) {
           await tx.productVariant.update({
             where: { id: it.variantId },
             data: { stockQty: { decrement: it.quantity } },
           });
           await tx.stockMovement.create({
-            data: { variantId: it.variantId, type: 'OUT', quantity: -it.quantity, reason: 'INVOICE_DELETE', refId: invoice.id },
+            data: {
+              variantId: it.variantId,
+              type: 'OUT',
+              quantity: -it.quantity,
+              reason: 'INVOICE_DELETE',
+              refId: invoice.id,
+              companyId,
+            },
           });
         }
         await tx.financialAccount.deleteMany({ where: { invoiceId: invoice.id } });
@@ -622,17 +697,25 @@ export async function invoiceRoutes(app: FastifyInstance) {
     },
   );
 
-  // Upsert manual de um vínculo De/Para
+  // Upsert manual de um vínculo De/Para. `upsert` não é coberto pela extensão
+  // withTenant (seletor único) — refeito como findFirst (escopado) + create/update.
   r.post(
     '/mappings',
     { preHandler: app.authenticate, schema: { body: supplierMappingSchema } },
     async (req, reply) => {
+      const { db, companyId } = tenantDb(req);
       const { supplierId, supplierItemCode, supplierBarcode, variantId } = req.body;
-      const mapping = await prisma.supplierProductMapping.upsert({
-        where: { supplierId_supplierItemCode: { supplierId, supplierItemCode } },
-        create: { supplierId, supplierItemCode, supplierBarcode, variantId },
-        update: { variantId, supplierBarcode },
+      const existing = await db.supplierProductMapping.findFirst({
+        where: { supplierId, supplierItemCode },
       });
+      const mapping = existing
+        ? await db.supplierProductMapping.update({
+            where: { id: existing.id },
+            data: { variantId, supplierBarcode },
+          })
+        : await db.supplierProductMapping.create({
+            data: { supplierId, supplierItemCode, supplierBarcode, variantId, companyId },
+          });
       return reply.status(201).send(mapping);
     },
   );
@@ -642,7 +725,8 @@ export async function invoiceRoutes(app: FastifyInstance) {
     '/:id/financial',
     { preHandler: app.authorize(['ADMIN']), schema: { params: idParam } },
     async (req, reply) => {
-      const invoice = await prisma.invoice.findUnique({
+      const { db } = tenantDb(req);
+      const invoice = await db.invoice.findFirst({
         where: { id: req.params.id },
         include: { financialAccounts: { include: { settlements: true } } },
       });
@@ -655,7 +739,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
           'Há contas a pagar desta compra com baixa registrada. Estorne as baixas antes.',
         );
       }
-      await prisma.financialAccount.deleteMany({ where: { invoiceId: req.params.id } });
+      await db.financialAccount.deleteMany({ where: { invoiceId: req.params.id } });
       return reply.status(204).send();
     },
   );
@@ -676,7 +760,8 @@ export async function invoiceRoutes(app: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const invoice = await prisma.invoice.findUnique({
+      const { db, companyId } = tenantDb(req);
+      const invoice = await db.invoice.findFirst({
         where: { id: req.params.id },
         include: { financialAccounts: true },
       });
@@ -685,7 +770,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
         throw new BusinessError('Exclua o financeiro atual antes de refazê-lo.');
       }
       const { installments } = req.body;
-      await prisma.financialAccount.createMany({
+      await db.financialAccount.createMany({
         data: installments.map((inst, i) => ({
           type: 'PAYABLE',
           description: `Compra #${invoice.documentNumber ?? invoice.id.slice(-6)} - Parcela ${i + 1}/${installments.length}`,
@@ -694,6 +779,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
           status: 'PENDING',
           invoiceId: invoice.id,
           personId: invoice.supplierId,
+          companyId,
         })),
       });
       return reply.status(201).send({ created: installments.length });
@@ -702,10 +788,11 @@ export async function invoiceRoutes(app: FastifyInstance) {
 
   // Listagem de notas (inclui financialAccounts resumido para exibir status)
   r.get('/', { preHandler: app.authenticate, schema: { querystring: paginationQuery } }, async (req) => {
+    const { db } = tenantDb(req);
     const { page, pageSize } = req.query;
     const [total, items] = await Promise.all([
-      prisma.invoice.count(),
-      prisma.invoice.findMany({
+      db.invoice.count(),
+      db.invoice.findMany({
         include: {
           supplier: true,
           items: true,

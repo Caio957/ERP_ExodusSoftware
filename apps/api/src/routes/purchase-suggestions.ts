@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { purchaseSuggestionQuerySchema } from '@exodus/shared';
-import { prisma } from '../lib/prisma.js';
 import { toMoney } from '../lib/serialize.js';
+import { tenantDb } from '../lib/tenant.js';
 
 /**
  * Sugestão de compra (Requisito 4.6).
@@ -18,6 +18,7 @@ export async function purchaseSuggestionRoutes(app: FastifyInstance) {
     '/',
     { preHandler: app.authorize(['ADMIN']), schema: { querystring: purchaseSuggestionQuerySchema } },
     async (req) => {
+      const { db } = tenantDb(req);
       const { windowDays, leadTimeDays, brand, group, subgroup } = req.query;
       const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
 
@@ -28,7 +29,7 @@ export async function purchaseSuggestionRoutes(app: FastifyInstance) {
       if (subgroup) productWhere.subgroup = { contains: subgroup, mode: 'insensitive' };
 
       // Busca todas as variantes (com filtro de produto)
-      const variants = await prisma.productVariant.findMany({
+      const variants = await db.productVariant.findMany({
         where: { product: Object.keys(productWhere).length ? productWhere : undefined },
         include: { product: true },
         orderBy: [{ product: { name: 'asc' } }, { sku: 'asc' }],
@@ -38,7 +39,7 @@ export async function purchaseSuggestionRoutes(app: FastifyInstance) {
 
       // Vendas agregadas na janela para as variantes encontradas
       const variantIds = variants.map((v) => v.id);
-      const grouped = await prisma.saleItem.groupBy({
+      const grouped = await db.saleItem.groupBy({
         by: ['variantId'],
         where: {
           variantId: { in: variantIds },

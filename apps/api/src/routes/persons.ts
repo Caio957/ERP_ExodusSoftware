@@ -2,8 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { createPersonSchema, updatePersonSchema, paginationQuery, PersonType } from '@exodus/shared';
-import { prisma } from '../lib/prisma.js';
 import { AppError, BusinessError, NotFoundError } from '../lib/errors.js';
+import { tenantDb } from '../lib/tenant.js';
 
 export async function personRoutes(app: FastifyInstance) {
   const r = app.withTypeProvider<ZodTypeProvider>();
@@ -30,14 +30,21 @@ export async function personRoutes(app: FastifyInstance) {
   );
 
   // GET /api/persons?type=SUPPLIER&search=...
+  // Ganhou `preHandler: app.authenticate` nesta rodada — não tinha NENHUMA
+  // autenticação antes (achado ao mapear as rotas para a Fase 4), o que
+  // tornava essa rota pública e, mais grave, impossível de escopar por
+  // tenant (sem req.user não há companyId nenhum para filtrar). Sem esse
+  // preHandler, o isolamento multi-tenant desta rota não teria como existir.
   r.get(
     '/',
     {
+      preHandler: app.authenticate,
       schema: {
         querystring: paginationQuery.extend({ type: PersonType.optional() }),
       },
     },
     async (req) => {
+      const { db } = tenantDb(req);
       const { page, pageSize, search, type } = req.query;
       const where = {
         ...(type ? { type } : {}),
@@ -51,8 +58,8 @@ export async function personRoutes(app: FastifyInstance) {
           : {}),
       };
       const [total, items] = await Promise.all([
-        prisma.person.count({ where }),
-        prisma.person.findMany({
+        db.person.count({ where }),
+        db.person.findMany({
           where,
           orderBy: { name: 'asc' },
           skip: (page - 1) * pageSize,
@@ -63,11 +70,13 @@ export async function personRoutes(app: FastifyInstance) {
     },
   );
 
+  // Mesmo achado do GET '/' acima — ganhou autenticação nesta rodada.
   r.get(
     '/:id',
-    { schema: { params: z.object({ id: z.string().uuid() }) } },
+    { preHandler: app.authenticate, schema: { params: z.object({ id: z.string().uuid() }) } },
     async (req) => {
-      const person = await prisma.person.findUnique({ where: { id: req.params.id } });
+      const { db } = tenantDb(req);
+      const person = await db.person.findFirst({ where: { id: req.params.id } });
       if (!person) throw new NotFoundError('Pessoa');
       return person;
     },
@@ -77,7 +86,8 @@ export async function personRoutes(app: FastifyInstance) {
     '/',
     { preHandler: app.authenticate, schema: { body: createPersonSchema } },
     async (req, reply) => {
-      const person = await prisma.person.create({ data: req.body });
+      const { db, companyId } = tenantDb(req);
+      const person = await db.person.create({ data: { ...req.body, companyId } });
       return reply.status(201).send(person);
     },
   );
@@ -89,7 +99,10 @@ export async function personRoutes(app: FastifyInstance) {
       schema: { params: z.object({ id: z.string().uuid() }), body: updatePersonSchema },
     },
     async (req) => {
-      return prisma.person.update({ where: { id: req.params.id }, data: req.body });
+      const { db } = tenantDb(req);
+      const existing = await db.person.findFirst({ where: { id: req.params.id } });
+      if (!existing) throw new NotFoundError('Pessoa');
+      return db.person.update({ where: { id: req.params.id }, data: req.body });
     },
   );
 
@@ -98,16 +111,17 @@ export async function personRoutes(app: FastifyInstance) {
     '/:id',
     { preHandler: app.authenticate, schema: { params: z.object({ id: z.string().uuid() }) } },
     async (req, reply) => {
-      const person = await prisma.person.findUnique({
+      const { db } = tenantDb(req);
+      const person = await db.person.findFirst({
         where: { id: req.params.id },
         select: { id: true },
       });
       if (!person) throw new NotFoundError('Pessoa');
 
       const [sales, invoices, accounts] = await Promise.all([
-        prisma.sale.count({ where: { clientId: req.params.id } }),
-        prisma.invoice.count({ where: { supplierId: req.params.id } }),
-        prisma.financialAccount.count({ where: { personId: req.params.id } }),
+        db.sale.count({ where: { clientId: req.params.id } }),
+        db.invoice.count({ where: { supplierId: req.params.id } }),
+        db.financialAccount.count({ where: { personId: req.params.id } }),
       ]);
       if (sales > 0 || invoices > 0 || accounts > 0) {
         throw new BusinessError(
@@ -115,7 +129,7 @@ export async function personRoutes(app: FastifyInstance) {
         );
       }
 
-      await prisma.person.delete({ where: { id: req.params.id } });
+      await db.person.delete({ where: { id: req.params.id } });
       return reply.status(204).send();
     },
   );
