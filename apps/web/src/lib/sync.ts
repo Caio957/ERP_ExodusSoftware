@@ -1,6 +1,7 @@
 import type { CreateSaleInput } from '@exodus/shared';
 import { api, ApiError } from './api';
 import { db, type QueuedSale } from './db';
+import { useAuth } from '../store/auth';
 
 interface SyncResultItem {
   clientRef: string | null;
@@ -16,9 +17,14 @@ interface SyncResultItem {
 export async function enqueueSale(
   payload: Omit<CreateSaleInput, 'clientRef'>,
 ): Promise<QueuedSale> {
+  const companyId = useAuth.getState().user?.companyId;
+  if (!companyId) {
+    throw new Error('Não é possível registrar a venda: sessão sem empresa associada.');
+  }
   const clientRef = crypto.randomUUID();
   const queued: QueuedSale = {
     clientRef,
+    companyId,
     payload: { ...payload, clientRef, soldAt: payload.soldAt ?? new Date() },
     createdAt: Date.now(),
     status: 'PENDING',
@@ -36,9 +42,21 @@ let flushing = false;
  */
 export async function flushQueue(): Promise<{ sent: number; failed: number } | null> {
   if (flushing || !navigator.onLine) return null;
+  const companyId = useAuth.getState().user?.companyId;
+  if (!companyId) return null;
   flushing = true;
   try {
-    const pending = await db.saleQueue.where('status').equals('PENDING').toArray();
+    const all = await db.saleQueue.where('status').equals('PENDING').toArray();
+    // Isolamento na leitura: só envia itens do tenant da sessão ativa. Na
+    // prática a fila já é purgada no logout (store/auth.ts), então itens de
+    // outro companyId não deveriam existir aqui — mantido como rede de
+    // segurança, não como única camada de proteção.
+    const pending = all.filter((item) => item.companyId === companyId);
+    if (all.length !== pending.length) {
+      console.warn(
+        `flushQueue: ${all.length - pending.length} item(ns) da fila pertencem a outro tenant e foram ignorados.`,
+      );
+    }
     if (pending.length === 0) return { sent: 0, failed: 0 };
 
     const { results } = await api.post<{ results: SyncResultItem[] }>('/api/sales/sync', {
@@ -79,7 +97,13 @@ export async function flushQueue(): Promise<{ sent: number; failed: number } | n
 
 /** Reprocessa vendas que falharam, voltando-as para PENDING. */
 export async function retryFailed(): Promise<void> {
-  await db.saleQueue.where('status').equals('ERROR').modify({ status: 'PENDING' });
+  const companyId = useAuth.getState().user?.companyId;
+  if (!companyId) return;
+  await db.saleQueue
+    .where('status')
+    .equals('ERROR')
+    .and((item) => item.companyId === companyId)
+    .modify({ status: 'PENDING' });
   await flushQueue();
 }
 

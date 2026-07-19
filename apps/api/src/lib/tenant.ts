@@ -114,7 +114,12 @@ export function withTenant(companyId: string) {
 export function tenantDb(req: FastifyRequest): { db: ReturnType<typeof withTenant>; companyId: string } {
   const companyId = req.user.companyId;
   if (!companyId) {
-    throw new ForbiddenError('Usuário sem empresa associada — ação não permitida');
+    // Code distinto (NO_TENANT) de propósito: cobre tanto o usuário
+    // realmente sem tenant quanto uma sessão com JWT emitido antes da
+    // migração multi-tenant (sem a claim `companyId`). O frontend usa esse
+    // código específico para deslogar automaticamente — diferente do 403
+    // comum de `authorize()` por papel, que não deve deslogar ninguém.
+    throw new ForbiddenError('Sua sessão está desatualizada. Faça login novamente.', 'NO_TENANT');
   }
   return { db: withTenant(companyId), companyId };
 }

@@ -55,8 +55,12 @@ export function Layout() {
   const items = navItems.filter((item) => canAccess(item.pageKey));
   const bottomItems = items.slice(0, 4); // principais no bottom nav (celular)
 
-  function doLogout() {
-    logout();
+  async function doLogout() {
+    const result = await logout();
+    if (!result.ok) {
+      window.alert(result.message);
+      return;
+    }
     navigate('/login');
   }
 

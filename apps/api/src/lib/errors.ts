@@ -33,8 +33,13 @@ export class UnauthorizedError extends AppError {
 }
 
 export class ForbiddenError extends AppError {
-  constructor(message = 'Acesso negado') {
-    super(403, message, 'FORBIDDEN');
+  // `code` é sobrescrevível para casos de 403 que o frontend precisa
+  // diferenciar do bloqueio comum de RBAC por papel — ex.: `NO_TENANT`
+  // (sessão sem empresa associada), que dispara logout automático no
+  // cliente, ao contrário de um 403 de `authorize()` por papel (que só deve
+  // exibir a mensagem de erro, sem deslogar ninguém).
+  constructor(message = 'Acesso negado', code = 'FORBIDDEN') {
+    super(403, message, code);
   }
 }
 

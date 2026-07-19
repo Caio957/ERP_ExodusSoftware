@@ -1,4 +1,5 @@
 import { tokenStore } from './token';
+import { useAuth } from '../store/auth';
 
 /** URL base da API. Em dev usamos o proxy do Vite ('/api'). */
 const BASE_URL = import.meta.env.VITE_API_URL ?? '';
@@ -49,6 +50,24 @@ export async function apiFetch<T = unknown>(
       (isJson && (data as { message?: string })?.message) || `Erro ${res.status}`;
     const code = isJson ? (data as { code?: string })?.code : undefined;
     if (res.status === 401) tokenStore.clear();
+    // NO_TENANT: sessão sem empresa associada (JWT emitido antes da migração
+    // multi-tenant, ou usuário genuinamente sem tenant). Diferente do 403
+    // comum de RBAC por papel (ex.: CASHIER numa rota de ADMIN) — aquele
+    // deve só mostrar a mensagem de erro, sem deslogar ninguém. Só este
+    // código específico dispara logout automático — location.href em vez de
+    // useNavigate porque este módulo roda fora da árvore React. `logout()`
+    // pode recusar (vendas locais pendentes de sincronizar): nesse caso
+    // avisa em vez de forçar o redirecionamento e apagar dados não
+    // sincronizados.
+    if (code === 'NO_TENANT') {
+      void useAuth
+        .getState()
+        .logout()
+        .then((result) => {
+          if (result.ok) window.location.href = '/login';
+          else window.alert(result.message);
+        });
+    }
     throw new ApiError(res.status, message, code, data);
   }
 
