@@ -16,6 +16,7 @@ import { serializeDecimals } from '../lib/serialize.js';
 import { parseNfeXml } from '../services/nfe-parser.js';
 import { BusinessError, ConflictError, NotFoundError } from '../lib/errors.js';
 import { calcWeightedAverageCost } from '../lib/inventory.js';
+import { getSetting } from '../lib/settings.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 
@@ -157,7 +158,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
 
             const draft = it.newProductData!;
             if (!productFormCfg) {
-              const setting = await tx.setting.findUnique({ where: { key: 'product_form' } });
+              const setting = await getSetting('product_form', tx);
               productFormCfg = productFormSettingsSchema.parse(setting?.value ?? {});
             }
             if (productFormCfg.brandRequired && !draft.brand)

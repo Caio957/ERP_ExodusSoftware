@@ -11,6 +11,16 @@
 //  [+] Relações faltantes           -> Invoice→supplier, CashRegister→user,
 //                                       Sale→user/client, FinancialAccount→invoice/person
 //  [+] StockMovement                -> razão (ledger) de estoque p/ auditoria e 4.6
+//  [+] Company + companyId opcional -> preparação Multi-Tenant (Plano Mestre V2.0,
+//                                       Fase 1: coluna nullable em todas as tabelas
+//                                       vitais, sem quebrar nada em produção; a
+//                                       obrigatoriedade só entra na Fase 4, depois
+//                                       do backfill e do dreno da fila offline do
+//                                       PDV). Constraints @unique existentes
+//                                       (email, sku, document, accessKey etc.)
+//                                       permanecem globais nesta fase — passarão a
+//                                       ser escopadas por tenant só quando o campo
+//                                       virar obrigatório.
 // ============================================================================
 
 generator client {
@@ -20,6 +30,32 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+// 0. MULTI-TENANT (preparação — Plano Mestre V2.0) ---------------------------
+model Company {
+  id        String   @id @default(uuid())
+  name      String
+  document  String?  @unique // CNPJ do tenant (opcional nesta fase)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users                   User[]
+  products                Product[]
+  productVariants         ProductVariant[]
+  persons                 Person[]
+  invoices                Invoice[]
+  invoiceItems            InvoiceItem[]
+  supplierProductMappings SupplierProductMapping[]
+  cashRegisters           CashRegister[]
+  cashTransactions        CashTransaction[]
+  sales                   Sale[]
+  saleItems               SaleItem[]
+  salePayments            SalePayment[]
+  stockMovements          StockMovement[]
+  settings                Setting[]
+  financialAccounts       FinancialAccount[]
+  accountSettlements      AccountSettlement[]
 }
 
 // 1. USUÁRIOS E RBAC ---------------------------------------------------------
@@ -33,8 +69,14 @@ model User {
   allowedPages Json?
   createdAt    DateTime @default(now())
 
+  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
   cashRegisters CashRegister[]
   sales         Sale[]
+
+  @@index([companyId])
 }
 
 // 2. PRODUTOS E VARIAÇÕES ----------------------------------------------------
@@ -52,8 +94,13 @@ model Product {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
   @@index([name])
   @@index([brand])
+  @@index([companyId])
 }
 
 model ProductVariant {
@@ -70,6 +117,10 @@ model ProductVariant {
   batch       String? // lote (obrigatório só quando Product.tracksLotValidity)
   validity    DateTime?
 
+  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
   invoiceItems    InvoiceItem[]
   saleItems       SaleItem[]
   supplierMaps    SupplierProductMapping[]
@@ -77,6 +128,7 @@ model ProductVariant {
 
   @@index([productId])
   @@index([barcode])
+  @@index([companyId])
 }
 
 // 3. PESSOAS -----------------------------------------------------------------
@@ -98,6 +150,10 @@ model Person {
   city     String?
   state    String?
 
+  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
   invoices          Invoice[]                @relation("SupplierInvoices")
   sales             Sale[]                   @relation("ClientSales")
   financialAccounts FinancialAccount[]
@@ -105,6 +161,7 @@ model Person {
 
   @@index([type])
   @@index([name])
+  @@index([companyId])
 }
 
 // 4. ENTRADA DE NOTAS FISCAIS ------------------------------------------------
@@ -129,11 +186,16 @@ model Invoice {
   otherExpenses  Decimal  @default(0) @db.Decimal(10, 2)
   createdAt      DateTime @default(now())
 
+  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
   items             InvoiceItem[]
   financialAccounts FinancialAccount[]
 
   @@index([supplierId])
   @@index([documentNumber])
+  @@index([companyId])
 }
 
 model InvoiceItem {
@@ -146,8 +208,13 @@ model InvoiceItem {
   unitCost  Decimal        @db.Decimal(10, 2)
   cfop      String // registrado como veio no XML (flexível) - 4.3
 
+  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
   @@index([invoiceId])
   @@index([variantId])
+  @@index([companyId])
 }
 
 // De/Para: associa o código/EAN do fornecedor a uma variante local (4.3).
@@ -161,8 +228,13 @@ model SupplierProductMapping {
   variant          ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
   createdAt        DateTime       @default(now())
 
+  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
   @@unique([supplierId, supplierItemCode])
   @@index([variantId])
+  @@index([companyId])
 }
 
 // 5. CAIXA E VENDAS ----------------------------------------------------------
@@ -181,12 +253,17 @@ model CashRegister {
   // que os registros já existentes continuam sendo 'DIARIO' sem migração de dados.
   type        String    @default("DIARIO")
 
+  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
   transactions CashTransaction[]
   sales        Sale[]
 
   @@index([userId])
   @@index([status])
   @@index([type])
+  @@index([companyId])
 }
 
 model CashTransaction {
@@ -198,7 +275,12 @@ model CashTransaction {
   description    String
   createdAt      DateTime     @default(now())
 
+  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
   @@index([cashRegisterId])
+  @@index([companyId])
 }
 
 model Sale {
@@ -225,12 +307,17 @@ model Sale {
   soldAt         DateTime     @default(now())
   createdAt      DateTime     @default(now())
 
+  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
   items             SaleItem[]
   payments          SalePayment[] // formas de pagamento (split / múltiplas)
   financialAccounts FinancialAccount[] // contas a receber geradas (venda a prazo)
 
   @@index([cashRegisterId])
   @@index([soldAt])
+  @@index([companyId])
 }
 
 model SaleItem {
@@ -242,8 +329,13 @@ model SaleItem {
   quantity  Int
   unitPrice Decimal        @db.Decimal(10, 2)
 
+  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
   @@index([saleId])
   @@index([variantId])
+  @@index([companyId])
 }
 
 // Formas de pagamento de uma venda (permite split de pagamento / "A prazo").
@@ -255,7 +347,12 @@ model SalePayment {
   amount    Decimal  @db.Decimal(10, 2)
   createdAt DateTime @default(now())
 
+  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
   @@index([saleId])
+  @@index([companyId])
 }
 
 // Razão de movimentações de estoque (auditoria + base p/ sugestão de compra)
@@ -275,15 +372,35 @@ model StockMovement {
   code      Int?
   createdAt DateTime       @default(now())
 
+  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
   @@index([variantId])
   @@index([createdAt])
+  @@index([companyId])
 }
 
 // Configurações da loja (chave/valor JSON) — ex.: campos obrigatórios do produto.
+// Multi-tenant: `key` deixou de ser a chave primária (era @id) — agora a PK é
+// um `id` uuid próprio, e a unicidade de `key` passou a ser composta com
+// `companyId` (`@@unique([companyId, key])`), permitindo que cada empresa
+// tenha sua própria "company_profile"/"product_form"/etc. Consultas no código
+// (routes/settings.ts, invoices.ts, products.ts) usam a chave composta
+// `companyId_key` (com `companyId: null` enquanto o contexto de tenant ainda
+// não é resolvido por requisição — fases seguintes do Plano Mestre).
 model Setting {
-  key       String   @id
+  id        String   @id @default(uuid())
+  key       String
   value     Json
   updatedAt DateTime @updatedAt
+
+  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo; ver nota acima)
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, key])
+  @@index([companyId])
 }
 
 // 6. FINANCEIRO --------------------------------------------------------------
@@ -306,12 +423,17 @@ model FinancialAccount {
   saleId    String?
   sale      Sale?    @relation(fields: [saleId], references: [id], onDelete: SetNull)
 
+  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
   settlements AccountSettlement[]
 
   @@index([status])
   @@index([dueDate])
   @@index([invoiceId])
   @@index([saleId])
+  @@index([companyId])
 }
 
 // Baixas (liquidações) de um título — permite baixa parcial e estorno (E1/E2).
@@ -323,5 +445,10 @@ model AccountSettlement {
   paidAt             DateTime         @default(now())
   createdAt          DateTime         @default(now())
 
+  // Multi-tenant (Fase 1 — opcional, ver cabeçalho do arquivo)
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+
   @@index([financialAccountId])
+  @@index([companyId])
 }

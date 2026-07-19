@@ -8,6 +8,7 @@ import {
   DEFAULT_PAYMENT_TYPES,
 } from '@exodus/shared';
 import { prisma } from '../lib/prisma.js';
+import { getSetting, upsertSetting } from '../lib/settings.js';
 
 const PRODUCT_FORM_KEY = 'product_form';
 const COMPANY_KEY = 'company_profile';
@@ -20,7 +21,7 @@ export async function settingsRoutes(app: FastifyInstance) {
   // Lê a config do formulário de produto (qualquer usuário autenticado — o
   // formulário usa para saber quais campos exigir). Defaults se não houver.
   r.get('/product-form', { preHandler: app.authenticate }, async () => {
-    const setting = await prisma.setting.findUnique({ where: { key: PRODUCT_FORM_KEY } });
+    const setting = await getSetting(PRODUCT_FORM_KEY);
     return productFormSettingsSchema.parse(setting?.value ?? {});
   });
 
@@ -29,19 +30,14 @@ export async function settingsRoutes(app: FastifyInstance) {
     '/product-form',
     { preHandler: app.authorize(['ADMIN']), schema: { body: productFormSettingsSchema } },
     async (req) => {
-      const value = req.body;
-      const setting = await prisma.setting.upsert({
-        where: { key: PRODUCT_FORM_KEY },
-        create: { key: PRODUCT_FORM_KEY, value },
-        update: { value },
-      });
+      const setting = await upsertSetting(PRODUCT_FORM_KEY, req.body);
       return productFormSettingsSchema.parse(setting.value);
     },
   );
 
   // --- Dados da empresa contratante -----------------------------------------
   r.get('/company', { preHandler: app.authenticate }, async () => {
-    const setting = await prisma.setting.findUnique({ where: { key: COMPANY_KEY } });
+    const setting = await getSetting(COMPANY_KEY);
     return companyProfileSchema.parse(setting?.value ?? {});
   });
 
@@ -49,18 +45,14 @@ export async function settingsRoutes(app: FastifyInstance) {
     '/company',
     { preHandler: app.authorize(['ADMIN']), schema: { body: companyProfileSchema } },
     async (req) => {
-      const setting = await prisma.setting.upsert({
-        where: { key: COMPANY_KEY },
-        create: { key: COMPANY_KEY, value: req.body },
-        update: { value: req.body },
-      });
+      const setting = await upsertSetting(COMPANY_KEY, req.body);
       return companyProfileSchema.parse(setting.value);
     },
   );
 
   // --- Tipos de recebimento (formas de pagamento configuráveis) -------------
   r.get('/payment-types', { preHandler: app.authenticate }, async () => {
-    const setting = await prisma.setting.findUnique({ where: { key: PAYMENT_TYPES_KEY } });
+    const setting = await getSetting(PAYMENT_TYPES_KEY);
     if (!setting) return { types: DEFAULT_PAYMENT_TYPES };
     return paymentTypesSchema.parse(setting.value);
   });
@@ -69,11 +61,7 @@ export async function settingsRoutes(app: FastifyInstance) {
     '/payment-types',
     { preHandler: app.authorize(['ADMIN']), schema: { body: paymentTypesSchema } },
     async (req) => {
-      const setting = await prisma.setting.upsert({
-        where: { key: PAYMENT_TYPES_KEY },
-        create: { key: PAYMENT_TYPES_KEY, value: req.body },
-        update: { value: req.body },
-      });
+      const setting = await upsertSetting(PAYMENT_TYPES_KEY, req.body);
       return paymentTypesSchema.parse(setting.value);
     },
   );
@@ -81,7 +69,7 @@ export async function settingsRoutes(app: FastifyInstance) {
   // --- Cliente padrão de vendas (substitui o fallback hardcoded "Balcão") ---
   // Qualquer usuário autenticado lê (PDV precisa saber o padrão ao abrir).
   r.get('/sales', { preHandler: app.authenticate }, async () => {
-    const setting = await prisma.setting.findUnique({ where: { key: SALES_KEY } });
+    const setting = await getSetting(SALES_KEY);
     const parsed = salesSettingsSchema.parse(setting?.value ?? {});
 
     // Resolve o Person aqui para o front não precisar de uma segunda requisição.
@@ -100,12 +88,7 @@ export async function settingsRoutes(app: FastifyInstance) {
     '/sales',
     { preHandler: app.authorize(['ADMIN']), schema: { body: salesSettingsSchema } },
     async (req) => {
-      const value = req.body;
-      const setting = await prisma.setting.upsert({
-        where: { key: SALES_KEY },
-        create: { key: SALES_KEY, value },
-        update: { value },
-      });
+      const setting = await upsertSetting(SALES_KEY, req.body);
       return salesSettingsSchema.parse(setting.value);
     },
   );

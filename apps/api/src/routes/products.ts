@@ -13,6 +13,7 @@ import {
 import { prisma } from '../lib/prisma.js';
 import { serializeDecimals } from '../lib/serialize.js';
 import { BusinessError, NotFoundError } from '../lib/errors.js';
+import { getSetting } from '../lib/settings.js';
 
 export async function productRoutes(app: FastifyInstance) {
   const r = app.withTypeProvider<ZodTypeProvider>();
@@ -110,7 +111,7 @@ export async function productRoutes(app: FastifyInstance) {
       const { variants, ...productData } = req.body;
 
       // Obrigatoriedade configurável (Configurações da loja).
-      const setting = await prisma.setting.findUnique({ where: { key: 'product_form' } });
+      const setting = await getSetting('product_form');
       const cfg = productFormSettingsSchema.parse(setting?.value ?? {});
       if (cfg.brandRequired && !productData.brand) throw new BusinessError('Marca é obrigatória');
       if (cfg.groupRequired && !productData.group) throw new BusinessError('Grupo é obrigatório');
