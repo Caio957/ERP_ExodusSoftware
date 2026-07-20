@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { loginSchema } from '@exodus/shared';
-import { Sparkles, Mail, Lock, ArrowRight, ShieldCheck, Zap, WifiOff, Gem } from 'lucide-react';
+import { loginSchema, type LoginCompanyOption } from '@exodus/shared';
+import { Sparkles, Mail, Lock, ArrowRight, ShieldCheck, Zap, WifiOff, Gem, Building2, ArrowLeft } from 'lucide-react';
 import { useAuth } from '../store/auth';
 import { ApiError } from '../lib/api';
 
@@ -18,6 +18,11 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Mesmo e-mail + senha conferem em mais de uma empresa (contador/franqueado
+  // — User.email deixou de ser globalmente único). Sem token ainda: mostra
+  // esse seletor em vez do formulário normal, reenvia o login com o
+  // companyId escolhido.
+  const [pendingCompanies, setPendingCompanies] = useState<LoginCompanyOption[] | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -31,10 +36,34 @@ export function LoginPage() {
 
     setLoading(true);
     try {
-      await login(parsed.data);
+      const result = await login(parsed.data);
+      if (!result.ok) {
+        setPendingCompanies(result.companies);
+        return;
+      }
       navigate('/pdv');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Falha ao entrar');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSelectCompany(companyId: string) {
+    setError(null);
+    setLoading(true);
+    try {
+      const result = await login({ email: email.trim(), password: password.trim(), companyId });
+      if (!result.ok) {
+        // Não deveria acontecer (companyId já desambiguado) — mas se
+        // acontecer, evita deixar a tela num estado sem saída.
+        setPendingCompanies(result.companies);
+        return;
+      }
+      navigate('/pdv');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Falha ao entrar');
+      setPendingCompanies(null);
     } finally {
       setLoading(false);
     }
@@ -114,63 +143,113 @@ export function LoginPage() {
             <p className="text-slate-500">ERP para lojas de cosméticos</p>
           </div>
 
-          <div className="mb-6">
-            <h2 className="font-display text-3xl font-extrabold">
-              Bem-vinda de <span className="gradient-text">volta</span> 👋
-            </h2>
-            <p className="mt-1 text-slate-500">Entre para começar a vender.</p>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="label">E-mail</label>
-              <div className="relative">
-                <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-brand-400" />
-                <input
-                  className="input pl-11"
-                  type="email"
-                  value={email}
-                  autoComplete="username"
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  inputMode="email"
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="admin@exodus.local"
-                />
+          {pendingCompanies ? (
+            <>
+              <div className="mb-6">
+                <h2 className="font-display text-3xl font-extrabold">
+                  Escolha sua <span className="gradient-text">empresa</span>
+                </h2>
+                <p className="mt-1 text-slate-500">
+                  Este e-mail tem acesso a mais de uma loja. Selecione qual você quer acessar.
+                </p>
               </div>
-            </div>
-            <div>
-              <label className="label">Senha</label>
-              <div className="relative">
-                <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-brand-400" />
-                <input
-                  className="input pl-11"
-                  type="password"
-                  value={password}
-                  autoComplete="current-password"
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                />
-              </div>
-            </div>
 
-            {error && (
-              <div className="animate-scale-in rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-medium text-rose-700">
-                {error}
+              <div className="space-y-3">
+                {pendingCompanies.map((company) => (
+                  <button
+                    key={company.id}
+                    type="button"
+                    className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-left font-semibold text-ink-900 transition hover:border-brand-300 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={loading}
+                    onClick={() => handleSelectCompany(company.id)}
+                  >
+                    <span className="icon-tile shrink-0">
+                      <Building2 className="h-5 w-5" />
+                    </span>
+                    {company.name}
+                  </button>
+                ))}
               </div>
-            )}
 
-            <button className="btn-primary w-full text-lg" disabled={loading}>
-              {loading ? (
-                'Entrando...'
-              ) : (
-                <>
-                  Entrar <ArrowRight className="h-5 w-5" />
-                </>
+              {error && (
+                <div className="animate-scale-in mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-medium text-rose-700">
+                  {error}
+                </div>
               )}
-            </button>
-          </form>
+
+              <button
+                type="button"
+                className="btn-ghost mt-4 w-full"
+                disabled={loading}
+                onClick={() => {
+                  setPendingCompanies(null);
+                  setError(null);
+                }}
+              >
+                <ArrowLeft className="h-5 w-5" /> Voltar
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="mb-6">
+                <h2 className="font-display text-3xl font-extrabold">
+                  Bem-vinda de <span className="gradient-text">volta</span> 👋
+                </h2>
+                <p className="mt-1 text-slate-500">Entre para começar a vender.</p>
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <label className="label">E-mail</label>
+                  <div className="relative">
+                    <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-brand-400" />
+                    <input
+                      className="input pl-11"
+                      type="email"
+                      value={email}
+                      autoComplete="username"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      inputMode="email"
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="admin@exodus.local"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="label">Senha</label>
+                  <div className="relative">
+                    <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-brand-400" />
+                    <input
+                      className="input pl-11"
+                      type="password"
+                      value={password}
+                      autoComplete="current-password"
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••"
+                    />
+                  </div>
+                </div>
+
+                {error && (
+                  <div className="animate-scale-in rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-medium text-rose-700">
+                    {error}
+                  </div>
+                )}
+
+                <button className="btn-primary w-full text-lg" disabled={loading}>
+                  {loading ? (
+                    'Entrando...'
+                  ) : (
+                    <>
+                      Entrar <ArrowRight className="h-5 w-5" />
+                    </>
+                  )}
+                </button>
+              </form>
+            </>
+          )}
         </div>
       </main>
     </div>

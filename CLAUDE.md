@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-07-18
+- **Última atualização:** 2026-07-19
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -57,11 +57,27 @@
   `ViewPurchaseModal` em Compras, sempre visível quando há financeiro e desabilitado
   com dica quando já há baixa — ver Onda 2026-07-17/18 em §11) — ver §11 para o
   histórico completo de commits de todas.
-  **`main` e `origin/main` estão em sincronia em `68f9579`.** Nenhuma branch de
-  feature ativa no momento. **§14.1 (propagar o seletor Caixa Físico/Conta Banco)
+  **`main` e `origin/main` estavam em sincronia em `68f9579`** até a abertura
+  da branch abaixo. **§14.1 (propagar o seletor Caixa Físico/Conta Banco)
   está concluído** — PDV, Vendas e Financeiro (settle/reverse) já propagam o
-  seletor; a próxima onda de trabalho deve criar uma nova
-  `feature/*`/`fix/*`/`refinamento-*` a partir daqui, sem pauta fixa pré-definida.
+  seletor.
+  🚧 **`feature/multi-tenant` é a branch ativa no momento** (criada a partir
+  de `68f9579`, **ainda não mesclada na `main`**) — implementa a arquitetura
+  multi-tenant completa (Plano Mestre V2.0): schema (`Company` + `companyId`
+  em 16 tabelas), Prisma Client Extension `withTenant` (isolamento lógico
+  por tenant em toda rota de negócio), JWT com `companyId`, isolamento da
+  fila offline do Dexie por tenant, e `User.email`/`ProductVariant.sku`/
+  `barcode`/`Person.document` migrados de `@unique` global para
+  `@@unique([companyId, campo])` com login capaz de desambiguar e-mail
+  colidente entre empresas — ver Onda 2026-07-19 em §11 para o
+  detalhamento completo. Commits até agora: `b2039ad` (Fases 1-2),
+  `0b0ff54` (prep. Fase 3 — JWT + base do `withTenant`), `7f7d001` (Fase 4 —
+  `companyId` obrigatório + varredura de rotas) e `e3c534b` (Fase 3 frontend
+  — isolamento do Dexie + logout seguro). ⚠️ **A última leva** (constraints
+  globais → tenant-scoped + login com desambiguação de empresa) **está
+  implementada, validada** (typecheck 0 erros + teste manual na tela) **e
+  ainda não commitada** — retomar por aí na próxima sessão antes de
+  qualquer coisa nova nesta branch.
   ⚠️ **Padrão observado na rodada de correções de impressão (PRs #14→#16)**: cada uma das 3 PRs
   seguidas (#14→#16) tentou resolver o mesmo sintoma relatado pelo Comandante (página em
   branco/layout quebrado ao imprimir no Android) com uma causa raiz diferente — cada
@@ -178,8 +194,27 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
 ### Backend
 - ✅ **Infra**: env tipado, Prisma singleton, CORS, Helmet, logger (pino-pretty em dev).
   `@fastify/static` serve o PWA em produção (monolito Railway).
-- ✅ **Auth/RBAC**: `/auth/login`, `/auth/register` (ADMIN), `/auth/me`; guards
-  `authenticate` e `authorize(roles)`.
+- ✅ **Multi-tenant** (Plano Mestre V2.0, branch `feature/multi-tenant`, ver Onda
+  2026-07-19 em §11): model `Company` + `companyId` obrigatório em 15 das 16
+  tabelas de negócio (`User` continua opcional, de propósito — reservado para
+  um futuro papel `SYSTEM_ADMIN` sem tenant único). `lib/tenant.ts` expõe
+  `withTenant(companyId)` (Prisma Client Extension que injeta `companyId` em
+  toda leitura/escrita em massa) e `tenantDb(req)` (atalho de rota: deriva o
+  client escopado + o `companyId` sempre do JWT, nunca do body). Toda rota de
+  negócio foi varrida para usar esse client em vez do Prisma cru.
+  **Constraints globais → tenant-scoped**: `User.email`, `ProductVariant.sku`/
+  `barcode` e `Person.document` deixaram de ser `@unique` global e viraram
+  `@@unique([companyId, campo])` — sem isso, duas lojas diferentes jamais
+  poderiam cadastrar o mesmo código de barras de fabricante ou o mesmo
+  fornecedor (CPF/CNPJ), por exemplo. `Company.document` e `Invoice.accessKey`
+  permanecem globais (identidade do próprio tenant / identificador único
+  nacional da NFe, respectivamente).
+- ✅ **Auth/RBAC**: `/auth/login` (busca por e-mail SEM filtro de tenant,
+  valida a senha contra todos os candidatos e só pede a empresa
+  explicitamente — `needsCompanySelection` — se mais de uma conferir; nunca
+  revela a lista antes de validar a senha, para não vazar enumeration),
+  `/auth/register` (ADMIN, sempre no tenant de quem cria), `/auth/me`; guards
+  `authenticate` e `authorize(roles)`. JWT carrega `companyId` (nullable).
 - ✅ **Error handler global** (§Req 4.8): trata Zod, AppError, Prisma (P2002/P2025)
   e erros inesperados; 404 padronizado; SPA fallback para rotas do front.
 - ✅ **Produtos**: CRUD completo; filtros por `search`, `brand`, `group`, `subgroup`;
@@ -337,6 +372,13 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   trim na validação, `type="email"`. Botão "preencher acesso demo" **removido
   (2026-07-12)** — sistema em produção com cliente real, virou risco de segurança
   ter credenciais expostas na tela de login.
+  **Seletor de empresa** (multi-tenant, ver Onda 2026-07-19 em §11): quando o
+  mesmo e-mail + senha conferem em mais de uma empresa (`/auth/login` retorna
+  `needsCompanySelection`), a tela troca o formulário por um card de seleção
+  (reaproveita 100% o design system — `icon-tile`, `btn-ghost`, `gradient-text`,
+  nenhuma classe nova) sem pedir e-mail/senha de novo; "Voltar" retoma o
+  formulário normal. Fluxo sem colisão (o caso comum, hoje 100% dos logins
+  reais) continua idêntico a sempre — zero fricção nova.
 - ✅ **PDV** (§4.4): scanner de teclado, **busca vazia lista todos os produtos**,
   carrinho com **valor unitário editável por item**, **desconto e acréscimo** sobre o
   subtotal (entrada em R$ e em %), **observação** livre da venda, **seletor de cliente**
@@ -709,6 +751,19 @@ Decisão: **fila própria no IndexedDB (Dexie)** em vez de Background Sync nativ
 Busca de produto por código de barras também tem fallback offline (cache
 `variants` no Dexie) — ver `apps/web/src/lib/products.ts`.
 
+**Isolamento multi-tenant do Dexie** (Plano Mestre V2.0, ver Onda 2026-07-19 em
+§11): `saleQueue`/`variants` (schema Dexie v2) carregam `companyId` — gravado
+pelo `enqueueSale`/`cacheVariants` a partir da sessão ativa, e usado para
+filtrar `flushQueue`/`retryFailed`/`lookupByBarcode`, para que a fila/cache
+local de um tenant nunca seja lida nem sincronizada sob a sessão de outro no
+mesmo dispositivo (risco real: tablet reaproveitado entre lojas). `logout()`
+(`store/auth.ts`) **recusa sair** se ainda houver vendas locais não
+sincronizadas do tenant ativo (tenta um flush final se online antes de
+bloquear) — evita apagar dinheiro real ainda não confirmado no servidor;
+só então purga `saleQueue`+`variants` e o token/estado. Migração v1→v2 do
+Dexie carimba linhas pré-existentes (sem `companyId`) com o tenant da sessão
+ativa no momento do upgrade, em vez de descartá-las.
+
 ---
 
 ## 7. Decisões de arquitetura e **divergências do schema base**
@@ -739,6 +794,8 @@ O schema Prisma do briefing foi **mantido como base, porém corrigido e estendid
 | `FinancialAccount.code` (SERIAL `@unique`) + status `PARTIAL` | Código sequencial do título e baixa parcial (mig. `financial_settlements_code`). |
 | `AccountSettlement` (nova) | Liquidações (baixas) de um título — baixa parcial + estorno (mesma migração). |
 | `PaymentMethod` enum `+A_PRAZO`; método **relaxado para string** na venda | Permite tipos de recebimento configuráveis além dos base. |
+| `Company` (nova) + `companyId` em 15 tabelas de negócio | Multi-tenant (Plano Mestre V2.0) — arquitetura de isolamento lógico por empresa, ver §5/§11 Onda 2026-07-19. `User.companyId` continua opcional (deliberado — futuro `SYSTEM_ADMIN`). |
+| `User.email`, `ProductVariant.sku`/`barcode`, `Person.document`: `@unique` global → `@@unique([companyId, campo])` | Fecha o único risco real de colisão entre tenants (ex.: duas lojas com o mesmo código de barras de fabricante). `Company.document`/`Invoice.accessKey` permanecem globais de propósito. |
 
 Outras decisões:
 - **CFOP flexível** (§4.3): registrado exatamente como vem no XML, sem bloquear a
@@ -784,14 +841,15 @@ Outras decisões:
 
 ## 9. Modelo de dados (entidades)
 
-`User`, `Product` 1—N `ProductVariant`, `Person` (CLIENT|SUPPLIER),
-`Invoice` 1—N `InvoiceItem`, `SupplierProductMapping`, `CashRegister` 1—N
-`CashTransaction`/`Sale`, `Sale` 1—N `SaleItem`/`SalePayment`, `StockMovement`,
-`FinancialAccount` 1—N `AccountSettlement`, `Setting` (chave/valor). Campos `role`,
-`type`, `status` etc. são `String` no Prisma (flexibilidade) mas **validados por
-`z.enum`** na borda (`packages/shared/src/enums.ts`) — exceto o método de pagamento
-da venda, **relaxado para string** (tipos de recebimento configuráveis). Detalhe
-completo: `apps/api/prisma/schema.prisma`.
+`Company` 1—N (todas as tabelas de negócio via `companyId`), `User`, `Product`
+1—N `ProductVariant`, `Person` (CLIENT|SUPPLIER), `Invoice` 1—N `InvoiceItem`,
+`SupplierProductMapping`, `CashRegister` 1—N `CashTransaction`/`Sale`, `Sale`
+1—N `SaleItem`/`SalePayment`, `StockMovement`, `FinancialAccount` 1—N
+`AccountSettlement`, `Setting` (chave/valor, `@@unique([companyId, key])`).
+Campos `role`, `type`, `status` etc. são `String` no Prisma (flexibilidade) mas
+**validados por `z.enum`** na borda (`packages/shared/src/enums.ts`) — exceto o
+método de pagamento da venda, **relaxado para string** (tipos de recebimento
+configuráveis). Detalhe completo: `apps/api/prisma/schema.prisma`.
 
 **Migrações (todas aditivas/seguras, lista não exaustiva — ver
 `apps/api/prisma/migrations/`):** `0_init`, `add_lot_validity_control`,
@@ -803,8 +861,18 @@ completo: `apps/api/prisma/schema.prisma`.
 `20260713021023_add_invoice_expenses` (`Invoice.freight`/`Invoice.otherExpenses` —
 landed cost, ver §5 Compras e Onda 2026-07-13 em §11),
 `20260714020913_add_cash_register_type` (`CashRegister.type` — Caixa Físico/Conta
-Banco, ver §5 Caixa e Onda 2026-07-15 em §11). Aplicadas automaticamente
-no Railway a cada deploy (`prisma migrate deploy`).
+Banco, ver §5 Caixa e Onda 2026-07-15 em §11),
+`20260719023334_add_company_multi_tenant` (model `Company` + `companyId`
+nullable em 16 tabelas — Fase 1),
+`20260719030000_adjust_setting_composite_key` (`Setting.key` deixa de ser PK,
+vira `@@unique([companyId, key])`),
+`20260719032607_company_id_required` (`companyId` obrigatório em 15 tabelas —
+Fase 4) e `20260719050000_tenant_scoped_unique_constraints` (`User.email`,
+`ProductVariant.sku`/`barcode`, `Person.document`: `@unique` global →
+`@@unique([companyId, campo])`) — as 4 últimas ainda só na branch
+`feature/multi-tenant`, ver §5/§11 Onda 2026-07-19. Aplicadas automaticamente
+no Railway a cada deploy (`prisma migrate deploy`) assim que a branch for
+mesclada na `main`.
 
 ---
 
@@ -2212,6 +2280,135 @@ no Railway a cada deploy (`prisma migrate deploy`).
   `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros** em
   todos os commits.
 
+- 🚧 **Onda 2026-07-19 — Arquitetura Multi-Tenant (Plano Mestre V2.0)**
+  (2026-07-19): branch `feature/multi-tenant` (criada a partir de `68f9579`)
+  — **ainda não mesclada na `main`**. Reestrutura o ERP de single-tenant
+  para multi-tenant real, em 4 fases + uma leva final de blindagem.
+  Documento externo "Plano Mestre V2.0" definiu as fases; execução em modo
+  **MANUAL** (Comandante aprovou cada etapa antes de codar).
+  - **Fase 1+2 — Preparação Silenciosa + Povoamento** (`b2039ad`): model
+    `Company` (`id`/`name`/`document?`) + `companyId String?` nullable em 16
+    tabelas de negócio (zero impacto — migração `20260719023334_add_company_
+    multi_tenant`, puramente aditiva). `Setting.key` deixou de ser PK
+    (colidiria entre empresas) e virou `id` + `@@unique([companyId, key])`
+    (migração `20260719030000_adjust_setting_composite_key`, escrita à mão —
+    Prisma exige confirmação interativa para esse tipo de aviso, não suportada
+    em ambiente não-interativo). `prisma/backfill-tenant.ts` (dry-run por
+    padrão) executado de verdade com `CONFIRM_BACKFILL=1`: criou a empresa
+    determinística **"Inquilino Zero"** (`00000000-0000-0000-0000-
+    000000000001`) e vinculou a ela as 9 linhas pré-existentes (2 User, 1
+    Product, 1 ProductVariant, 1 CashRegister, 4 StockMovement).
+  - **Fase 3 (preparação) — JWT + base do `withTenant`** (`0b0ff54`):
+    `JwtPayload`/`AuthResponse` (shared) ganharam `companyId: string | null`;
+    `/auth/login` passou a incluir a claim; novo `apps/api/src/lib/tenant.ts`
+    com `withTenant(companyId)` — Prisma Client Extension
+    (`$extends`/`$allModels`/`$allOperations`) que injeta `companyId` no
+    `where` (leituras/updateMany/deleteMany em massa) ou no `data` (create/
+    createMany) de 16 modelos — ainda **não conectada a nenhuma rota** nesta
+    fase.
+  - **Fase 4 — `companyId` obrigatório + varredura de rotas** (`7f7d001`):
+    `companyId` virou `String` (obrigatório) em 15 tabelas via migração
+    `20260719032607_company_id_required` (`User` continua opcional — reserva
+    para um futuro papel `SYSTEM_ADMIN` cross-tenant, §4 do Plano Mestre).
+    **Todas** as rotas de negócio (`auth`, `products`, `persons`, `invoices`,
+    `sales`/`services/sales.ts`, `cash`, `financial`, `dashboard`,
+    `purchase-suggestions`) migradas do `prisma` cru para `tenantDb(req)`
+    (atalho que resolve `{ db, companyId }` do JWT, lança `ForbiddenError` se
+    faltar). **Limitação conhecida do Prisma Client Extensions**: operações
+    por seletor único (`findUnique`/`update`/`delete`/`upsert`) não são
+    escopadas pela extensão — cada uma foi reescrita manualmente para
+    `findFirst` (ou `findFirst` + validação de posse antes de agir por id).
+    `Prisma.TransactionClient` e o tipo do `tx` recebido dentro de um
+    `db.$transaction()` do client estendido **não são mutuamente atribuíveis**
+    (branding genérico interno do Prisma) — contornado com interfaces
+    estruturais mínimas (`SettingCapableClient` em `lib/settings.ts`,
+    `FinancialTxClient` em `financial.ts`) descrevendo só os métodos
+    realmente usados. `backfill-tenant.ts` **aposentado** (reescrito como
+    registro histórico) — com `companyId` `NOT NULL`, sua lógica original de
+    "achar `companyId: null`" nunca mais encontra nada. **IDOR reais
+    fechados como subproduto da varredura**: `GET /persons` e `GET /products`
+    (+ `by-barcode`) não tinham **nenhuma autenticação** (rotas públicas);
+    `createSale`/`updateSale` e `/invoices/confirm` não validavam se um
+    `variantId` vindo do cliente pertencia ao tenant; `PUT/DELETE
+    /cash/transactions/:id` não checava posse por tenant. `npm run typecheck`
+    → 0 erros nos 3 workspaces.
+  - **Validação real do `withTenant`** (mesmo dia, script `test-tenant-flow.ts`
+    na raiz, **temporário, apagado depois**): login real →
+    `POST /api/persons` **sem enviar `companyId` no body** → consulta direta
+    ao Postgres confirmou a coluna preenchida sozinha pela extensão, a partir
+    só do JWT. Prova de ponta a ponta de que o cliente nunca precisa (e não
+    consegue) informar o tenant manualmente.
+  - **Fase 3 (frontend) — isolamento multi-tenant da fila offline** (`e3c534b`):
+    `AuthUser` (`store/auth.ts`) passou a carregar `companyId` (lido de
+    `/auth/me`, fonte fresca — mesmo raciocínio já aplicado a `allowedPages`).
+    Dexie (`lib/db.ts`) subiu para `version(2)`: `saleQueue`/`variants`
+    ganharam `companyId`; migração v1→v2 **carimba** linhas pré-existentes com
+    o tenant da sessão ativa (não descarta vendas genuinamente pendentes de
+    sincronizar — dinheiro real). `enqueueSale`/`flushQueue`/`retryFailed`
+    (`lib/sync.ts`) e `cacheVariants`/`lookupByBarcode` (`lib/products.ts`)
+    passaram a taguear/filtrar por `companyId` da sessão ativa. `logout()`
+    virou assíncrono e **recusa sair** se sobrar item de `saleQueue` do
+    tenant ativo (tenta um flush final se online; só então purga
+    `saleQueue`+`variants`+token/estado) — decisão deliberada para nunca
+    apagar uma venda local ainda não confirmada no servidor. Backend ganhou
+    um `code` de erro distinto (`NO_TENANT`, `lib/errors.ts`/`lib/tenant.ts`)
+    para sessões com JWT sem `companyId` (ex.: token emitido antes desta
+    migração) — `apiFetch` (`lib/api.ts`) intercepta especificamente esse
+    código para deslogar automaticamente, **sem** afetar o 403 comum de
+    RBAC por papel. **Validado ao vivo pelo Comandante no navegador**:
+    logout bloqueado com venda pendente offline; sincronizou e permitiu sair
+    ao voltar a conexão; migração v1→v2 carimbou uma fila v1 simulada em vez
+    de descartá-la.
+  - **Constraints globais → tenant-scoped + login com desambiguação**
+    (mesmo dia, **implementado e validado, commit ainda pendente** — ver
+    aviso no topo do documento): `User.email`, `ProductVariant.sku`/
+    `barcode`, `Person.document` deixaram de ser `@unique` sozinhos e
+    viraram `@@unique([companyId, campo])` (migração
+    `20260719050000_tenant_scoped_unique_constraints`, escrita à mão pelo
+    mesmo motivo de sempre — aviso interativo do Prisma; sem backfill
+    necessário, já que só existe o Inquilino Zero hoje). `Company.document`/
+    `Invoice.accessKey` permanecem globais de propósito. **`/auth/login`
+    redesenhado** (`routes/auth.ts`): busca todas as contas com o e-mail
+    (`findMany`, deliberadamente sem filtro de tenant), valida a senha
+    contra cada uma **antes** de decidir qualquer coisa (nunca revela quais/
+    quantas empresas têm conta com aquele e-mail para quem não provou a
+    senha — evita enumeration), e só retorna `{ needsCompanySelection: true,
+    companies }` (sem token) se mais de uma conferir — caso raro
+    (contador/franqueado com mesma senha em duas lojas). Novos schemas
+    `loginNeedsCompanySchema`/`loginResponseSchema`/`LoginCompanyOption`
+    (shared); `loginSchema` ganhou `companyId?`. Frontend
+    (`LoginPage.tsx`/`store/auth.ts`): `login()` retorna `LoginResult`
+    (`{ok:true}` ou `{ok:false, companies}`); tela alterna para um card de
+    seleção de empresa nesse segundo caso, reaproveitando 100% o design
+    system. **`prisma/seed.ts` corrigido**: os usuários de bootstrap local
+    (`admin@exodus.local`/`caixa@exodus.local`) eram criados **sem
+    `companyId`** (campo era opcional, ninguém tinha notado — só não dava
+    problema porque o backfill da Fase 2 já tinha corrigido retroativamente
+    os dois únicos usuários existentes); corrigido para primeiro garantir a
+    empresa "Inquilino Zero" (mesmo id determinístico do backfill) e só
+    então criar os usuários já com `companyId`, usando o seletor de chave
+    composta `companyId_email` no `upsert`. `error-handler.ts`: mensagem do
+    `P2002` filtra `companyId` da lista de campos exibida ("Registro já
+    existe (sku)", não "(companyId, sku)"). **Achado durante a regeneração
+    do Prisma Client**: `npx prisma generate` falhou (`EPERM` no
+    `query_engine-windows.dll.node`) porque o `dev:api` de uma sessão
+    anterior ainda estava de pé (4 processos `node`/`tsx watch`
+    remanescentes, terminal diferente do que o Comandante achava ter
+    fechado) — resolvido localizando os PIDs reais via
+    `Get-CimInstance Win32_Process` e encerrando-os explicitamente após
+    confirmação. **Validado ao vivo**: `curl` direto em `/auth/login`
+    confirmou `needsCompanySelection` com as duas empresas; segundo request
+    com `companyId` emitiu token normalmente; Comandante testou o seletor na
+    tela real criando uma segunda `Company` + um segundo usuário
+    `admin@exodus.local`/`admin12345` **direto no banco** (script
+    descartável, sem migração) — visual e fluxo aprovados; dados de teste
+    removidos ao final (`prisma.user.delete`/`prisma.company.delete`,
+    confirmado com re-consulta). `npm run typecheck` (shared+api+web) →
+    **0 erros**.
+  - **Pendência real identificada, fora do escopo desta onda**: não existe
+    nenhuma rota de provisionamento de tenant — `Company` só nasce via
+    script/inserção direta no banco. Ver §12.
+
 ---
 
 ## 12. Pendências, bloqueios e dívidas técnicas
@@ -2276,6 +2473,19 @@ no Railway a cada deploy (`prisma migrate deploy`).
     "livro" o título vai refletir quando for baixado — só é decidido depois,
     no momento da baixa em si (`SettleModal` já pergunta lá). Considerado
     aceitável: o `RegisterSelectionModal` na baixa já cobre a decisão real.
+18. **[NOVO] `feature/multi-tenant` tem trabalho não commitado**: a última
+    leva (constraints tenant-scoped + login com desambiguação, ver Onda
+    2026-07-19 em §11) está implementada e validada, mas **ainda não
+    commitada**. Próxima sessão: revisar e commitar antes de qualquer coisa
+    nova nessa branch.
+19. **[NOVO] Não existe rota de provisionamento de tenant**: `Company` só
+    nasce via script (`backfill-tenant.ts`, já aposentado) ou inserção
+    direta no banco — não há `POST`, listagem, nem qualquer fluxo de
+    onboarding de uma segunda loja de verdade. A arquitetura multi-tenant
+    está pronta na camada de dados/API/frontend, mas sem essa rota o sistema
+    ainda opera, na prática, como single-tenant (só o "Inquilino Zero"
+    existe). Candidato natural para a próxima onda desta frente, se for a
+    prioridade escolhida.
 
 ---
 
@@ -2317,6 +2527,28 @@ PDV, Vendas e Financeiro.**~~ **RESOLVIDO (2026-07-18)** em duas ondas — ver
 
 Nenhuma pauta fixa aberta no momento — a próxima onda parte do backlog de
 maturidade (§14.2) ou de novo pedido direto do Comandante.
+
+### 14.1b Multi-tenant (branch `feature/multi-tenant`, ver §11 Onda 2026-07-19)
+
+**Estado**: schema, `withTenant`, JWT, isolamento do Dexie e constraints
+tenant-scoped (com login capaz de desambiguar e-mail colidente) estão
+implementados e validados — mas a última leva ainda **não foi commitada**
+(§12.18) e a branch inteira ainda **não foi mesclada na `main`**. Antes de
+qualquer coisa nova aqui: revisar + commitar a leva pendente.
+
+**Candidato natural de próxima onda**: rota de provisionamento de tenant
+(§12.19) — hoje não existe nenhum jeito real de nascer uma segunda empresa
+além de inserir direto no banco. Sem isso, a arquitetura multi-tenant não
+tem porta de entrada de uso.
+
+> **Nota**: o Comandante recebeu do Gemini (avaliador externo, §13) uma
+> sugestão de que o próximo grande objetivo seria a construção do módulo de
+> **Catálogo e Estoque** (variações/SKUs, preço, controle de quantidade).
+> Registrado aqui como **sugestão externa relatada, não uma decisão tomada
+> nesta sessão** — o módulo de Produtos já existe e está ✅ no §5; se a
+> intenção for uma reformulação maior dele, vale alinhar com o Comandante o
+> escopo exato antes de iniciar, já que não foi detalhado em nenhuma
+> conversa registrada neste documento.
 
 ### 14.2 Maturidade/robustez (backlog de funcionalidades dos sócios: 100% concluído)
 

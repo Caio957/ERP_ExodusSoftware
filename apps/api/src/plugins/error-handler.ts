@@ -55,7 +55,15 @@ export const errorHandlerPlugin = fp(async (app) => {
     // 4. Erros conhecidos do Prisma
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
       if (error.code === 'P2002') {
-        const target = (error.meta?.target as string[] | undefined)?.join(', ');
+        // `companyId` some da mensagem exibida ao usuário: desde que as
+        // constraints viraram compostas por tenant (Plano Mestre V2.0 —
+        // constraints globais → tenant-scoped), toda violação de unicidade
+        // inclui esse campo no `target` do Prisma, mas ele não tem nenhum
+        // significado pro operador ("Registro já existe (companyId, sku)"
+        // é ruído — "(sku)" já basta).
+        const target = (error.meta?.target as string[] | undefined)
+          ?.filter((field) => field !== 'companyId')
+          .join(', ');
         request.log.warn({ ...base, prisma: error.code }, 'Violação de unicidade');
         return reply.status(409).send({
           statusCode: 409,

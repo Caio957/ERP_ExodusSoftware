@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { AuthResponse, LoginInput, UserRole } from '@exodus/shared';
+import type { LoginCompanyOption, LoginInput, LoginResponse, UserRole } from '@exodus/shared';
 import { api } from '../lib/api';
 import { tokenStore } from '../lib/token';
 import { db } from '../lib/db';
@@ -28,10 +28,18 @@ export interface LogoutResult {
   message?: string;
 }
 
+/**
+ * Resultado do login. `ok: false` só acontece quando o mesmo e-mail + senha
+ * conferem em mais de uma empresa (User.email escopado por tenant — Plano
+ * Mestre V2.0) — a tela precisa mostrar um seletor e chamar `login()` de
+ * novo com `companyId` preenchido.
+ */
+export type LoginResult = { ok: true } | { ok: false; companies: LoginCompanyOption[] };
+
 interface AuthState {
   user: AuthUser | null;
   token: string | null;
-  login: (input: LoginInput) => Promise<void>;
+  login: (input: LoginInput) => Promise<LoginResult>;
   logout: () => Promise<LogoutResult>;
   isAdmin: () => boolean;
   canAccess: (pageKey: string) => boolean;
@@ -46,7 +54,11 @@ export const useAuth = create<AuthState>()(
       user: null,
       token: null,
       login: async (input) => {
-        const data = await api.post<AuthResponse>('/api/auth/login', input, { auth: false });
+        const data = await api.post<LoginResponse>('/api/auth/login', input, { auth: false });
+        if ('needsCompanySelection' in data) {
+          return { ok: false, companies: data.companies };
+        }
+
         tokenStore.set(data.token);
         // Busca allowedPages + companyId do perfil completo após login — /me
         // sempre lê fresco do banco (não confia na claim do JWT, que pode
@@ -56,6 +68,7 @@ export const useAuth = create<AuthState>()(
           token: data.token,
           user: { ...data.user, allowedPages: me.allowedPages ?? null, companyId: me.companyId },
         });
+        return { ok: true };
       },
       // Purga o Dexie (fila de vendas + cache de produtos) ao sair — impede
       // que dados de um tenant sobrevivam no dispositivo para a próxima

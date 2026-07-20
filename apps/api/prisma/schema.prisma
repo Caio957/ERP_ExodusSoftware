@@ -24,12 +24,28 @@
 //                                       papel SYSTEM_ADMIN (§4 do Plano Mestre).
 //                                       Constraints @unique pré-existentes
 //                                       (email, sku, barcode, document,
-//                                       accessKey) permanecem GLOBAIS mesmo
-//                                       após a Fase 4 — não foram tocadas nesta
-//                                       rodada; ver ressalva no relatório da
-//                                       Fase 4 (risco real de colisão entre
-//                                       tenants, ex.: dois lojistas com o mesmo
-//                                       código de barras de fabricante).
+//                                       accessKey) permaneceram GLOBAIS até a
+//                                       Fase 4 — risco real de colisão entre
+//                                       tenants (ex.: dois lojistas com o
+//                                       mesmo código de barras de fabricante,
+//                                       ou o mesmo CPF/CNPJ de fornecedor).
+//                                       Rodada seguinte (constraints globais
+//                                       → tenant-scoped) trocou User.email,
+//                                       ProductVariant.sku/barcode e
+//                                       Person.document por
+//                                       @@unique([companyId, campo]).
+//                                       Ficaram deliberadamente GLOBAIS:
+//                                       Company.document (identidade do
+//                                       próprio tenant) e Invoice.accessKey
+//                                       (chave de acesso da NFe — identificador
+//                                       único nacional emitido pela Receita,
+//                                       escopar por tenant não evitaria nada).
+//                                       Login por e-mail (routes/auth.ts)
+//                                       adaptado: valida a senha contra todas
+//                                       as ocorrências do e-mail e só pede a
+//                                       empresa explicitamente se mais de uma
+//                                       conferir (ver `loginNeedsCompanySchema`,
+//                                       packages/shared/src/schemas/auth.ts).
 // ============================================================================
 
 generator client {
@@ -70,7 +86,12 @@ model Company {
 // 1. USUÁRIOS E RBAC ---------------------------------------------------------
 model User {
   id           String   @id @default(uuid())
-  email        String   @unique
+  // Deixou de ser @unique sozinho (Plano Mestre V2.0 — constraints globais →
+  // tenant-scoped): o mesmo e-mail pode existir em empresas diferentes
+  // (ex.: contador/franqueado com acesso a várias lojas). Login por e-mail
+  // passou a validar a senha contra todas as ocorrências e só pede a
+  // empresa explicitamente se mais de uma conferir (routes/auth.ts).
+  email        String
   name         String
   passwordHash String
   role         String   // 'ADMIN' | 'CASHIER' (futuro: 'SYSTEM_ADMIN')
@@ -91,6 +112,13 @@ model User {
   cashRegisters CashRegister[]
   sales         Sale[]
 
+  // ⚠️ companyId nullable aqui (nota acima) significa que dois usuários
+  // globais (SYSTEM_ADMIN, companyId=null) poderiam ter o mesmo e-mail sem
+  // violar esta constraint (Postgres trata NULL como distinto de NULL em
+  // índice único). Sem risco prático hoje — não existe nenhum caminho de
+  // código que crie usuário com companyId null (/auth/register sempre usa
+  // tenantDb). Reavaliar se o papel SYSTEM_ADMIN for implementado de fato.
+  @@unique([companyId, email])
   @@index([companyId])
 }
 
@@ -122,8 +150,13 @@ model ProductVariant {
   id          String    @id @default(uuid())
   productId   String
   product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
-  sku         String    @unique
-  barcode     String?   @unique
+  // sku/barcode deixaram de ser @unique sozinhos (Plano Mestre V2.0 —
+  // constraints globais → tenant-scoped): código de barras é atribuído pelo
+  // fabricante/marca, não pela loja — duas lojas vendendo o mesmo produto
+  // colidiriam sob a constraint global antiga, bloqueando o cadastro
+  // legítimo de um segundo tenant. Ver @@unique([companyId, ...]) abaixo.
+  sku         String
+  barcode     String?
   description String
   costPrice   Decimal   @db.Decimal(10, 2)
   averageCost Decimal   @default(0) @db.Decimal(10, 2)
@@ -141,6 +174,8 @@ model ProductVariant {
   supplierMaps    SupplierProductMapping[]
   stockMovements  StockMovement[]
 
+  @@unique([companyId, sku])
+  @@unique([companyId, barcode])
   @@index([productId])
   @@index([barcode])
   @@index([companyId])
@@ -153,7 +188,10 @@ model Person {
   type     String // 'CLIENT' | 'SUPPLIER'
   name      String
   tradeName String? // Nome fantasia (PJ) ou apelido (PF)
-  document  String? @unique // CPF/CNPJ - opcional p/ balcão
+  // Deixou de ser @unique sozinho (Plano Mestre V2.0 — constraints globais →
+  // tenant-scoped): o mesmo fornecedor/cliente (CPF/CNPJ) frequentemente
+  // atende várias lojas diferentes. Ver @@unique([companyId, document]) abaixo.
+  document  String? // CPF/CNPJ - opcional p/ balcão
   email     String?
   phone     String?
 
@@ -174,6 +212,7 @@ model Person {
   financialAccounts FinancialAccount[]
   supplierMaps      SupplierProductMapping[]
 
+  @@unique([companyId, document])
   @@index([type])
   @@index([name])
   @@index([companyId])

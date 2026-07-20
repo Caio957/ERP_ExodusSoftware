@@ -4,6 +4,14 @@ import { UserRole } from '../enums.js';
 export const loginSchema = z.object({
   email: z.string().trim().toLowerCase().email('E-mail inválido'),
   password: z.string().min(1, 'Senha obrigatória'),
+  /**
+   * Multi-tenant (Plano Mestre V2.0): só é necessário quando o mesmo e-mail
+   * + a mesma senha existem em mais de uma empresa (ex.: contador/franqueado
+   * com acesso a várias lojas — User.email deixou de ser globalmente único).
+   * O login comum nunca precisa enviar isso; o backend só pede esse campo
+   * de volta através da resposta `needsCompanySelection`.
+   */
+  companyId: z.string().uuid().optional(),
 });
 export type LoginInput = z.infer<typeof loginSchema>;
 
@@ -41,3 +49,26 @@ export const authResponseSchema = z.object({
   }),
 });
 export type AuthResponse = z.infer<typeof authResponseSchema>;
+
+/**
+ * Resposta alternativa de `/auth/login` quando a senha confere para o mesmo
+ * e-mail em mais de uma empresa (User.email escopado por tenant — Plano
+ * Mestre V2.0). Sem token ainda: o frontend mostra um seletor e reenvia o
+ * login com `companyId` preenchido. Deliberadamente só é retornada DEPOIS de
+ * validar a senha (nunca antes) — revelar a lista de empresas de um e-mail
+ * sem provar a senha primeiro seria um vazamento de enumeração de contas.
+ */
+export const loginCompanyOptionSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+});
+export type LoginCompanyOption = z.infer<typeof loginCompanyOptionSchema>;
+
+export const loginNeedsCompanySchema = z.object({
+  needsCompanySelection: z.literal(true),
+  companies: z.array(loginCompanyOptionSchema),
+});
+export type LoginNeedsCompany = z.infer<typeof loginNeedsCompanySchema>;
+
+export const loginResponseSchema = z.union([authResponseSchema, loginNeedsCompanySchema]);
+export type LoginResponse = z.infer<typeof loginResponseSchema>;

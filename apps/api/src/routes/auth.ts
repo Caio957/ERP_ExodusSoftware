@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { createUserSchema, loginSchema, type JwtPayload } from '@exodus/shared';
+import { createUserSchema, loginSchema, type JwtPayload, type LoginNeedsCompany } from '@exodus/shared';
 import { prisma } from '../lib/prisma.js';
 import { hashPassword, verifyPassword } from '../lib/password.js';
 import { AppError, NotFoundError, UnauthorizedError } from '../lib/errors.js';
@@ -21,15 +21,52 @@ export async function authRoutes(app: FastifyInstance) {
   const r = app.withTypeProvider<ZodTypeProvider>();
 
   // POST /api/auth/login — deliberadamente NÃO escopado por tenant: login é a
-  // própria operação que descobre a quem o usuário pertence, então a busca
-  // por e-mail precisa varrer todos os tenants (email é globalmente único).
+  // própria operação que descobre a quem o usuário pertence. User.email
+  // deixou de ser globalmente único (Plano Mestre V2.0 — constraints globais
+  // → tenant-scoped: o mesmo e-mail pode pertencer a contas em empresas
+  // diferentes, ex.: contador/franqueado). Busca TODAS as contas com esse
+  // e-mail; se o cliente já informou `companyId` (reenvio pós-desambiguação),
+  // restringe antes de validar senha — como email é único DENTRO de uma
+  // empresa (@@unique([companyId, email])), isso já garante no máximo 1
+  // candidato.
   r.post('/login', { schema: { body: loginSchema } }, async (req) => {
-    const { email, password } = req.body;
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (!user || !(await verifyPassword(password, user.passwordHash))) {
+    const { email, password, companyId } = req.body;
+
+    const candidates = await prisma.user.findMany({
+      where: { email, ...(companyId ? { companyId } : {}) },
+    });
+
+    // Valida a senha contra cada candidato ANTES de decidir qualquer coisa
+    // sobre desambiguação — nunca revela quais/quantas empresas têm conta
+    // com esse e-mail para quem não provou conhecer a senha (evita
+    // enumeration de contas).
+    const matches: typeof candidates = [];
+    for (const candidate of candidates) {
+      if (await verifyPassword(password, candidate.passwordHash)) matches.push(candidate);
+    }
+
+    if (matches.length === 0) {
       throw new UnauthorizedError('Credenciais inválidas');
     }
 
+    // Mais de uma empresa com o mesmo e-mail + mesma senha — caso raro
+    // (contador/franqueado com acesso a várias lojas usando a mesma senha
+    // em ambas). Só é possível chegar aqui sem `companyId` no body (com ele,
+    // `candidates` já vem restrito a no máximo 1 pela unicidade composta).
+    // Sem token ainda: o frontend mostra um seletor e reenvia o login com
+    // `companyId` preenchido.
+    if (matches.length > 1) {
+      const companyIds = matches
+        .map((m) => m.companyId)
+        .filter((id): id is string => id != null);
+      const companies = await prisma.company.findMany({
+        where: { id: { in: companyIds } },
+        select: { id: true, name: true },
+      });
+      return { needsCompanySelection: true, companies } satisfies LoginNeedsCompany;
+    }
+
+    const user = matches[0]!;
     const payload: JwtPayload = {
       sub: user.id,
       email: user.email,
