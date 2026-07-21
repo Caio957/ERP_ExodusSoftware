@@ -360,32 +360,6 @@ function ScrollToTopButton() {
 // ---------------------------------------------------------------------------
 // Schemas Zod dinâmicos — obrigatoriedade condicionada às configurações da loja
 // ---------------------------------------------------------------------------
-function buildProductFormSchema(
-  brandRequired: boolean,
-  groupRequired: boolean,
-  subgroupRequired: boolean,
-  barcodeRequired: boolean,
-  tracksLotValidity: boolean,
-  requireAverageCost: boolean,
-) {
-  return z.object({
-    name: z.string().min(1, 'Nome é obrigatório'),
-    brand: brandRequired ? z.string().min(1, 'Marca é obrigatória') : z.string(),
-    group: groupRequired ? z.string().min(1, 'Grupo é obrigatório') : z.string(),
-    subgroup: subgroupRequired ? z.string().min(1, 'Subgrupo é obrigatório') : z.string(),
-    sku: z.string().min(1, 'SKU é obrigatório'),
-    barcode: barcodeRequired ? z.string().min(1, 'Código de barras é obrigatório') : z.string(),
-    cost: z.number({ invalid_type_error: 'Custo inválido' }).min(0.01, 'Custo deve ser maior que zero'),
-    averageCost: z.coerce.number().refine(
-      (val) => !requireAverageCost || val > 0,
-      { message: 'Custo médio é obrigatório' },
-    ),
-    salePrice: z.number({ invalid_type_error: 'Preço inválido' }).min(0.01, 'Preço de venda deve ser maior que zero'),
-    batch: tracksLotValidity ? z.string().min(1, 'Lote é obrigatório') : z.string(),
-    validity: tracksLotValidity ? z.string().min(1, 'Validade é obrigatória') : z.string(),
-  });
-}
-
 function buildVariantSchema(barcodeRequired: boolean, tracksLotValidity: boolean, requireAverageCost: boolean) {
   return z.object({
     sku: z.string().min(1, 'SKU é obrigatório'),
@@ -411,23 +385,46 @@ function toFieldErrors(issues: z.ZodIssue[]): Record<string, string> {
 }
 
 // ---------------------------------------------------------------------------
-// Cadastro de novo produto
+// Cadastro de novo produto — multi-variante (ex.: perfume 50ml/100ml, batom
+// em várias cores) numa única chamada a POST /api/products, que já aceita
+// `variants: CreateVariantInput[]` (nunca precisou de mudança de backend).
 // ---------------------------------------------------------------------------
-function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const [form, setForm] = useState({
-    name: '',
-    brand: '',
-    group: '',
-    subgroup: '',
+interface NewVariantRow {
+  key: string; // id client-side p/ React key + updates; não é enviado ao backend
+  sku: string;
+  barcode: string;
+  description: string;
+  stockQty: string;
+  batch: string;
+  validity: string;
+  cost: number;
+  averageCost: number;
+  salePrice: number;
+  pct: number;
+}
+
+function emptyVariantRow(): NewVariantRow {
+  return {
+    key: crypto.randomUUID(),
     sku: '',
     barcode: '',
     description: '',
+    stockQty: '0',
     batch: '',
     validity: '',
-    stockQty: '0',
-  });
+    cost: 0,
+    averageCost: 0,
+    salePrice: 0,
+    pct: 0,
+  };
+}
+
+function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const [form, setForm] = useState({ name: '', brand: '', group: '', subgroup: '' });
   const [tracksLotValidity, setTracksLotValidity] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [variants, setVariants] = useState<NewVariantRow[]>(() => [emptyVariantRow()]);
+  const [productErrors, setProductErrors] = useState<Record<string, string>>({});
+  const [variantErrors, setVariantErrors] = useState<Record<string, Record<string, string>>>({});
 
   // Config da loja: define quais campos são obrigatórios (Onda 2).
   const { data: settings } = useQuery({
@@ -440,35 +437,51 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
   const barcodeRequired = settings?.barcodeRequired ?? false;
   const requireAverageCost = settings?.requireAverageCost ?? false;
   // Lote/validade é sempre opt-in: todo produto novo abre desmarcado e quem
-  // decide é o usuário, por produto. Não bloqueia o cadastro por causa de lote.
-
-  // Precificação unificada: um único estado `pct` representa Margem OU Markup
-  // conforme `pricingMode` lido das configurações da loja.
+  // decide é o usuário, por produto (vale para todas as variantes dele).
   const pricingMode = settings?.pricingMode ?? 'margin';
-  const [cost, setCost] = useState(0);
-  const [averageCost, setAverageCost] = useState(0);
-  const [salePrice, setSalePrice] = useState(0);
-  const [pct, setPct] = useState(0);
 
-  function applyCost(novoCusto: number) {
-    const safePct = pricingMode === 'margin' ? Math.min(pct, 99.99) : pct;
-    setCost(novoCusto);
-    setSalePrice(pricingMode === 'margin'
-      ? priceFromMargin(novoCusto, safePct)
-      : priceFromMarkup(novoCusto, safePct));
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  function updateVariant(key: string, patch: Partial<NewVariantRow>) {
+    setVariants((vs) => vs.map((v) => (v.key === key ? { ...v, ...patch } : v)));
   }
-  function applyPct(v: number) {
-    const safe = pricingMode === 'margin' ? Math.min(v, 99.99) : v;
-    setPct(safe);
-    setSalePrice(pricingMode === 'margin'
-      ? priceFromMargin(cost, safe)
-      : priceFromMarkup(cost, safe));
+  // Precificação por variante: cada uma tem seu próprio custo/margem/venda —
+  // mesma lógica bidirecional de sempre, só que aplicada por `key`.
+  function applyVariantCost(key: string, novoCusto: number) {
+    setVariants((vs) => vs.map((v) => {
+      if (v.key !== key) return v;
+      const safePct = pricingMode === 'margin' ? Math.min(v.pct, 99.99) : v.pct;
+      const salePrice = pricingMode === 'margin'
+        ? priceFromMargin(novoCusto, safePct)
+        : priceFromMarkup(novoCusto, safePct);
+      return { ...v, cost: novoCusto, salePrice };
+    }));
   }
-  function applySalePrice(v: number) {
-    setSalePrice(v);
-    setPct(pricingMode === 'margin'
-      ? marginFromPrice(cost, v) || 0
-      : markupFromPrice(cost, v) || 0);
+  function applyVariantPct(key: string, novoPct: number) {
+    setVariants((vs) => vs.map((v) => {
+      if (v.key !== key) return v;
+      const safe = pricingMode === 'margin' ? Math.min(novoPct, 99.99) : novoPct;
+      const salePrice = pricingMode === 'margin'
+        ? priceFromMargin(v.cost, safe)
+        : priceFromMarkup(v.cost, safe);
+      return { ...v, pct: safe, salePrice };
+    }));
+  }
+  function applyVariantSalePrice(key: string, novoSale: number) {
+    setVariants((vs) => vs.map((v) => {
+      if (v.key !== key) return v;
+      const pct = pricingMode === 'margin'
+        ? marginFromPrice(v.cost, novoSale) || 0
+        : markupFromPrice(v.cost, novoSale) || 0;
+      return { ...v, salePrice: novoSale, pct };
+    }));
+  }
+  function addVariant() {
+    setVariants((vs) => [...vs, emptyVariantRow()]);
+  }
+  function removeVariant(key: string) {
+    setVariants((vs) => (vs.length > 1 ? vs.filter((v) => v.key !== key) : vs));
   }
 
   const create = useMutation({
@@ -480,55 +493,64 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
         group: form.group.trim() || undefined,
         subgroup: form.subgroup.trim() || undefined,
         tracksLotValidity,
-        variants: [
-          {
-            sku: form.sku,
-            barcode: form.barcode || undefined,
-            description: form.description.trim() || undefined,
-            costPrice: cost,
-            averageCost,
-            salePrice,
-            stockQty: Number(form.stockQty) || 0,
-            batch: form.batch || undefined,
-            validity: form.validity || undefined,
-          },
-        ],
+        variants: variants.map((v) => ({
+          sku: v.sku,
+          barcode: v.barcode.trim() || undefined,
+          description: v.description.trim() || undefined,
+          costPrice: v.cost,
+          averageCost: v.averageCost,
+          salePrice: v.salePrice,
+          stockQty: Number(v.stockQty) || 0,
+          batch: v.batch.trim() || undefined,
+          validity: v.validity || undefined,
+        })),
       }),
     onSuccess: onCreated,
   });
 
   function submit() {
-    const schema = buildProductFormSchema(
-      brandRequired, groupRequired, subgroupRequired, barcodeRequired, tracksLotValidity, requireAverageCost,
-    );
-    const result = schema.safeParse({
-      name: form.name,
-      brand: form.brand,
-      group: form.group,
-      subgroup: form.subgroup,
-      sku: form.sku,
-      barcode: form.barcode,
-      cost,
-      averageCost,
-      salePrice,
-      batch: form.batch,
-      validity: form.validity,
+    const productSchema = z.object({
+      name: z.string().min(1, 'Nome é obrigatório'),
+      brand: brandRequired ? z.string().min(1, 'Marca é obrigatória') : z.string(),
+      group: groupRequired ? z.string().min(1, 'Grupo é obrigatório') : z.string(),
+      subgroup: subgroupRequired ? z.string().min(1, 'Subgrupo é obrigatório') : z.string(),
     });
-    if (!result.success) {
-      setErrors(toFieldErrors(result.error.issues));
-      return;
-    }
-    setErrors({});
-    create.mutate();
-  }
+    const variantSchema = buildVariantSchema(barcodeRequired, tracksLotValidity, requireAverageCost);
 
-  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setForm((f) => ({ ...f, [k]: e.target.value }));
+    const productResult = productSchema.safeParse(form);
+    let hasErrors = false;
+    if (!productResult.success) {
+      setProductErrors(toFieldErrors(productResult.error.issues));
+      hasErrors = true;
+    } else {
+      setProductErrors({});
+    }
+
+    const newVariantErrors: Record<string, Record<string, string>> = {};
+    for (const v of variants) {
+      const result = variantSchema.safeParse({
+        sku: v.sku,
+        barcode: v.barcode,
+        costPrice: v.cost,
+        averageCost: v.averageCost,
+        salePrice: v.salePrice,
+        batch: v.batch,
+        validity: v.validity,
+      });
+      if (!result.success) {
+        newVariantErrors[v.key] = toFieldErrors(result.error.issues);
+        hasErrors = true;
+      }
+    }
+    setVariantErrors(newVariantErrors);
+
+    if (!hasErrors) create.mutate();
+  }
 
   return createPortal(
     <div className="modal-overlay">
       <form
-        className="modal-sheet sm:max-w-2xl flex flex-col overflow-hidden !p-0"
+        className="modal-sheet sm:max-w-3xl flex flex-col overflow-hidden !p-0"
         onSubmit={(e) => { e.preventDefault(); submit(); }}
       >
         {/* Cabeçalho fixo */}
@@ -538,30 +560,22 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
           </span>
           <div>
             <h2 className="font-display text-lg font-bold">Novo produto</h2>
-            <p className="text-sm text-slate-500">Cadastre o produto e a primeira variante.</p>
+            <p className="text-sm text-slate-500">
+              Cadastre o produto e uma ou mais variantes (ex.: 50ml/100ml, cores diferentes).
+            </p>
           </div>
         </div>
 
         {/* Corpo com scroll interno — min-h-0 é obrigatório para o flexbox não estourar o wrapper */}
         <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Nome" required error={errors.name} value={form.name} onChange={set('name')} />
-            <Field label="Marca" required={brandRequired} error={errors.brand} value={form.brand} onChange={set('brand')} />
-            <Field label="Grupo" required={groupRequired} error={errors.group} value={form.group} onChange={set('group')} />
-            <Field label="Subgrupo" required={subgroupRequired} error={errors.subgroup} value={form.subgroup} onChange={set('subgroup')} />
-            <Field label="SKU" required error={errors.sku} value={form.sku} onChange={set('sku')} />
-            <Field
-              label="Código de barras"
-              required={barcodeRequired}
-              error={errors.barcode}
-              value={form.barcode}
-              onChange={set('barcode')}
-            />
-            <Field label="Descrição da variante" value={form.description} onChange={set('description')} />
-            <Field label="Estoque inicial" type="number" value={form.stockQty} onChange={set('stockQty')} />
+            <Field label="Nome" required error={productErrors.name} value={form.name} onChange={set('name')} />
+            <Field label="Marca" required={brandRequired} error={productErrors.brand} value={form.brand} onChange={set('brand')} />
+            <Field label="Grupo" required={groupRequired} error={productErrors.group} value={form.group} onChange={set('group')} />
+            <Field label="Subgrupo" required={subgroupRequired} error={productErrors.subgroup} value={form.subgroup} onChange={set('subgroup')} />
           </div>
 
-          {/* Controle de lote e validade (Requisito 4.1 configurável) */}
+          {/* Controle de lote e validade (Requisito 4.1 configurável) — vale para todas as variantes */}
           <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
             <input
               type="checkbox"
@@ -572,33 +586,122 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
             <span className="text-sm">
               <span className="font-semibold text-slate-700">Controlar lote e validade</span>
               <span className="block text-xs text-slate-500">
-                Quando ativado, lote e validade tornam-se obrigatórios para este produto.
+                Quando ativado, lote e validade tornam-se obrigatórios em cada variante.
               </span>
             </span>
           </label>
 
-          {tracksLotValidity && (
-            <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Lote" required error={errors.batch} value={form.batch} onChange={set('batch')} />
-              <Field label="Validade" required type="date" error={errors.validity} value={form.validity} onChange={set('validity')} />
-            </div>
-          )}
+          <div className="mt-5 flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Variantes ({variants.length})
+            </span>
+            <button type="button" className="btn-ghost h-8 px-3 text-sm" onClick={addVariant}>
+              <Plus className="h-4 w-4" /> Adicionar variante
+            </button>
+          </div>
 
-          <div className="mt-4 rounded-xl border border-brand-100 bg-brand-50/60 p-4">
-            <div className="mb-2 text-sm font-semibold text-brand-700">
-              Precificação — {pricingMode === 'margin' ? 'Margem sobre venda' : 'Markup sobre custo'}
-            </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <NumField label="Último custo (R$)" required error={errors.cost} value={cost} onChange={applyCost} />
-              <NumField label="Custo médio (R$)" required={requireAverageCost} error={errors.averageCost} value={averageCost} onChange={setAverageCost} />
-              <NumField
-                label={pricingMode === 'margin' ? 'Margem (%)' : 'Markup (%)'}
-                value={pct}
-                max={pricingMode === 'margin' ? 99.99 : undefined}
-                onChange={applyPct}
-              />
-              <NumField label="Venda (R$)" required error={errors.salePrice} value={salePrice} onChange={applySalePrice} />
-            </div>
+          <div className="mt-3 space-y-3">
+            {variants.map((v, idx) => (
+              <div key={v.key} className="rounded-xl border border-slate-200 p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    Variante {idx + 1}
+                  </span>
+                  <button
+                    type="button"
+                    className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-30"
+                    onClick={() => removeVariant(v.key)}
+                    disabled={variants.length <= 1}
+                    title="Remover variante"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <Field
+                    label="SKU"
+                    required
+                    error={variantErrors[v.key]?.sku}
+                    value={v.sku}
+                    onChange={(e) => updateVariant(v.key, { sku: e.target.value })}
+                  />
+                  <Field
+                    label="Código de barras"
+                    required={barcodeRequired}
+                    error={variantErrors[v.key]?.barcode}
+                    value={v.barcode}
+                    onChange={(e) => updateVariant(v.key, { barcode: e.target.value })}
+                  />
+                  <Field
+                    label="Descrição da variante"
+                    value={v.description}
+                    onChange={(e) => updateVariant(v.key, { description: e.target.value })}
+                  />
+                  <Field
+                    label="Estoque inicial"
+                    type="number"
+                    value={v.stockQty}
+                    onChange={(e) => updateVariant(v.key, { stockQty: e.target.value })}
+                  />
+                </div>
+
+                {tracksLotValidity && (
+                  <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <Field
+                      label="Lote"
+                      required
+                      error={variantErrors[v.key]?.batch}
+                      value={v.batch}
+                      onChange={(e) => updateVariant(v.key, { batch: e.target.value })}
+                    />
+                    <Field
+                      label="Validade"
+                      required
+                      type="date"
+                      error={variantErrors[v.key]?.validity}
+                      value={v.validity}
+                      onChange={(e) => updateVariant(v.key, { validity: e.target.value })}
+                    />
+                  </div>
+                )}
+
+                <div className="mt-3 rounded-xl border border-brand-100 bg-brand-50/60 p-3">
+                  <div className="mb-2 text-sm font-semibold text-brand-700">
+                    Precificação — {pricingMode === 'margin' ? 'Margem sobre venda' : 'Markup sobre custo'}
+                  </div>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <NumField
+                      label="Último custo (R$)"
+                      required
+                      error={variantErrors[v.key]?.costPrice}
+                      value={v.cost}
+                      onChange={(val) => applyVariantCost(v.key, val)}
+                    />
+                    <NumField
+                      label="Custo médio (R$)"
+                      required={requireAverageCost}
+                      error={variantErrors[v.key]?.averageCost}
+                      value={v.averageCost}
+                      onChange={(val) => updateVariant(v.key, { averageCost: val })}
+                    />
+                    <NumField
+                      label={pricingMode === 'margin' ? 'Margem (%)' : 'Markup (%)'}
+                      value={v.pct}
+                      max={pricingMode === 'margin' ? 99.99 : undefined}
+                      onChange={(val) => applyVariantPct(v.key, val)}
+                    />
+                    <NumField
+                      label="Venda (R$)"
+                      required
+                      error={variantErrors[v.key]?.salePrice}
+                      value={v.salePrice}
+                      onChange={(val) => applyVariantSalePrice(v.key, val)}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
 
           {create.error instanceof ApiError && (
@@ -614,7 +717,7 @@ function ProductForm({ onClose, onCreated }: { onClose: () => void; onCreated: (
             Cancelar
           </button>
           <button type="submit" className="btn-primary" disabled={create.isPending}>
-            {create.isPending ? 'Salvando...' : 'Salvar produto'}
+            {create.isPending ? 'Salvando...' : `Salvar produto (${variants.length} variante${variants.length > 1 ? 's' : ''})`}
           </button>
         </div>
       </form>
