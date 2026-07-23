@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-07-19
+- **Última atualização:** 2026-07-22
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -223,6 +223,55 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   **`POST /products/adjust-stock`** (acerto de estoque → `StockMovement ADJUST`).
 - ✅ **Pessoas**: CRUD cliente/fornecedor (document opcional); **`DELETE`** com proteção
   (bloqueia se houver vendas/notas/títulos vinculados).
+  **Criptografia de dados sensíveis (Plano Mestre V2.0, Frente 2 — LGPD)**:
+  `Person.document`/`email`/`phone` são cifrados em repouso, de forma
+  transparente para toda rota que já usa `tenantDb(req)`/`withTenant`. Nova
+  extensão do Prisma `withEncryption` (`lib/encryption.ts`, mesmo espírito de
+  `withTenant`), composta por baixo de `withTenant` (`withEncryption(prisma).
+  $extends({name:'withTenant',...})` em `lib/tenant.ts`) — qualquer `tx` de um
+  `db.$transaction()` já herda as duas. Dois esquemas: `document`
+  **determinístico** (AES-256-CBC, IV derivado via HMAC-SHA256 do próprio
+  texto claro — mesmo texto claro sempre produz o mesmo ciphertext) para
+  continuar suportando busca exata (`where: { document: '...' }`, usado em
+  `/invoices/parse` para casar fornecedor por CNPJ) e a constraint
+  `@@unique([companyId, document])`; `email`/`phone` **não-determinístico**
+  (AES-256-GCM, IV aleatório por chamada, autenticado) — mais forte, mas sem
+  busca por igualdade (nenhuma rota precisa disso hoje). `ENCRYPTION_KEY`
+  (32 bytes hex/base64, `env.ts`, fail-fast no boot) — trocar a chave em
+  produção torna ilegível tudo que já foi cifrado com a anterior.
+  **Arquitetura da extensão**: `query.person.$allOperations` só mexe em
+  argumentos (cifra `data`/`create`/`update` nas escritas, cifra
+  `where.document` nas leituras — inclusive recursivamente dentro de
+  `AND`/`OR`/`NOT`, usado pela busca de `GET /persons`); `result.person.
+  {document,email,phone}` são campos computados que decifram o valor cru —
+  **diferente de um hook em `query`, o componente `result` do Prisma Client
+  Extensions se aplica automaticamente também a relações aninhadas**
+  (`FinancialAccount.person`, `Invoice.supplier`, `Sale.client` via
+  `include`), que um hook de `query` escopado a `person` jamais veria (só
+  dispara quando `Person` é o model raiz da chamada) — confirmado ao vivo.
+  **Tolerância a dado legado**: valores sem os prefixos reconhecidos
+  (`encdet1:`/`encgcm1:`) são devolvidos como vieram em vez de tentar decifrar
+  e quebrar — cobre registros gravados antes desta Frente 2. Script
+  `prisma/backfill-person-encryption.ts` (dry-run por padrão, `CONFIRM_
+  BACKFILL=1` para aplicar, mesmo padrão de `backfill-tenant.ts`) migra o que
+  já existe — **ainda não rodado em produção** (ver §12).
+  **Limitação conhecida e documentada no código**: `document: { contains:
+  ... }` (usado pelo parâmetro `search` de `GET /persons`) não funciona mais
+  sob criptografia determinística — não há como buscar substring em
+  ciphertext. Não é regressão prática: a única tela real (`RegistrationsPage.tsx`)
+  já filtra 100% client-side desde a Onda 2026-07-02 e nunca envia `search`
+  ao backend; o parâmetro ficou vestigial. Outros operadores não suportados
+  (`startsWith`, `not`, etc.) são deixados intactos — na prática, não
+  encontram nada, sem quebrar a requisição.
+  **Testado ao vivo**: create/update grava ciphertext real no Postgres
+  (confirmado lendo com Prisma cru, sem a extensão); busca exata por
+  `document` encontra o registro; busca por `document` inexistente retorna
+  vazio sem erro; `select` parcial (sem document/email/phone) não vaza os
+  campos; include aninhado (`FinancialAccount.person`) decifra
+  corretamente; unicidade `@@unique([companyId, document])` continua
+  bloqueando duplicata (P2002); dado legado em texto claro (inserido via
+  Prisma cru, simulando um registro pré-Frente 2) é lido sem quebrar. Dados
+  de teste removidos ao final.
 - ✅ **Entrada de XML/NFe** (§4.3): `/invoices/parse` (resolve o De/Para e já retorna
   `matchedVariant` com os dados reais do catálogo — nome do produto, SKU, preços —
   para o item auto-mapeado nunca exibir o `xProd` da nota como se fosse o nome
@@ -2409,6 +2458,88 @@ mesclada na `main`.
     nenhuma rota de provisionamento de tenant — `Company` só nasce via
     script/inserção direta no banco. Ver §12.
 
+- ✅ **Onda 2026-07-22b — Criptografia de Dados Sensíveis (Plano Mestre
+  V2.0, Frente 2 — LGPD)** (2026-07-22): branch `feature/lgpd-encryption`
+  (criada a partir da `main`, **independente** da branch de onboarding —
+  ver nota de drift em §14.1b/topo do documento sobre as duas frentes
+  seguirem em paralelo sem merge ainda). Commit único. Cifra
+  `Person.document`/`email`/`phone` em repouso.
+  - **`lib/encryption.ts`** (novo): duas primitivas sobre o módulo nativo
+    `crypto`. `encryptDeterministic`/`decryptDeterministic` (AES-256-CBC,
+    IV derivado via HMAC-SHA256 do texto claro) para `document` — precisa
+    suportar busca exata. `encryptRandom`/`decryptRandom` (AES-256-GCM, IV
+    aleatório, autenticado) para `email`/`phone`. **Achado de design
+    corrigido durante a implementação**: a missão original sugeria "IV
+    derivado" sem detalhar o armazenamento — um IV puramente derivado do
+    texto claro não pode ser re-derivado na hora de decifrar (o texto claro
+    é exatamente o que ainda não temos); o IV continua sendo GRAVADO junto
+    do ciphertext (como em qualquer CBC), só que agora de forma
+    reproduzível — a mesma entrada sempre grava o mesmo IV, e é isso que
+    faz a busca por igualdade bater. Prefixos versionados (`encdet1:`/
+    `encgcm1:`) permitem ao decrypt reconhecer o esquema certo por valor, e
+    — crucial num sistema já em produção com dados reais — diferenciar
+    ciphertext de texto legado ainda não migrado (`decryptField` devolve
+    texto sem prefixo reconhecido intacto, em vez de tentar decifrar e
+    quebrar).
+  - **`withEncryption`** (mesmo arquivo): extensão do Prisma com DOIS
+    componentes de responsabilidades separadas — `query.person.
+    $allOperations` só mexe em argumentos (cifra `data`/`create`/`update`
+    nas escritas; cifra `where.document` nas leituras, descendo
+    recursivamente por `AND`/`OR`/`NOT`); `result.person.
+    {document,email,phone}` são campos computados que decifram o retorno.
+    **Achado de arquitetura não previsto na missão, descoberto e validado
+    ao vivo**: um hook de `query` escopado a `person` só dispara quando
+    `Person` é o model RAIZ da chamada — nunca veria `FinancialAccount.
+    findFirst({ include: { person: true } })`, `Invoice`+`supplier: true`
+    ou `Sale`+`client: true` (relações aninhadas), que ficariam com
+    document/email/phone cru (cifrado) vazando no JSON de resposta dessas
+    telas. O componente `result` do Prisma Client Extensions resolve isso
+    nativamente — computa o campo em QUALQUER lugar que uma linha de
+    `Person` apareça na resposta, aninhada ou não — sem precisar de nenhum
+    tratamento especial nessas três rotas. Confirmado ao vivo com um
+    `FinancialAccount` de teste incluindo `person: true`.
+  - **Integração**: `withTenant` (`lib/tenant.ts`) passou a compor
+    `withEncryption(prisma).$extends({name:'withTenant', ...})` em vez de
+    partir do `prisma` cru — toda rota que já usa `tenantDb(req)` ganha
+    criptografia transparente para `Person` sem precisar saber disso; o
+    `tx` de um `db.$transaction()` herda as duas extensões (comportamento
+    nativo do Prisma, confirmado ao vivo com `tx.person.create` dentro da
+    transação de `/invoices/confirm`).
+  - **`ENCRYPTION_KEY`** (`env.ts`): 32 bytes em hex ou base64, validado
+    com `.refine()` e fail-fast no boot — mesmo padrão de `JWT_SECRET`.
+    Adicionada a `.env.example` e ao `.env` local (gitignorados).
+  - **Limitação documentada, não corrigida (impossível de corrigir)**:
+    `document: { contains: search }` (usado pelo parâmetro `search` de
+    `GET /persons`) para de funcionar sob criptografia determinística —
+    não existe esquema que suporte busca por substring em ciphertext sem
+    trocar a arquitetura inteira (ex.: um índice cego por n-gramas, fora de
+    escopo). **Confirmado que não é uma regressão prática**: a única tela
+    real (`RegistrationsPage.tsx`, "busca onisciente" da Onda 2026-07-02)
+    já filtra 100% client-side e nunca envia `search` para o backend — o
+    parâmetro já estava vestigial antes desta onda.
+  - **Script de backfill** (`prisma/backfill-person-encryption.ts`, novo,
+    mesmo padrão dry-run de `backfill-tenant.ts`): migra `Person`s já
+    existentes em texto claro. **Não fazia falta rodar nesta sessão** — o
+    banco de dev usado para os testes ao vivo não tinha nenhum `Person`
+    pré-existente (dry-run confirmou "0 pendentes"); **fica pendente rodar
+    contra produção** antes de considerar a Frente 2 realmente completa
+    (ver §12.20).
+  - **Testado ao vivo, ponta a ponta, contra o dev API**: `POST /api/persons`
+    real via HTTP retornou os 3 campos em texto claro; leitura direta do
+    Postgres com Prisma CRU (sem a extensão) confirmou ciphertext de
+    verdade gravado (`encdet1:.../encgcm1:...`), não texto claro; busca
+    exata por `document` encontrou o registro certo; busca por `document`
+    inexistente voltou vazia sem erro; `select` parcial (só
+    `id`/`name`/`tradeName`, mesmo formato de `GET /settings/sales`) não
+    vazou os campos cifrados; `include` aninhado em `FinancialAccount`
+    decifrou corretamente (e com `select` parcial dentro do include,
+    também não vazou); tentativa de duplicar `document` na mesma empresa
+    bloqueada por `@@unique([companyId, document])` (P2002), provando que
+    o esquema determinístico preserva a unicidade; um registro inserido
+    via Prisma cru simulando dado legado pré-Frente-2 foi lido sem quebrar.
+    Todos os dados de teste removidos ao final (nenhum resíduo).
+  `npm run typecheck` + `npm run build` (api) → **0 erros**.
+
 ---
 
 ## 12. Pendências, bloqueios e dívidas técnicas
@@ -2486,6 +2617,18 @@ mesclada na `main`.
     ainda opera, na prática, como single-tenant (só o "Inquilino Zero"
     existe). Candidato natural para a próxima onda desta frente, se for a
     prioridade escolhida.
+20. **[NOVO, AÇÃO ANTES DO PRÓXIMO DEPLOY] Criptografia LGPD (Frente 2)
+    implementada, mas duas ações manuais ficam pendentes antes de ir para
+    produção**: (a) definir `ENCRYPTION_KEY` (32 bytes hex, `openssl rand
+    -hex 32`) nas variáveis de ambiente do Railway — sem ela o boot falha
+    fail-fast (`env.ts`); (b) rodar `CONFIRM_BACKFILL=1 npx tsx prisma/
+    backfill-person-encryption.ts` contra o banco de produção **depois** do
+    deploy que introduz a extensão — todo `Person.document`/`email`/`phone`
+    já existente (dados reais de clientes/fornecedores, sistema em produção
+    há meses) continua em texto claro até esse script rodar; a leitura não
+    quebra nesse meio-tempo (`decryptField` tolera texto claro), mas não é
+    LGPD-compliant até o backfill ser aplicado. Ver §5 (bullet Pessoas) para
+    o detalhamento técnico completo.
 
 ---
 
