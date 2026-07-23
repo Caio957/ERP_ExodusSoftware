@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
@@ -131,6 +132,60 @@ export async function personRoutes(app: FastifyInstance) {
 
       await db.person.delete({ where: { id: req.params.id } });
       return reply.status(204).send();
+    },
+  );
+
+  /**
+   * Anonimização (Plano Mestre V2.0, Frente 3 — Direito ao Esquecimento).
+   * Alternativa ao `DELETE` quando a pessoa tem vendas/notas/títulos
+   * vinculados (ou mesmo sem vínculo, se só se quer "esquecer" os dados sem
+   * apagar o histórico): sempre `UPDATE`, nunca `DELETE` — preserva o `id`
+   * para não quebrar `Sale.clientId`/`Invoice.supplierId`/
+   * `FinancialAccount.personId`. Só ADMIN — decisão revertida
+   * deliberadamente (correção crítica de RBAC, 2026-07-23): uma rodada
+   * anterior desta mesma missão havia afrouxado para `authenticate` simples
+   * (qualquer usuário do tenant, incluindo CASHIER); o Comandante reverteu
+   * por ser risco grave de negócio — operador de caixa nunca pode
+   * anonimizar/destruir dados de cliente. `tenantDb`/`db.person.findFirst`
+   * também barram IDOR: o `id` só resolve se pertencer à empresa do token
+   * (`companyId` injetado pela extensão `withTenant`).
+   * Os novos valores passam pelo `db.person.update` normal — a extensão
+   * `withEncryption` (Frente 2, `lib/encryption.ts`) cifra `document`/
+   * `email`/`phone` automaticamente, como cifraria qualquer outra escrita.
+   */
+  r.post(
+    '/:id/anonymize',
+    { preHandler: app.authorize(['ADMIN']), schema: { params: z.object({ id: z.string().uuid() }) } },
+    async (req) => {
+      const { db } = tenantDb(req);
+      const existing = await db.person.findFirst({ where: { id: req.params.id } });
+      if (!existing) throw new NotFoundError('Pessoa');
+
+      const anonId = crypto.randomUUID();
+      const anonymized = await db.person.update({
+        where: { id: req.params.id },
+        data: {
+          name: 'Anônimo (LGPD)',
+          // Nome fantasia/apelido também identifica a pessoa — limpo junto.
+          tradeName: null,
+          // Único (@@unique([companyId, document])) mesmo com N pessoas
+          // anonimizadas na mesma empresa — cada UUID é distinto.
+          document: `ANON-${anonId}`,
+          email: `anon-${anonId}@lgpd.local`,
+          phone: null,
+          zipCode: null,
+          street: null,
+          number: null,
+          district: null,
+          city: null,
+          state: null,
+        },
+      });
+
+      return {
+        message: 'Dados da pessoa foram anonimizados com sucesso.',
+        person: anonymized,
+      };
     },
   );
 }

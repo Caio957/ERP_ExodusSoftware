@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-07-19
+- **Última atualização:** 2026-07-23
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -223,6 +223,138 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   **`POST /products/adjust-stock`** (acerto de estoque → `StockMovement ADJUST`).
 - ✅ **Pessoas**: CRUD cliente/fornecedor (document opcional); **`DELETE`** com proteção
   (bloqueia se houver vendas/notas/títulos vinculados).
+  **Criptografia de dados sensíveis (Plano Mestre V2.0, Frente 2 — LGPD)**:
+  `Person.document`/`email`/`phone` são cifrados em repouso, de forma
+  transparente para toda rota que já usa `tenantDb(req)`/`withTenant`. Nova
+  extensão do Prisma `withEncryption` (`lib/encryption.ts`, mesmo espírito de
+  `withTenant`), composta por baixo de `withTenant` (`withEncryption(prisma).
+  $extends({name:'withTenant',...})` em `lib/tenant.ts`) — qualquer `tx` de um
+  `db.$transaction()` já herda as duas. Dois esquemas: `document`
+  **determinístico** (AES-256-CBC, IV derivado via HMAC-SHA256 do próprio
+  texto claro — mesmo texto claro sempre produz o mesmo ciphertext) para
+  continuar suportando busca exata (`where: { document: '...' }`, usado em
+  `/invoices/parse` para casar fornecedor por CNPJ) e a constraint
+  `@@unique([companyId, document])`; `email`/`phone` **não-determinístico**
+  (AES-256-GCM, IV aleatório por chamada, autenticado) — mais forte, mas sem
+  busca por igualdade (nenhuma rota precisa disso hoje). `ENCRYPTION_KEY`
+  (32 bytes hex/base64, `env.ts`, fail-fast no boot) — trocar a chave em
+  produção torna ilegível tudo que já foi cifrado com a anterior.
+  **Arquitetura da extensão**: `query.person.$allOperations` só mexe em
+  argumentos (cifra `data`/`create`/`update` nas escritas, cifra
+  `where.document` nas leituras — inclusive recursivamente dentro de
+  `AND`/`OR`/`NOT`, usado pela busca de `GET /persons`); `result.person.
+  {document,email,phone}` são campos computados que decifram o valor cru —
+  **diferente de um hook em `query`, o componente `result` do Prisma Client
+  Extensions se aplica automaticamente também a relações aninhadas**
+  (`FinancialAccount.person`, `Invoice.supplier`, `Sale.client` via
+  `include`), que um hook de `query` escopado a `person` jamais veria (só
+  dispara quando `Person` é o model raiz da chamada) — confirmado ao vivo.
+  **Tolerância a dado legado**: valores sem os prefixos reconhecidos
+  (`encdet1:`/`encgcm1:`) são devolvidos como vieram em vez de tentar decifrar
+  e quebrar — cobre registros gravados antes desta Frente 2. Script
+  `prisma/backfill-person-encryption.ts` (dry-run por padrão, `CONFIRM_
+  BACKFILL=1` para aplicar, mesmo padrão de `backfill-tenant.ts`) migra o que
+  já existe — **ainda não rodado em produção** (ver §12).
+  **Limitação conhecida e documentada no código**: `document: { contains:
+  ... }` (usado pelo parâmetro `search` de `GET /persons`) não funciona mais
+  sob criptografia determinística — não há como buscar substring em
+  ciphertext. Não é regressão prática: a única tela real (`RegistrationsPage.tsx`)
+  já filtra 100% client-side desde a Onda 2026-07-02 e nunca envia `search`
+  ao backend; o parâmetro ficou vestigial. Outros operadores não suportados
+  (`startsWith`, `not`, etc.) são deixados intactos — na prática, não
+  encontram nada, sem quebrar a requisição.
+  **Testado ao vivo**: create/update grava ciphertext real no Postgres
+  (confirmado lendo com Prisma cru, sem a extensão); busca exata por
+  `document` encontra o registro; busca por `document` inexistente retorna
+  vazio sem erro; `select` parcial (sem document/email/phone) não vaza os
+  campos; include aninhado (`FinancialAccount.person`) decifra
+  corretamente; unicidade `@@unique([companyId, document])` continua
+  bloqueando duplicata (P2002); dado legado em texto claro (inserido via
+  Prisma cru, simulando um registro pré-Frente 2) é lido sem quebrar. Dados
+  de teste removidos ao final.
+  **Anonimização / Direito ao Esquecimento (Plano Mestre V2.0, Frente 3 —
+  LGPD)**: **`POST /persons/:id/anonymize`** — **só `ADMIN`**
+  (`authorize(['ADMIN'])`). ⚠️ **Histórico de RBAC nesta rota** (relevante
+  para não repetir o erro): a versão original já era `ADMIN`-only; uma
+  rodada intermediária afrouxou para `authenticate` simples (qualquer
+  usuário do tenant, inclusive `CASHIER`), por instrução explícita de uma
+  mensagem; o Comandante reverteu isso **no mesmo dia**, por ser risco
+  grave de negócio — operador de caixa nunca pode anonimizar/destruir
+  dados de cliente. O estado atual (e definitivo) é `ADMIN`-only. Sempre
+  `UPDATE`, nunca `DELETE`: preserva o `id` para não quebrar
+  `Sale.clientId`/`Invoice.supplierId`/`FinancialAccount.personId` —
+  exatamente o cenário que hoje bloqueia o `DELETE` normal (vendas/notas/
+  títulos vinculados); a anonimização é a alternativa para "esquecer" os
+  dados reais sem apagar o histórico. **Proteção contra IDOR** (independente
+  do RBAC por papel, em camada adicional): `db.person.findFirst({ where: {
+  id } })` via `tenantDb` já injeta `companyId` do token no `where`
+  (extensão `withTenant`) — um `id` de outra empresa nunca resolve, 404 em
+  vez de vazar/alterar dado alheio (confirmado ao vivo). Sobrescreve `name`
+  ("Anônimo (LGPD)"), `tradeName` (também identifica a pessoa, limpo
+  junto), `document` (`ANON-{uuid}` — único mesmo com N pessoas
+  anonimizadas na mesma empresa, cada UUID é distinto, então
+  `@@unique([companyId, document])` nunca colide), `email`
+  (`anon-{uuid}@lgpd.local`), `phone` (`null`) e todo o endereço
+  (`zipCode`/`street`/`number`/`district`/`city`/`state`, todos para
+  `null`) — `crypto.randomUUID()` nativo do Node. Os novos valores passam
+  pelo `db.person.update` comum, e a extensão `withEncryption` (Frente 2,
+  acima) cifra `document`/`email`/`phone` automaticamente como cifraria
+  qualquer outra escrita — o `ANON-{uuid}` fica duplamente ilegível no
+  banco (texto já ofuscado, depois cifrado). **Achado de premissa** (desde
+  a primeira rodada, ainda válido): a missão original pedia atualizar um
+  campo `updatedAt`, mas `Person` **não tem `updatedAt`/`createdAt`** no
+  schema — nenhuma migração foi criada só para isso; o passo continua
+  omitido. **Testado ao vivo (estado atual, pós-correção)**: usuário
+  `CASHIER` tentando anonimizar → **403** (confirmado bloqueado); `ADMIN`
+  → 200, com `name`/`document`/`email`/`phone` sobrescritos corretamente e
+  cifrados no banco. **Testes anteriores, ainda válidos** (nenhuma outra
+  parte da rota mudou nesta correção): pessoa vinculada a um
+  `FinancialAccount` real manteve `personId` íntegro após anonimizada;
+  teste de IDOR dedicado (pessoa criada direto no banco em empresa
+  "estranha") → 404. Dados de teste removidos ao final de cada rodada.
+- 🟡 **Impersonate administrativo + Auditoria (Plano Mestre V2.0, Frente 4)**:
+  **`POST /api/admin/impersonate`** (`routes/admin.ts`, novo — rotas globais
+  fora do isolamento multi-tenant comum, sempre Prisma cru, nunca
+  `withTenant`/`tenantDb`). Suporte técnico da Exodus troca o contexto de
+  tenant para o de um cliente sem precisar de login próprio naquela empresa.
+  **Autorização** (bypass deliberadamente simples até existir um
+  papel/painel de admin global de verdade — `SYSTEM_ADMIN`, ainda não
+  implementado): compara `req.user.email` com a env var `SUPER_ADMIN_EMAIL`
+  (nova, `env.ts`, **opcional** — diferente do padrão fail-fast de
+  `JWT_SECRET`/`ENCRYPTION_KEY` porque, se não configurada, o endpoint
+  simplesmente fica indisponível para todo mundo: nenhum e-mail real é
+  jamais igual a `undefined`, então o bypass falha **fechado** por padrão,
+  em vez de derrubar o boot de toda a API por uma variável que nem todo
+  ambiente precisa configurar no dia 1). **Novo model `AuditLog`** (sem
+  `@relation`/FK de propósito — um log de auditoria precisa sobreviver à
+  exclusão do usuário/empresa que referencia, é o próprio registro jurídico
+  de "quem acessou o quê"; também sem `companyId`, é uma tabela GLOBAL,
+  nunca escopada por `withTenant`): grava `adminUserId`/`targetCompanyId`/
+  `action` (`'IMPERSONATE_LOGIN'`) **antes** de emitir o token — se o
+  registro falhar, a troca de contexto também falha (proteção jurídica sem
+  exceção). O token novo mantém `sub`/`email`/`name` do admin REAL
+  (rastreabilidade), troca só `companyId` para o tenant-alvo — é só isso
+  que `withTenant`/`tenantDb` olham, então basta para "enganá-lo" e escopar
+  toda rota de negócio subsequente para a empresa do cliente — e adiciona
+  `isImpersonating: true` + `originalUserId` (`jwtPayloadSchema`, shared,
+  ambos opcionais) para o frontend futuramente exibir uma faixa de aviso
+  (ainda não implementado no frontend — ver §12). **🟡 parcialmente
+  validado**: por pedido explícito do Comandante, a migração do Prisma
+  (`AuditLog` é tabela nova) foi deixada para ele rodar — código e
+  `prisma generate` (só codegen, não altera o banco) validados via
+  `npm run typecheck`/`build`; **testado ao vivo** até o limite possível
+  sem a tabela existir: sem `SUPER_ADMIN_EMAIL` configurada → 403 (fail
+  closed); `CASHIER` (não é o super admin) → 403; empresa-alvo inexistente
+  → 404 (checado antes de qualquer escrita); super admin + empresa real →
+  falhou com 500 **exatamente** no `tx.auditLog.create` ("table
+  `public.AuditLog` does not exist"), confirmando que todo o resto do
+  fluxo (autorização, busca da empresa, geração de payload) está correto —
+  só falta a migração rodar. Servidor **não caiu** com esse erro (handler
+  global tratou normalmente). **Ação pendente do Comandante**: rodar
+  `npx prisma migrate dev --name add_audit_log` (dev) e depois
+  `npx prisma migrate deploy` chega sozinho no próximo `git push`/deploy do
+  Railway; e configurar `SUPER_ADMIN_EMAIL` no Railway antes de usar em
+  produção.
 - ✅ **Entrada de XML/NFe** (§4.3): `/invoices/parse` (resolve o De/Para e já retorna
   `matchedVariant` com os dados reais do catálogo — nome do produto, SKU, preços —
   para o item auto-mapeado nunca exibir o `xProd` da nota como se fosse o nome
@@ -2409,6 +2541,218 @@ mesclada na `main`.
     nenhuma rota de provisionamento de tenant — `Company` só nasce via
     script/inserção direta no banco. Ver §12.
 
+- ✅ **Onda 2026-07-22b — Criptografia de Dados Sensíveis (Plano Mestre
+  V2.0, Frente 2 — LGPD)** (2026-07-22): branch `feature/lgpd-encryption`
+  (criada a partir da `main`, **independente** da branch de onboarding —
+  ver nota de drift em §14.1b/topo do documento sobre as duas frentes
+  seguirem em paralelo sem merge ainda). Commit único. Cifra
+  `Person.document`/`email`/`phone` em repouso.
+  - **`lib/encryption.ts`** (novo): duas primitivas sobre o módulo nativo
+    `crypto`. `encryptDeterministic`/`decryptDeterministic` (AES-256-CBC,
+    IV derivado via HMAC-SHA256 do texto claro) para `document` — precisa
+    suportar busca exata. `encryptRandom`/`decryptRandom` (AES-256-GCM, IV
+    aleatório, autenticado) para `email`/`phone`. **Achado de design
+    corrigido durante a implementação**: a missão original sugeria "IV
+    derivado" sem detalhar o armazenamento — um IV puramente derivado do
+    texto claro não pode ser re-derivado na hora de decifrar (o texto claro
+    é exatamente o que ainda não temos); o IV continua sendo GRAVADO junto
+    do ciphertext (como em qualquer CBC), só que agora de forma
+    reproduzível — a mesma entrada sempre grava o mesmo IV, e é isso que
+    faz a busca por igualdade bater. Prefixos versionados (`encdet1:`/
+    `encgcm1:`) permitem ao decrypt reconhecer o esquema certo por valor, e
+    — crucial num sistema já em produção com dados reais — diferenciar
+    ciphertext de texto legado ainda não migrado (`decryptField` devolve
+    texto sem prefixo reconhecido intacto, em vez de tentar decifrar e
+    quebrar).
+  - **`withEncryption`** (mesmo arquivo): extensão do Prisma com DOIS
+    componentes de responsabilidades separadas — `query.person.
+    $allOperations` só mexe em argumentos (cifra `data`/`create`/`update`
+    nas escritas; cifra `where.document` nas leituras, descendo
+    recursivamente por `AND`/`OR`/`NOT`); `result.person.
+    {document,email,phone}` são campos computados que decifram o retorno.
+    **Achado de arquitetura não previsto na missão, descoberto e validado
+    ao vivo**: um hook de `query` escopado a `person` só dispara quando
+    `Person` é o model RAIZ da chamada — nunca veria `FinancialAccount.
+    findFirst({ include: { person: true } })`, `Invoice`+`supplier: true`
+    ou `Sale`+`client: true` (relações aninhadas), que ficariam com
+    document/email/phone cru (cifrado) vazando no JSON de resposta dessas
+    telas. O componente `result` do Prisma Client Extensions resolve isso
+    nativamente — computa o campo em QUALQUER lugar que uma linha de
+    `Person` apareça na resposta, aninhada ou não — sem precisar de nenhum
+    tratamento especial nessas três rotas. Confirmado ao vivo com um
+    `FinancialAccount` de teste incluindo `person: true`.
+  - **Integração**: `withTenant` (`lib/tenant.ts`) passou a compor
+    `withEncryption(prisma).$extends({name:'withTenant', ...})` em vez de
+    partir do `prisma` cru — toda rota que já usa `tenantDb(req)` ganha
+    criptografia transparente para `Person` sem precisar saber disso; o
+    `tx` de um `db.$transaction()` herda as duas extensões (comportamento
+    nativo do Prisma, confirmado ao vivo com `tx.person.create` dentro da
+    transação de `/invoices/confirm`).
+  - **`ENCRYPTION_KEY`** (`env.ts`): 32 bytes em hex ou base64, validado
+    com `.refine()` e fail-fast no boot — mesmo padrão de `JWT_SECRET`.
+    Adicionada a `.env.example` e ao `.env` local (gitignorados).
+  - **Limitação documentada, não corrigida (impossível de corrigir)**:
+    `document: { contains: search }` (usado pelo parâmetro `search` de
+    `GET /persons`) para de funcionar sob criptografia determinística —
+    não existe esquema que suporte busca por substring em ciphertext sem
+    trocar a arquitetura inteira (ex.: um índice cego por n-gramas, fora de
+    escopo). **Confirmado que não é uma regressão prática**: a única tela
+    real (`RegistrationsPage.tsx`, "busca onisciente" da Onda 2026-07-02)
+    já filtra 100% client-side e nunca envia `search` para o backend — o
+    parâmetro já estava vestigial antes desta onda.
+  - **Script de backfill** (`prisma/backfill-person-encryption.ts`, novo,
+    mesmo padrão dry-run de `backfill-tenant.ts`): migra `Person`s já
+    existentes em texto claro. **Não fazia falta rodar nesta sessão** — o
+    banco de dev usado para os testes ao vivo não tinha nenhum `Person`
+    pré-existente (dry-run confirmou "0 pendentes"); **fica pendente rodar
+    contra produção** antes de considerar a Frente 2 realmente completa
+    (ver §12.20).
+  - **Testado ao vivo, ponta a ponta, contra o dev API**: `POST /api/persons`
+    real via HTTP retornou os 3 campos em texto claro; leitura direta do
+    Postgres com Prisma CRU (sem a extensão) confirmou ciphertext de
+    verdade gravado (`encdet1:.../encgcm1:...`), não texto claro; busca
+    exata por `document` encontrou o registro certo; busca por `document`
+    inexistente voltou vazia sem erro; `select` parcial (só
+    `id`/`name`/`tradeName`, mesmo formato de `GET /settings/sales`) não
+    vazou os campos cifrados; `include` aninhado em `FinancialAccount`
+    decifrou corretamente (e com `select` parcial dentro do include,
+    também não vazou); tentativa de duplicar `document` na mesma empresa
+    bloqueada por `@@unique([companyId, document])` (P2002), provando que
+    o esquema determinístico preserva a unicidade; um registro inserido
+    via Prisma cru simulando dado legado pré-Frente-2 foi lido sem quebrar.
+    Todos os dados de teste removidos ao final (nenhum resíduo).
+  `npm run typecheck` + `npm run build` (api) → **0 erros**.
+
+- ✅ **Onda 2026-07-22c — Anonimização / Direito ao Esquecimento (Plano
+  Mestre V2.0, Frente 3 — LGPD)** (2026-07-22): mesma branch
+  `feature/lgpd-encryption` (continuação direta da Frente 2 — anonimização
+  depende da extensão de criptografia recém-criada). Commit único.
+  `POST /api/persons/:id/anonymize` (`routes/persons.ts`, só ADMIN) —
+  sempre `UPDATE`, nunca `DELETE`: sobrescreve `name`/`tradeName`/
+  `document`/`email`/`phone`/endereço com valores ofuscados
+  (`ANON-{crypto.randomUUID()}`/`anon-{uuid}@exodus-deleted.com`/
+  `00000000000`/`null`), preservando o `id` para não quebrar
+  `Sale.clientId`/`Invoice.supplierId`/`FinancialAccount.personId`. Os
+  novos valores passam pelo `db.person.update` comum — a extensão
+  `withEncryption` da Frente 2 cifra `document`/`email`/`phone`
+  automaticamente, sem nenhum código extra: o `ANON-{uuid}` fica
+  duplamente ilegível no banco (texto ofuscado, depois cifrado).
+  **Achado de premissa**: a missão pedia atualizar um campo `updatedAt` em
+  `Person` — o model **não tem** `updatedAt`/`createdAt` no schema; não foi
+  criada uma migração só para isso (fora do escopo pedido, afetaria toda
+  leitura/serialização de `Person` sem necessidade real) — o passo foi
+  simplesmente omitido, sem impacto no restante da funcionalidade. Nenhum
+  schema novo no `packages/shared` foi necessário — o único "param" é
+  `id: uuid()`, já coberto pelo padrão inline (`z.object({ id: z.string().
+  uuid() })`) que toda outra rota deste arquivo já usa; não havia
+  precedente de expor esse tipo de schema trivial no pacote compartilhado.
+  **Testado ao vivo**: pessoa de teste vinculada a um `FinancialAccount`
+  real — `DELETE /persons/:id` normal bloqueado com 422 (prova de que a
+  anonimização é mesmo a alternativa necessária); `POST .../anonymize`
+  retornou 200 com todos os campos sobrescritos; leitura direta do
+  Postgres (Prisma cru, sem a extensão) confirmou `document`/`email`
+  cifrados (`encdet1:`/`encgcm1:`) por cima do texto já anonimizado, não o
+  texto puro `ANON-{uuid}`; `FinancialAccount.personId` continuou
+  apontando para o mesmo `id` (integridade referencial preservada); 404
+  para id inexistente; 403 para usuário `CASHIER` (RBAC). Dados de teste
+  removidos ao final.
+  `npm run typecheck` + `npm run build` (api) → **0 erros**.
+
+- ✅ **Onda 2026-07-22d — Impersonate Administrativo + Auditoria (Plano
+  Mestre V2.0, Frente 4 — fecha a frente Segurança/LGPD)** (2026-07-22,
+  **migração aplicada e fluxo completo validado em 2026-07-23** — ver
+  Onda 2026-07-23 abaixo e §12.21):
+  mesma branch `feature/lgpd-encryption`. Commit único.
+  - **Schema**: novo model `AuditLog` (`id`/`adminUserId`/`targetCompanyId`/
+    `action`/`createdAt`) — deliberadamente sem `@relation`/FK (sobrevive à
+    exclusão do que referencia — é o próprio registro jurídico) e sem
+    `companyId` (tabela global, nunca escopada por `withTenant`). **Por
+    pedido explícito do Comandante, a migração (`prisma migrate dev`) foi
+    deixada para ele rodar** — só `npx prisma generate` (codegen puro, não
+    toca no banco) foi executado, o suficiente para `tx.auditLog.create`
+    tipar corretamente e o typecheck/build passarem.
+  - **`env.ts`**: `SUPER_ADMIN_EMAIL` nova, opcional (não fail-fast) — nota
+    própria no código explicando a escolha (endpoint fica indisponível pra
+    todo mundo se não configurada, em vez de derrubar o boot da API).
+  - **`jwtPayloadSchema`** (shared): ganhou `isImpersonating`/
+    `originalUserId`, ambos opcionais — não quebra nenhum token já emitido
+    (campos ausentes = sessão normal).
+  - **`routes/admin.ts`** (novo, prefixo `/admin`): `POST /impersonate`
+    exige `authenticate` (qualquer usuário logado pode chamar), mas só
+    passa da checagem de e-mail == `SUPER_ADMIN_EMAIL`. Busca a `Company`
+    alvo (404 se não existir) → grava `AuditLog` (`action:
+    'IMPERSONATE_LOGIN'`) **antes** de assinar o token — se a auditoria
+    falhar, a troca de contexto falha junto, sem exceção. Token novo:
+    `sub`/`email`/`name` do admin real (rastreabilidade), `companyId` do
+    tenant-alvo (é só isso que `withTenant`/`tenantDb` olham — basta pra
+    escopar toda rota de negócio subsequente pro cliente), `role: 'ADMIN'`,
+    `isImpersonating: true`, `originalUserId`.
+  - **Testado ao vivo até o limite possível sem a migração**: sem
+    `SUPER_ADMIN_EMAIL` configurada → 403 em qualquer usuário (fail
+    closed, confirmado); com a variável configurada para
+    `admin@exodus.local`, login como `CASHIER` → 403 (não é o super
+    admin); `admin@exodus.local` contra `targetCompanyId` inexistente →
+    404 (checagem de empresa roda antes de qualquer escrita);
+    `admin@exodus.local` contra a empresa real ("Inquilino Zero") → 500
+    exatamente em `tx.auditLog.create` ("table `public.AuditLog` does not
+    exist"), confirmando que autorização + busca de empresa + montagem do
+    payload estão corretos, faltando só a tabela existir; servidor
+    permaneceu no ar depois do erro (handler global tratou normalmente,
+    sem crash). **Fluxo de sucesso completo (token emitido de verdade)
+    ainda não foi validado** — depende da migração, que é a próxima ação
+    do Comandante (ver §12).
+  `npm run typecheck` + `npm run build` (shared+api) → **0 erros**.
+
+- ✅ **Onda 2026-07-23 — Segurança/LGPD: migração do AuditLog aplicada +
+  segunda rodada de Anonimização (RBAC revisto)** (2026-07-23): mesma
+  branch `feature/lgpd-encryption`, dois commits.
+  - **Migração `20260723025004_add_audit_log`**: o Comandante rodou
+    `npx prisma migrate dev --name add_audit_log` (ação que ficou
+    deliberadamente para ele, ver Onda 2026-07-22d) — a tabela `AuditLog`
+    agora existe de verdade. Arquivo de migração commitado (puramente
+    aditivo — `CREATE TABLE` + 2 índices, sem risco de deploy).
+  - **Anonimização revisada**: o Comandante voltou com uma segunda versão
+    da missão da Onda 2026-07-22c, com três mudanças deliberadas em
+    relação à primeira: (1) **RBAC afrouxado** de `authorize(['ADMIN'])`
+    para `app.authenticate` simples (qualquer usuário do tenant, não só
+    ADMIN); (2) `name` mudou de `"Cliente Anonimizado"` para `"Anônimo
+    (LGPD)"`; (3) `email` mudou de dominio `@exodus-deleted.com` para
+    `@lgpd.local`, e `phone` de `'00000000000'` para `null`. Endpoint e
+    arquitetura permanecem os mesmos (`POST /persons/:id/anonymize`,
+    sempre `UPDATE`, cifra automática via `withEncryption`) — só os
+    literais e o guard mudaram. Ver §5 (bullet Pessoas) para o texto
+    atual completo.
+  - **Testado ao vivo**: fluxo completo de impersonate agora funciona de
+    ponta a ponta (tabela existe) — não re-testado nesta onda especificamente
+    (já validado na Onda 2026-07-22d até o limite possível; a única
+    novidade operacional é a tabela existir, sem mudança de código no
+    impersonate). Anonimização re-testada com o novo RBAC: usuário
+    `CASHIER` anonimizou com sucesso (200, antes seria 403); valores
+    literais novos confirmados na resposta e no ciphertext gravado; teste
+    de IDOR dedicado — pessoa criada direto no banco em uma empresa
+    "estranha" (fora do tenant do token) → 404, nunca encontrada nem
+    alterada; `FinancialAccount.personId` continuou íntegro. Dados de
+    teste (incluindo a empresa estranha) removidos ao final.
+  `npm run typecheck` → **0 erros**.
+
+- ✅ **Onda 2026-07-23b — Correção crítica de RBAC: anonimização volta a
+  ser ADMIN-only** (2026-07-23): mesma branch `feature/lgpd-encryption`,
+  commit único. O Comandante identificou, logo depois da Onda 2026-07-23,
+  que o afrouxamento de RBAC daquela mesma onda (`authorize(['ADMIN'])` →
+  `app.authenticate`) era um risco grave de negócio — operador de caixa
+  (`CASHIER`) não pode ter permissão para anonimizar/destruir dados de
+  cliente. Revertido: `POST /persons/:id/anonymize` voltou a exigir
+  `preHandler: app.authorize(['ADMIN'])`. Nenhuma outra parte da rota
+  mudou (valores anonimizados, proteção IDOR via `tenantDb`, cifra
+  automática via `withEncryption` — tudo intacto). **Testado ao vivo**:
+  `CASHIER` → 403 (bloqueado, confirmado); `ADMIN` → 200, anonimização
+  funcionando normalmente com os valores da Onda 2026-07-23 (`"Anônimo
+  (LGPD)"`, `@lgpd.local`, `phone: null`). Dados de teste removidos ao
+  final. `npm run typecheck` → **0 erros**.
+  **Lição registrada no próprio código** (comentário na rota): o histórico
+  de RBAC desta rota específica (ADMIN-only → afrouxado → ADMIN-only de
+  novo) fica documentado inline para não se repetir.
+
 ---
 
 ## 12. Pendências, bloqueios e dívidas técnicas
@@ -2486,6 +2830,29 @@ mesclada na `main`.
     ainda opera, na prática, como single-tenant (só o "Inquilino Zero"
     existe). Candidato natural para a próxima onda desta frente, se for a
     prioridade escolhida.
+20. **[NOVO, AÇÃO ANTES DO PRÓXIMO DEPLOY] Criptografia LGPD (Frente 2)
+    implementada, mas duas ações manuais ficam pendentes antes de ir para
+    produção**: (a) definir `ENCRYPTION_KEY` (32 bytes hex, `openssl rand
+    -hex 32`) nas variáveis de ambiente do Railway — sem ela o boot falha
+    fail-fast (`env.ts`); (b) rodar `CONFIRM_BACKFILL=1 npx tsx prisma/
+    backfill-person-encryption.ts` contra o banco de produção **depois** do
+    deploy que introduz a extensão — todo `Person.document`/`email`/`phone`
+    já existente (dados reais de clientes/fornecedores, sistema em produção
+    há meses) continua em texto claro até esse script rodar; a leitura não
+    quebra nesse meio-tempo (`decryptField` tolera texto claro), mas não é
+    LGPD-compliant até o backfill ser aplicado. Ver §5 (bullet Pessoas) para
+    o detalhamento técnico completo.
+21. ~~**Migração do `AuditLog` (Frente 4) ainda não rodou**~~ **RESOLVIDO
+    (2026-07-23)**: o Comandante rodou `npx prisma migrate dev --name
+    add_audit_log` — a tabela existe e a migração já está commitada (Onda
+    2026-07-23 em §11). Ainda pendente, não bloqueante: (a) configurar
+    `SUPER_ADMIN_EMAIL` no Railway antes de usar em produção (sem ela, o
+    endpoint fica indisponível para todo mundo — fail closed, não quebra
+    nada, só não funciona); (b) frontend ainda não tem NENHUMA tela/botão
+    para chamar `POST /api/admin/impersonate`, nem a faixa amarela de
+    aviso "Você está acessando como suporte" mencionada na missão original
+    — o payload (`isImpersonating`/`originalUserId`) já existe no JWT,
+    pronto para o frontend consumir quando essa tela for construída.
 
 ---
 
@@ -2549,6 +2916,33 @@ tem porta de entrada de uso.
 > intenção for uma reformulação maior dele, vale alinhar com o Comandante o
 > escopo exato antes de iniciar, já que não foi detalhado em nenhuma
 > conversa registrada neste documento.
+
+### 14.1c Segurança de Dados / LGPD (Plano Mestre V2.0, Frentes 2–4) — ✅
+**100% CONCLUÍDO** (2026-07-23)
+
+Branch `feature/lgpd-encryption` (independente da `feature/multi-tenant`
+acima e da `feature/tenant-onboarding` — três frentes do Plano Mestre V2.0
+avançando em paralelo, ainda sem merge entre si; reconciliar na hora do
+merge). Quatro ondas seguidas, todas nesta mesma branch:
+
+- ✅ **Frente 2 — Criptografia** (Onda 2026-07-22b, §11): `Person.document`/
+  `email`/`phone` cifrados em repouso, transparente via `withEncryption`.
+- ✅ **Frente 3 — Anonimização / Direito ao Esquecimento** (Onda 2026-07-22c,
+  valores revistos na Onda 2026-07-23, RBAC corrigido de volta para
+  ADMIN-only na Onda 2026-07-23b, §11): `POST /persons/:id/anonymize`,
+  sempre `UPDATE`, só `ADMIN`, IDOR testado e bloqueado.
+- ✅ **Frente 4 — Impersonate + Auditoria** (Onda 2026-07-22d, migração
+  aplicada na Onda 2026-07-23, §11): `POST /api/admin/impersonate` + model
+  `AuditLog` (tabela existe de verdade agora).
+
+**Ainda fora do código-fonte, mas não bloqueante para considerar as 4
+frentes concluídas** (ações operacionais/infra, não implementação — ver
+§12.20/§12.21): rodar o backfill de criptografia (`prisma/backfill-person-
+encryption.ts`) contra produção; configurar `ENCRYPTION_KEY` e
+`SUPER_ADMIN_EMAIL` no Railway; construir a tela/faixa de aviso de
+impersonate no frontend (zero UI ainda — só a API existe, o payload
+`isImpersonating`/`originalUserId` já está pronto para quando essa tela for
+feita).
 
 ### 14.2 Maturidade/robustez (backlog de funcionalidades dos sócios: 100% concluído)
 

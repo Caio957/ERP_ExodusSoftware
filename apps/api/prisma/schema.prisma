@@ -83,6 +83,24 @@ model Company {
   accountSettlements      AccountSettlement[]
 }
 
+// 0b. AUDITORIA (Plano Mestre V2.0, Frente 4 — Impersonate) ------------------
+// Sem @relation de propósito: um log de auditoria precisa sobreviver à
+// exclusão do usuário/empresa que ele referencia (é o próprio registro
+// jurídico de "quem acessou o quê"), então fica desacoplado de qualquer
+// FK/onDelete — só strings simples, indexadas para consulta. Também não
+// carrega `companyId` — é uma tabela GLOBAL (o auditor atravessa tenants por
+// definição), nunca escopada por `withTenant`.
+model AuditLog {
+  id              String   @id @default(uuid())
+  adminUserId     String // usuário de suporte (Exodus) que executou a ação
+  targetCompanyId String // empresa (tenant) acessada/impersonada
+  action          String // ex.: 'IMPERSONATE_LOGIN'
+  createdAt       DateTime @default(now())
+
+  @@index([adminUserId])
+  @@index([targetCompanyId])
+}
+
 // 1. USUÁRIOS E RBAC ---------------------------------------------------------
 model User {
   id           String   @id @default(uuid())

@@ -35,6 +35,18 @@ export const jwtPayloadSchema = z.object({
   // O backend SEMPRE deriva o companyId de uma escrita/leitura a partir
   // desta claim (nunca de um campo enviado pelo body da requisição).
   companyId: z.string().uuid().nullable(),
+  /**
+   * Presentes só durante uma sessão de impersonate (Plano Mestre V2.0,
+   * Frente 4 — suporte técnico "acessando como" outra empresa,
+   * `POST /api/admin/impersonate`). `sub`/`email`/`name` continuam
+   * identificando o usuário REAL (rastreabilidade em `AuditLog`) — só
+   * `companyId` é trocado para o tenant-alvo. `originalUserId` é redundante
+   * com `sub` neste desenho (nunca trocamos o `sub`), mas mantido explícito
+   * no payload para o frontend não precisar assumir esse detalhe de
+   * implementação ao decidir se mostra a faixa de aviso.
+   */
+  isImpersonating: z.boolean().optional(),
+  originalUserId: z.string().uuid().optional(),
 });
 export type JwtPayload = z.infer<typeof jwtPayloadSchema>;
 

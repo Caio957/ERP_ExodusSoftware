@@ -1,6 +1,7 @@
 import type { FastifyRequest } from 'fastify';
 import { prisma } from './prisma.js';
 import { ForbiddenError } from './errors.js';
+import { withEncryption } from './encryption.js';
 
 // Modelos que carregam `companyId` (Fase 1 do Plano Mestre Multi-Tenant —
 // ver o cabeçalho de schema.prisma). Mantido como lista explícita (não
@@ -68,7 +69,13 @@ export function withTenant(companyId: string) {
     throw new Error('withTenant: companyId é obrigatório para escopar o client por tenant');
   }
 
-  return prisma.$extends({
+  // Composição de extensões: withEncryption (Plano Mestre V2.0, Frente 2 —
+  // lib/encryption.ts) primeiro, withTenant por cima — o `tx` de um
+  // `db.$transaction()` chamado sobre o client resultante propaga as DUAS
+  // extensões (comportamento nativo do Prisma Client Extensions), então
+  // qualquer rota que já usa `tenantDb(req)` para tocar em `Person` passa a
+  // gravar/ler criptografado sem precisar saber disso.
+  return withEncryption(prisma).$extends({
     name: 'withTenant',
     query: {
       $allModels: {
