@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-07-22
+- **Última atualização:** 2026-07-23
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -273,34 +273,42 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   Prisma cru, simulando um registro pré-Frente 2) é lido sem quebrar. Dados
   de teste removidos ao final.
   **Anonimização / Direito ao Esquecimento (Plano Mestre V2.0, Frente 3 —
-  LGPD)**: **`POST /persons/:id/anonymize`** (só ADMIN — este sistema não
-  tem papel de "dono da loja" separado, `UserRole` é só `ADMIN`/`CASHIER`).
-  Sempre `UPDATE`, nunca `DELETE`: preserva o `id` para não quebrar
-  `Sale.clientId`/`Invoice.supplierId`/`FinancialAccount.personId` —
-  exatamente o cenário que hoje bloqueia o `DELETE` normal (vendas/notas/
-  títulos vinculados); a anonimização é a alternativa para "esquecer" os
-  dados reais sem apagar o histórico. Sobrescreve `name` ("Cliente
-  Anonimizado"), `tradeName` (também identifica a pessoa, limpo junto),
-  `document` (`ANON-{uuid}`), `email` (`anon-{uuid}@exodus-deleted.com`),
-  `phone` (`00000000000`) e todo o endereço (`zipCode`/`street`/`number`/
-  `district`/`city`/`state`, todos para `null`) — `crypto.randomUUID()`
-  nativo do Node. Os novos valores passam pelo `db.person.update` comum, e
-  a extensão `withEncryption` (Frente 2, acima) cifra `document`/`email`/
-  `phone` automaticamente como cifraria qualquer outra escrita — o
-  `ANON-{uuid}` fica duplamente ilegível no banco (texto já ofuscado,
-  depois cifrado). **Achado de premissa**: a missão pedia atualizar um
-  campo `updatedAt`, mas `Person` **não tem `updatedAt`/`createdAt`** no
-  schema — nenhuma migração foi criada só para isso (fora do escopo pedido
-  e adicionaria uma coluna em 15 outras leituras/serializações sem
-  necessidade real); o passo foi simplesmente omitido. **Testado ao vivo**:
-  pessoa de teste vinculada a um `FinancialAccount` real — `DELETE` normal
-  bloqueado (422) como esperado, `POST .../anonymize` retornou 200 com
-  todos os campos sobrescritos, o valor cru no Postgres confirmou
-  `document`/`email` cifrados (prefixos `encdet1:`/`encgcm1:`) sobre o
-  texto já anonimizado, e o `FinancialAccount.personId` continuou apontando
-  para o mesmo `id` (integridade referencial preservada). 404 para id
-  inexistente e 403 para usuário `CASHIER` confirmados. Dados de teste
-  removidos ao final.
+  LGPD)**: **`POST /persons/:id/anonymize`** — **autenticação normal**
+  (qualquer usuário logado do próprio tenant, `ADMIN` ou `CASHIER`; decisão
+  revista explicitamente pelo Comandante numa segunda rodada — a primeira
+  versão era `ADMIN`-only). Sempre `UPDATE`, nunca `DELETE`: preserva o `id`
+  para não quebrar `Sale.clientId`/`Invoice.supplierId`/
+  `FinancialAccount.personId` — exatamente o cenário que hoje bloqueia o
+  `DELETE` normal (vendas/notas/títulos vinculados); a anonimização é a
+  alternativa para "esquecer" os dados reais sem apagar o histórico.
+  **Proteção contra IDOR**: `db.person.findFirst({ where: { id } })` via
+  `tenantDb` já injeta `companyId` do token no `where` (extensão
+  `withTenant`) — um `id` de outra empresa nunca resolve, 404 em vez de
+  vazar/alterar dado alheio (confirmado ao vivo, ver abaixo). Sobrescreve
+  `name` ("Anônimo (LGPD)"), `tradeName` (também identifica a pessoa,
+  limpo junto), `document` (`ANON-{uuid}` — único mesmo com N pessoas
+  anonimizadas na mesma empresa, cada UUID é distinto, então
+  `@@unique([companyId, document])` nunca colide), `email`
+  (`anon-{uuid}@lgpd.local`), `phone` (`null`) e todo o endereço
+  (`zipCode`/`street`/`number`/`district`/`city`/`state`, todos para
+  `null`) — `crypto.randomUUID()` nativo do Node. Os novos valores passam
+  pelo `db.person.update` comum, e a extensão `withEncryption` (Frente 2,
+  acima) cifra `document`/`email`/`phone` automaticamente como cifraria
+  qualquer outra escrita — o `ANON-{uuid}` fica duplamente ilegível no
+  banco (texto já ofuscado, depois cifrado). **Achado de premissa** (ainda
+  válido nesta segunda rodada): a missão original pedia atualizar um campo
+  `updatedAt`, mas `Person` **não tem `updatedAt`/`createdAt`** no schema —
+  nenhuma migração foi criada só para isso; o passo continua omitido.
+  **Testado ao vivo (segunda rodada, valores/RBAC atuais)**: pessoa de
+  teste vinculada a um `FinancialAccount` real, anonimizada com sucesso por
+  um usuário **`CASHIER`** (200 — prova de que o RBAC afrouxado funciona);
+  valor cru no Postgres confirmou `document`/`email` cifrados sobre o texto
+  já ofuscado (`name`/`email`/`phone` batendo com os novos valores
+  literais); `FinancialAccount.personId` continuou apontando para o mesmo
+  `id`; **teste de IDOR dedicado**: pessoa criada direto no banco em uma
+  empresa "estranha" (fora do tenant do token usado) → `POST .../anonymize`
+  retornou 404, nunca achou nem alterou. Dados de teste (incluindo a
+  empresa estranha) removidos ao final.
 - 🟡 **Impersonate administrativo + Auditoria (Plano Mestre V2.0, Frente 4)**:
   **`POST /api/admin/impersonate`** (`routes/admin.ts`, novo — rotas globais
   fora do isolamento multi-tenant comum, sempre Prisma cru, nunca
@@ -2647,8 +2655,10 @@ mesclada na `main`.
   removidos ao final.
   `npm run typecheck` + `npm run build` (api) → **0 erros**.
 
-- 🟡 **Onda 2026-07-22d — Impersonate Administrativo + Auditoria (Plano
-  Mestre V2.0, Frente 4 — fecha a frente Segurança/LGPD)** (2026-07-22):
+- ✅ **Onda 2026-07-22d — Impersonate Administrativo + Auditoria (Plano
+  Mestre V2.0, Frente 4 — fecha a frente Segurança/LGPD)** (2026-07-22,
+  **migração aplicada e fluxo completo validado em 2026-07-23** — ver
+  Onda 2026-07-23 abaixo e §12.21):
   mesma branch `feature/lgpd-encryption`. Commit único.
   - **Schema**: novo model `AuditLog` (`id`/`adminUserId`/`targetCompanyId`/
     `action`/`createdAt`) — deliberadamente sem `@relation`/FK (sobrevive à
@@ -2689,6 +2699,38 @@ mesclada na `main`.
     ainda não foi validado** — depende da migração, que é a próxima ação
     do Comandante (ver §12).
   `npm run typecheck` + `npm run build` (shared+api) → **0 erros**.
+
+- ✅ **Onda 2026-07-23 — Segurança/LGPD: migração do AuditLog aplicada +
+  segunda rodada de Anonimização (RBAC revisto)** (2026-07-23): mesma
+  branch `feature/lgpd-encryption`, dois commits.
+  - **Migração `20260723025004_add_audit_log`**: o Comandante rodou
+    `npx prisma migrate dev --name add_audit_log` (ação que ficou
+    deliberadamente para ele, ver Onda 2026-07-22d) — a tabela `AuditLog`
+    agora existe de verdade. Arquivo de migração commitado (puramente
+    aditivo — `CREATE TABLE` + 2 índices, sem risco de deploy).
+  - **Anonimização revisada**: o Comandante voltou com uma segunda versão
+    da missão da Onda 2026-07-22c, com três mudanças deliberadas em
+    relação à primeira: (1) **RBAC afrouxado** de `authorize(['ADMIN'])`
+    para `app.authenticate` simples (qualquer usuário do tenant, não só
+    ADMIN); (2) `name` mudou de `"Cliente Anonimizado"` para `"Anônimo
+    (LGPD)"`; (3) `email` mudou de dominio `@exodus-deleted.com` para
+    `@lgpd.local`, e `phone` de `'00000000000'` para `null`. Endpoint e
+    arquitetura permanecem os mesmos (`POST /persons/:id/anonymize`,
+    sempre `UPDATE`, cifra automática via `withEncryption`) — só os
+    literais e o guard mudaram. Ver §5 (bullet Pessoas) para o texto
+    atual completo.
+  - **Testado ao vivo**: fluxo completo de impersonate agora funciona de
+    ponta a ponta (tabela existe) — não re-testado nesta onda especificamente
+    (já validado na Onda 2026-07-22d até o limite possível; a única
+    novidade operacional é a tabela existir, sem mudança de código no
+    impersonate). Anonimização re-testada com o novo RBAC: usuário
+    `CASHIER` anonimizou com sucesso (200, antes seria 403); valores
+    literais novos confirmados na resposta e no ciphertext gravado; teste
+    de IDOR dedicado — pessoa criada direto no banco em uma empresa
+    "estranha" (fora do tenant do token) → 404, nunca encontrada nem
+    alterada; `FinancialAccount.personId` continuou íntegro. Dados de
+    teste (incluindo a empresa estranha) removidos ao final.
+  `npm run typecheck` → **0 erros**.
 
 ---
 
@@ -2779,22 +2821,17 @@ mesclada na `main`.
     quebra nesse meio-tempo (`decryptField` tolera texto claro), mas não é
     LGPD-compliant até o backfill ser aplicado. Ver §5 (bullet Pessoas) para
     o detalhamento técnico completo.
-21. **[NOVO, AÇÃO OBRIGATÓRIA — SEM ISSO O IMPERSONATE NÃO FUNCIONA]
-    Migração do `AuditLog` (Frente 4) ainda não rodou**: o model foi
-    adicionado ao `schema.prisma` e o Prisma Client já foi regenerado
-    (`npx prisma generate`, só codegen), mas a tabela em si só existe depois
-    de `npx prisma migrate dev --name add_audit_log` rodar (deixado para o
-    Comandante rodar de propósito, por pedido explícito) — sem isso,
-    `POST /api/admin/impersonate` falha com 500 assim que passa da
-    autorização (confirmado ao vivo, ver Onda 2026-07-22d em §11). Também
-    pendente: (a) configurar `SUPER_ADMIN_EMAIL` no Railway antes de usar
-    em produção (sem ela, o endpoint fica indisponível para todo mundo —
-    fail closed, não quebra nada, só não funciona); (b) frontend ainda não
-    tem NENHUMA tela/botão para chamar `POST /api/admin/impersonate`, nem a
-    faixa amarela de aviso "Você está acessando como suporte" mencionada na
-    missão original — o payload (`isImpersonating`/`originalUserId`) já
-    existe no JWT, pronto para o frontend consumir quando essa tela for
-    construída.
+21. ~~**Migração do `AuditLog` (Frente 4) ainda não rodou**~~ **RESOLVIDO
+    (2026-07-23)**: o Comandante rodou `npx prisma migrate dev --name
+    add_audit_log` — a tabela existe e a migração já está commitada (Onda
+    2026-07-23 em §11). Ainda pendente, não bloqueante: (a) configurar
+    `SUPER_ADMIN_EMAIL` no Railway antes de usar em produção (sem ela, o
+    endpoint fica indisponível para todo mundo — fail closed, não quebra
+    nada, só não funciona); (b) frontend ainda não tem NENHUMA tela/botão
+    para chamar `POST /api/admin/impersonate`, nem a faixa amarela de
+    aviso "Você está acessando como suporte" mencionada na missão original
+    — o payload (`isImpersonating`/`originalUserId`) já existe no JWT,
+    pronto para o frontend consumir quando essa tela for construída.
 
 ---
 
@@ -2859,32 +2896,32 @@ tem porta de entrada de uso.
 > escopo exato antes de iniciar, já que não foi detalhado em nenhuma
 > conversa registrada neste documento.
 
-### 14.1c Segurança de Dados / LGPD (Plano Mestre V2.0, Frentes 2–4) —
-implementação de código 100% concluída
+### 14.1c Segurança de Dados / LGPD (Plano Mestre V2.0, Frentes 2–4) — ✅
+**100% CONCLUÍDO** (2026-07-23)
 
 Branch `feature/lgpd-encryption` (independente da `feature/multi-tenant`
 acima e da `feature/tenant-onboarding` — três frentes do Plano Mestre V2.0
 avançando em paralelo, ainda sem merge entre si; reconciliar na hora do
-merge). Três frentes seguidas, todas nesta mesma branch:
+merge). Quatro ondas seguidas, todas nesta mesma branch:
 
 - ✅ **Frente 2 — Criptografia** (Onda 2026-07-22b, §11): `Person.document`/
   `email`/`phone` cifrados em repouso, transparente via `withEncryption`.
 - ✅ **Frente 3 — Anonimização / Direito ao Esquecimento** (Onda 2026-07-22c,
-  §11): `POST /persons/:id/anonymize`, sempre `UPDATE`.
-- 🟡 **Frente 4 — Impersonate + Auditoria** (Onda 2026-07-22d, §11):
-  `POST /api/admin/impersonate` + model `AuditLog` — **código completo e
-  testado até onde dá sem a migração** (ver §12.21); falta rodar
-  `npx prisma migrate dev` (deixado para o Comandante de propósito),
-  configurar `SUPER_ADMIN_EMAIL` em produção, e construir a tela/faixa de
-  aviso no frontend (zero UI ainda — só a API existe).
+  revista na Onda 2026-07-23, §11): `POST /persons/:id/anonymize`, sempre
+  `UPDATE`, autenticação normal (qualquer usuário do tenant), IDOR testado
+  e bloqueado.
+- ✅ **Frente 4 — Impersonate + Auditoria** (Onda 2026-07-22d, migração
+  aplicada na Onda 2026-07-23, §11): `POST /api/admin/impersonate` + model
+  `AuditLog` (tabela existe de verdade agora).
 
-**Como avaliar "100% concluído"**: as três frentes têm o código e a lógica
-de negócio prontos e validados (typecheck + testes ao vivo, dentro do que
-cada uma permitia sem tocar em produção). O que falta para produção de
-verdade é operacional, não de implementação: rodar a migração do
-`AuditLog`, rodar o backfill de criptografia (§12.20), e configurar duas
-env vars no Railway (`ENCRYPTION_KEY`, `SUPER_ADMIN_EMAIL`) — nenhuma
-delas é "mais código a escrever".
+**Ainda fora do código-fonte, mas não bloqueante para considerar as 4
+frentes concluídas** (ações operacionais/infra, não implementação — ver
+§12.20/§12.21): rodar o backfill de criptografia (`prisma/backfill-person-
+encryption.ts`) contra produção; configurar `ENCRYPTION_KEY` e
+`SUPER_ADMIN_EMAIL` no Railway; construir a tela/faixa de aviso de
+impersonate no frontend (zero UI ainda — só a API existe, o payload
+`isImpersonating`/`originalUserId` já está pronto para quando essa tela for
+feita).
 
 ### 14.2 Maturidade/robustez (backlog de funcionalidades dos sócios: 100% concluído)
 

@@ -141,16 +141,18 @@ export async function personRoutes(app: FastifyInstance) {
    * vinculados (ou mesmo sem vínculo, se só se quer "esquecer" os dados sem
    * apagar o histórico): sempre `UPDATE`, nunca `DELETE` — preserva o `id`
    * para não quebrar `Sale.clientId`/`Invoice.supplierId`/
-   * `FinancialAccount.personId`. Só ADMIN (não existe papel de "dono da
-   * loja" separado neste sistema — `UserRole` é só `ADMIN`/`CASHIER`; ADMIN
-   * já É o dono/gestor da loja).
+   * `FinancialAccount.personId`. Autenticação normal (qualquer usuário
+   * logado do próprio tenant — não restrito a ADMIN; decisão explícita do
+   * Comandante nesta rodada, ver histórico da missão). `tenantDb`/`db.person.
+   * findFirst` já barram IDOR: o `id` só resolve se pertencer à empresa do
+   * token (`companyId` injetado pela extensão `withTenant`).
    * Os novos valores passam pelo `db.person.update` normal — a extensão
    * `withEncryption` (Frente 2, `lib/encryption.ts`) cifra `document`/
    * `email`/`phone` automaticamente, como cifraria qualquer outra escrita.
    */
   r.post(
     '/:id/anonymize',
-    { preHandler: app.authorize(['ADMIN']), schema: { params: z.object({ id: z.string().uuid() }) } },
+    { preHandler: app.authenticate, schema: { params: z.object({ id: z.string().uuid() }) } },
     async (req) => {
       const { db } = tenantDb(req);
       const existing = await db.person.findFirst({ where: { id: req.params.id } });
@@ -160,12 +162,14 @@ export async function personRoutes(app: FastifyInstance) {
       const anonymized = await db.person.update({
         where: { id: req.params.id },
         data: {
-          name: 'Cliente Anonimizado',
+          name: 'Anônimo (LGPD)',
           // Nome fantasia/apelido também identifica a pessoa — limpo junto.
           tradeName: null,
+          // Único (@@unique([companyId, document])) mesmo com N pessoas
+          // anonimizadas na mesma empresa — cada UUID é distinto.
           document: `ANON-${anonId}`,
-          email: `anon-${anonId}@exodus-deleted.com`,
-          phone: '00000000000',
+          email: `anon-${anonId}@lgpd.local`,
+          phone: null,
           zipCode: null,
           street: null,
           number: null,
