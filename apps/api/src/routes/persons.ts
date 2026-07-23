@@ -141,18 +141,21 @@ export async function personRoutes(app: FastifyInstance) {
    * vinculados (ou mesmo sem vínculo, se só se quer "esquecer" os dados sem
    * apagar o histórico): sempre `UPDATE`, nunca `DELETE` — preserva o `id`
    * para não quebrar `Sale.clientId`/`Invoice.supplierId`/
-   * `FinancialAccount.personId`. Autenticação normal (qualquer usuário
-   * logado do próprio tenant — não restrito a ADMIN; decisão explícita do
-   * Comandante nesta rodada, ver histórico da missão). `tenantDb`/`db.person.
-   * findFirst` já barram IDOR: o `id` só resolve se pertencer à empresa do
-   * token (`companyId` injetado pela extensão `withTenant`).
+   * `FinancialAccount.personId`. Só ADMIN — decisão revertida
+   * deliberadamente (correção crítica de RBAC, 2026-07-23): uma rodada
+   * anterior desta mesma missão havia afrouxado para `authenticate` simples
+   * (qualquer usuário do tenant, incluindo CASHIER); o Comandante reverteu
+   * por ser risco grave de negócio — operador de caixa nunca pode
+   * anonimizar/destruir dados de cliente. `tenantDb`/`db.person.findFirst`
+   * também barram IDOR: o `id` só resolve se pertencer à empresa do token
+   * (`companyId` injetado pela extensão `withTenant`).
    * Os novos valores passam pelo `db.person.update` normal — a extensão
    * `withEncryption` (Frente 2, `lib/encryption.ts`) cifra `document`/
    * `email`/`phone` automaticamente, como cifraria qualquer outra escrita.
    */
   r.post(
     '/:id/anonymize',
-    { preHandler: app.authenticate, schema: { params: z.object({ id: z.string().uuid() }) } },
+    { preHandler: app.authorize(['ADMIN']), schema: { params: z.object({ id: z.string().uuid() }) } },
     async (req) => {
       const { db } = tenantDb(req);
       const existing = await db.person.findFirst({ where: { id: req.params.id } });

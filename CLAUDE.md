@@ -273,20 +273,25 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   Prisma cru, simulando um registro pré-Frente 2) é lido sem quebrar. Dados
   de teste removidos ao final.
   **Anonimização / Direito ao Esquecimento (Plano Mestre V2.0, Frente 3 —
-  LGPD)**: **`POST /persons/:id/anonymize`** — **autenticação normal**
-  (qualquer usuário logado do próprio tenant, `ADMIN` ou `CASHIER`; decisão
-  revista explicitamente pelo Comandante numa segunda rodada — a primeira
-  versão era `ADMIN`-only). Sempre `UPDATE`, nunca `DELETE`: preserva o `id`
-  para não quebrar `Sale.clientId`/`Invoice.supplierId`/
-  `FinancialAccount.personId` — exatamente o cenário que hoje bloqueia o
-  `DELETE` normal (vendas/notas/títulos vinculados); a anonimização é a
-  alternativa para "esquecer" os dados reais sem apagar o histórico.
-  **Proteção contra IDOR**: `db.person.findFirst({ where: { id } })` via
-  `tenantDb` já injeta `companyId` do token no `where` (extensão
-  `withTenant`) — um `id` de outra empresa nunca resolve, 404 em vez de
-  vazar/alterar dado alheio (confirmado ao vivo, ver abaixo). Sobrescreve
-  `name` ("Anônimo (LGPD)"), `tradeName` (também identifica a pessoa,
-  limpo junto), `document` (`ANON-{uuid}` — único mesmo com N pessoas
+  LGPD)**: **`POST /persons/:id/anonymize`** — **só `ADMIN`**
+  (`authorize(['ADMIN'])`). ⚠️ **Histórico de RBAC nesta rota** (relevante
+  para não repetir o erro): a versão original já era `ADMIN`-only; uma
+  rodada intermediária afrouxou para `authenticate` simples (qualquer
+  usuário do tenant, inclusive `CASHIER`), por instrução explícita de uma
+  mensagem; o Comandante reverteu isso **no mesmo dia**, por ser risco
+  grave de negócio — operador de caixa nunca pode anonimizar/destruir
+  dados de cliente. O estado atual (e definitivo) é `ADMIN`-only. Sempre
+  `UPDATE`, nunca `DELETE`: preserva o `id` para não quebrar
+  `Sale.clientId`/`Invoice.supplierId`/`FinancialAccount.personId` —
+  exatamente o cenário que hoje bloqueia o `DELETE` normal (vendas/notas/
+  títulos vinculados); a anonimização é a alternativa para "esquecer" os
+  dados reais sem apagar o histórico. **Proteção contra IDOR** (independente
+  do RBAC por papel, em camada adicional): `db.person.findFirst({ where: {
+  id } })` via `tenantDb` já injeta `companyId` do token no `where`
+  (extensão `withTenant`) — um `id` de outra empresa nunca resolve, 404 em
+  vez de vazar/alterar dado alheio (confirmado ao vivo). Sobrescreve `name`
+  ("Anônimo (LGPD)"), `tradeName` (também identifica a pessoa, limpo
+  junto), `document` (`ANON-{uuid}` — único mesmo com N pessoas
   anonimizadas na mesma empresa, cada UUID é distinto, então
   `@@unique([companyId, document])` nunca colide), `email`
   (`anon-{uuid}@lgpd.local`), `phone` (`null`) e todo o endereço
@@ -295,20 +300,18 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   pelo `db.person.update` comum, e a extensão `withEncryption` (Frente 2,
   acima) cifra `document`/`email`/`phone` automaticamente como cifraria
   qualquer outra escrita — o `ANON-{uuid}` fica duplamente ilegível no
-  banco (texto já ofuscado, depois cifrado). **Achado de premissa** (ainda
-  válido nesta segunda rodada): a missão original pedia atualizar um campo
-  `updatedAt`, mas `Person` **não tem `updatedAt`/`createdAt`** no schema —
-  nenhuma migração foi criada só para isso; o passo continua omitido.
-  **Testado ao vivo (segunda rodada, valores/RBAC atuais)**: pessoa de
-  teste vinculada a um `FinancialAccount` real, anonimizada com sucesso por
-  um usuário **`CASHIER`** (200 — prova de que o RBAC afrouxado funciona);
-  valor cru no Postgres confirmou `document`/`email` cifrados sobre o texto
-  já ofuscado (`name`/`email`/`phone` batendo com os novos valores
-  literais); `FinancialAccount.personId` continuou apontando para o mesmo
-  `id`; **teste de IDOR dedicado**: pessoa criada direto no banco em uma
-  empresa "estranha" (fora do tenant do token usado) → `POST .../anonymize`
-  retornou 404, nunca achou nem alterou. Dados de teste (incluindo a
-  empresa estranha) removidos ao final.
+  banco (texto já ofuscado, depois cifrado). **Achado de premissa** (desde
+  a primeira rodada, ainda válido): a missão original pedia atualizar um
+  campo `updatedAt`, mas `Person` **não tem `updatedAt`/`createdAt`** no
+  schema — nenhuma migração foi criada só para isso; o passo continua
+  omitido. **Testado ao vivo (estado atual, pós-correção)**: usuário
+  `CASHIER` tentando anonimizar → **403** (confirmado bloqueado); `ADMIN`
+  → 200, com `name`/`document`/`email`/`phone` sobrescritos corretamente e
+  cifrados no banco. **Testes anteriores, ainda válidos** (nenhuma outra
+  parte da rota mudou nesta correção): pessoa vinculada a um
+  `FinancialAccount` real manteve `personId` íntegro após anonimizada;
+  teste de IDOR dedicado (pessoa criada direto no banco em empresa
+  "estranha") → 404. Dados de teste removidos ao final de cada rodada.
 - 🟡 **Impersonate administrativo + Auditoria (Plano Mestre V2.0, Frente 4)**:
   **`POST /api/admin/impersonate`** (`routes/admin.ts`, novo — rotas globais
   fora do isolamento multi-tenant comum, sempre Prisma cru, nunca
@@ -2732,6 +2735,24 @@ mesclada na `main`.
     teste (incluindo a empresa estranha) removidos ao final.
   `npm run typecheck` → **0 erros**.
 
+- ✅ **Onda 2026-07-23b — Correção crítica de RBAC: anonimização volta a
+  ser ADMIN-only** (2026-07-23): mesma branch `feature/lgpd-encryption`,
+  commit único. O Comandante identificou, logo depois da Onda 2026-07-23,
+  que o afrouxamento de RBAC daquela mesma onda (`authorize(['ADMIN'])` →
+  `app.authenticate`) era um risco grave de negócio — operador de caixa
+  (`CASHIER`) não pode ter permissão para anonimizar/destruir dados de
+  cliente. Revertido: `POST /persons/:id/anonymize` voltou a exigir
+  `preHandler: app.authorize(['ADMIN'])`. Nenhuma outra parte da rota
+  mudou (valores anonimizados, proteção IDOR via `tenantDb`, cifra
+  automática via `withEncryption` — tudo intacto). **Testado ao vivo**:
+  `CASHIER` → 403 (bloqueado, confirmado); `ADMIN` → 200, anonimização
+  funcionando normalmente com os valores da Onda 2026-07-23 (`"Anônimo
+  (LGPD)"`, `@lgpd.local`, `phone: null`). Dados de teste removidos ao
+  final. `npm run typecheck` → **0 erros**.
+  **Lição registrada no próprio código** (comentário na rota): o histórico
+  de RBAC desta rota específica (ADMIN-only → afrouxado → ADMIN-only de
+  novo) fica documentado inline para não se repetir.
+
 ---
 
 ## 12. Pendências, bloqueios e dívidas técnicas
@@ -2907,9 +2928,9 @@ merge). Quatro ondas seguidas, todas nesta mesma branch:
 - ✅ **Frente 2 — Criptografia** (Onda 2026-07-22b, §11): `Person.document`/
   `email`/`phone` cifrados em repouso, transparente via `withEncryption`.
 - ✅ **Frente 3 — Anonimização / Direito ao Esquecimento** (Onda 2026-07-22c,
-  revista na Onda 2026-07-23, §11): `POST /persons/:id/anonymize`, sempre
-  `UPDATE`, autenticação normal (qualquer usuário do tenant), IDOR testado
-  e bloqueado.
+  valores revistos na Onda 2026-07-23, RBAC corrigido de volta para
+  ADMIN-only na Onda 2026-07-23b, §11): `POST /persons/:id/anonymize`,
+  sempre `UPDATE`, só `ADMIN`, IDOR testado e bloqueado.
 - ✅ **Frente 4 — Impersonate + Auditoria** (Onda 2026-07-22d, migração
   aplicada na Onda 2026-07-23, §11): `POST /api/admin/impersonate` + model
   `AuditLog` (tabela existe de verdade agora).
