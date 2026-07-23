@@ -57,12 +57,12 @@
   `ViewPurchaseModal` em Compras, sempre visível quando há financeiro e desabilitado
   com dica quando já há baixa — ver Onda 2026-07-17/18 em §11) — ver §11 para o
   histórico completo de commits de todas.
-  **`main` e `origin/main` estavam em sincronia em `68f9579`** até a abertura
-  da branch abaixo. **§14.1 (propagar o seletor Caixa Físico/Conta Banco)
-  está concluído** — PDV, Vendas e Financeiro (settle/reverse) já propagam o
-  seletor.
-  🚧 **`feature/multi-tenant` é a branch ativa no momento** (criada a partir
-  de `68f9579`, **ainda não mesclada na `main`**) — implementa a arquitetura
+  **`main` e `origin/main` estavam em sincronia em `68f9579`** até a
+  sequência de branches abaixo. **§14.1 (propagar o seletor Caixa Físico/
+  Conta Banco) está concluído** — PDV, Vendas e Financeiro (settle/reverse)
+  já propagam o seletor.
+  ✅ **`feature/multi-tenant` mesclada na `main`** (commit direto `230e74d`,
+  sem PR — ver nota de drift original em §14.1b) — implementa a arquitetura
   multi-tenant completa (Plano Mestre V2.0): schema (`Company` + `companyId`
   em 16 tabelas), Prisma Client Extension `withTenant` (isolamento lógico
   por tenant em toda rota de negócio), JWT com `companyId`, isolamento da
@@ -70,14 +70,29 @@
   `barcode`/`Person.document` migrados de `@unique` global para
   `@@unique([companyId, campo])` com login capaz de desambiguar e-mail
   colidente entre empresas — ver Onda 2026-07-19 em §11 para o
-  detalhamento completo. Commits até agora: `b2039ad` (Fases 1-2),
-  `0b0ff54` (prep. Fase 3 — JWT + base do `withTenant`), `7f7d001` (Fase 4 —
-  `companyId` obrigatório + varredura de rotas) e `e3c534b` (Fase 3 frontend
-  — isolamento do Dexie + logout seguro). ⚠️ **A última leva** (constraints
-  globais → tenant-scoped + login com desambiguação de empresa) **está
-  implementada, validada** (typecheck 0 erros + teste manual na tela) **e
-  ainda não commitada** — retomar por aí na próxima sessão antes de
-  qualquer coisa nova nesta branch.
+  detalhamento completo (Fases 1-2 `b2039ad`, prep. Fase 3 `0b0ff54`,
+  Fase 4 `7f7d001`, Fase 3 frontend `e3c534b`, última leva `230e74d`).
+  ✅ **`feature/lgpd-encryption` mesclada na `main` via PR #24** (`6d68e3c`,
+  2026-07-23 — Plano Mestre V2.0: Segurança/LGPD, Frentes 2-4: criptografia
+  de `Person.document`/`email`/`phone` (`withEncryption`), anonimização
+  (`POST /persons/:id/anonymize`, ADMIN-only) e impersonate administrativo
+  com auditoria obrigatória (`POST /api/admin/impersonate` + `AuditLog`) —
+  ver Onda 2026-07-22b/c/d e 2026-07-23 em §11 para o detalhamento completo
+  de cada frente, e Onda 2026-07-23c para o deploy em produção e a
+  execução do backfill de criptografia contra o banco real).
+  **`main` e `origin/main` estão em sincronia em `6d68e3c`.**
+  ⚠️ **`feature/tenant-onboarding` (Frente 1 — Onboarding de Novas Lojas)
+  NÃO foi mesclada e sequer foi enviada ao GitHub** — existe só como branch
+  LOCAL numa máquina de trabalho (commit `1e0b103`, `POST /api/onboarding`).
+  A rota **não existe em produção nem na `main`** — confirmado checando
+  `apps/api/src/routes/index.ts` e `git branch --contains 1e0b103`
+  diretamente nesta sessão (2026-07-23). Isso importa porque um relato
+  recente (Caio, ver Onda 2026-07-23c) descreve o próximo passo do
+  frontend como "consumir a rota de onboarding que já existe no backend" —
+  **essa premissa está incorreta**: a rota precisa ser resgatada dessa
+  branch local, revalidada contra as mudanças de multi-tenant/criptografia
+  que entraram na `main` depois dela ter sido criada, e só então mesclada,
+  antes de qualquer tela de frontend poder consumi-la de verdade.
   ⚠️ **Padrão observado na rodada de correções de impressão (PRs #14→#16)**: cada uma das 3 PRs
   seguidas (#14→#16) tentou resolver o mesmo sintoma relatado pelo Comandante (página em
   branco/layout quebrado ao imprimir no Android) com uma causa raiz diferente — cada
@@ -254,7 +269,20 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   e quebrar — cobre registros gravados antes desta Frente 2. Script
   `prisma/backfill-person-encryption.ts` (dry-run por padrão, `CONFIRM_
   BACKFILL=1` para aplicar, mesmo padrão de `backfill-tenant.ts`) migra o que
-  já existe — **ainda não rodado em produção** (ver §12).
+  já existe — **✅ já rodado em produção** (`CONFIRM_BACKFILL=1` via Console
+  do Railway, ver Onda 2026-07-23c em §11): o banco real de produção está
+  cifrado, não só o de dev.
+  **Incidente local resolvido** (relato de Caio, Onda 2026-07-23c): um erro
+  500 (`ERR_OSSL_BAD_DECRYPT`) apareceu no ambiente local — registros
+  gravados com uma `ENCRYPTION_KEY` antiga (de uma rotação de chave local)
+  ficaram indecifráveis com a chave nova, já que a chave em si não fica
+  registrada no valor cifrado (diferente do prefixo de esquema). Resolvido
+  limpando os registros presos à chave antiga (dado de teste local, sem
+  relação com produção). Lição: `decryptField` tolera texto **claro**
+  legado, mas não tolera ciphertext cifrado com uma chave **diferente** da
+  atual — trocar `ENCRYPTION_KEY` sempre exige ou manter a chave antiga
+  disponível para decifrar o legado, ou rodar o backfill de novo com a
+  chave nova antes de descartar a antiga.
   **Limitação conhecida e documentada no código**: `document: { contains:
   ... }` (usado pelo parâmetro `search` de `GET /persons`) não funciona mais
   sob criptografia determinística — não há como buscar substring em
@@ -312,49 +340,46 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   `FinancialAccount` real manteve `personId` íntegro após anonimizada;
   teste de IDOR dedicado (pessoa criada direto no banco em empresa
   "estranha") → 404. Dados de teste removidos ao final de cada rodada.
-- 🟡 **Impersonate administrativo + Auditoria (Plano Mestre V2.0, Frente 4)**:
-  **`POST /api/admin/impersonate`** (`routes/admin.ts`, novo — rotas globais
-  fora do isolamento multi-tenant comum, sempre Prisma cru, nunca
-  `withTenant`/`tenantDb`). Suporte técnico da Exodus troca o contexto de
-  tenant para o de um cliente sem precisar de login próprio naquela empresa.
-  **Autorização** (bypass deliberadamente simples até existir um
-  papel/painel de admin global de verdade — `SYSTEM_ADMIN`, ainda não
-  implementado): compara `req.user.email` com a env var `SUPER_ADMIN_EMAIL`
-  (nova, `env.ts`, **opcional** — diferente do padrão fail-fast de
-  `JWT_SECRET`/`ENCRYPTION_KEY` porque, se não configurada, o endpoint
-  simplesmente fica indisponível para todo mundo: nenhum e-mail real é
-  jamais igual a `undefined`, então o bypass falha **fechado** por padrão,
-  em vez de derrubar o boot de toda a API por uma variável que nem todo
-  ambiente precisa configurar no dia 1). **Novo model `AuditLog`** (sem
-  `@relation`/FK de propósito — um log de auditoria precisa sobreviver à
-  exclusão do usuário/empresa que referencia, é o próprio registro jurídico
-  de "quem acessou o quê"; também sem `companyId`, é uma tabela GLOBAL,
-  nunca escopada por `withTenant`): grava `adminUserId`/`targetCompanyId`/
-  `action` (`'IMPERSONATE_LOGIN'`) **antes** de emitir o token — se o
-  registro falhar, a troca de contexto também falha (proteção jurídica sem
-  exceção). O token novo mantém `sub`/`email`/`name` do admin REAL
-  (rastreabilidade), troca só `companyId` para o tenant-alvo — é só isso
-  que `withTenant`/`tenantDb` olham, então basta para "enganá-lo" e escopar
+- ✅ **Impersonate administrativo + Auditoria (Plano Mestre V2.0, Frente 4)
+  — em produção**: **`POST /api/admin/impersonate`** (`routes/admin.ts`,
+  novo — rotas globais fora do isolamento multi-tenant comum, sempre Prisma
+  cru, nunca `withTenant`/`tenantDb`). Suporte técnico da Exodus troca o
+  contexto de tenant para o de um cliente sem precisar de login próprio
+  naquela empresa. **Autorização** (bypass deliberadamente simples até
+  existir um papel/painel de admin global de verdade — `SYSTEM_ADMIN`,
+  ainda não implementado): compara `req.user.email` com a env var
+  `SUPER_ADMIN_EMAIL` (nova, `env.ts`, **opcional** — diferente do padrão
+  fail-fast de `JWT_SECRET`/`ENCRYPTION_KEY` porque, se não configurada, o
+  endpoint simplesmente fica indisponível para todo mundo: nenhum e-mail
+  real é jamais igual a `undefined`, então o bypass falha **fechado** por
+  padrão, em vez de derrubar o boot de toda a API por uma variável que nem
+  todo ambiente precisa configurar no dia 1) — **já configurada no
+  Railway**. **Model `AuditLog`** (sem `@relation`/FK de propósito — um log
+  de auditoria precisa sobreviver à exclusão do usuário/empresa que
+  referencia, é o próprio registro jurídico de "quem acessou o quê";
+  também sem `companyId`, é uma tabela GLOBAL, nunca escopada por
+  `withTenant`): grava `adminUserId`/`targetCompanyId`/`action`
+  (`'IMPERSONATE_LOGIN'`) **antes** de emitir o token — se o registro
+  falhar, a troca de contexto também falha (proteção jurídica sem exceção).
+  O token novo mantém `sub`/`email`/`name` do admin REAL (rastreabilidade),
+  troca só `companyId` para o tenant-alvo — é só isso que
+  `withTenant`/`tenantDb` olham, então basta para "enganá-lo" e escopar
   toda rota de negócio subsequente para a empresa do cliente — e adiciona
   `isImpersonating: true` + `originalUserId` (`jwtPayloadSchema`, shared,
-  ambos opcionais) para o frontend futuramente exibir uma faixa de aviso
-  (ainda não implementado no frontend — ver §12). **🟡 parcialmente
-  validado**: por pedido explícito do Comandante, a migração do Prisma
-  (`AuditLog` é tabela nova) foi deixada para ele rodar — código e
-  `prisma generate` (só codegen, não altera o banco) validados via
-  `npm run typecheck`/`build`; **testado ao vivo** até o limite possível
-  sem a tabela existir: sem `SUPER_ADMIN_EMAIL` configurada → 403 (fail
-  closed); `CASHIER` (não é o super admin) → 403; empresa-alvo inexistente
-  → 404 (checado antes de qualquer escrita); super admin + empresa real →
-  falhou com 500 **exatamente** no `tx.auditLog.create` ("table
-  `public.AuditLog` does not exist"), confirmando que todo o resto do
-  fluxo (autorização, busca da empresa, geração de payload) está correto —
-  só falta a migração rodar. Servidor **não caiu** com esse erro (handler
-  global tratou normalmente). **Ação pendente do Comandante**: rodar
-  `npx prisma migrate dev --name add_audit_log` (dev) e depois
-  `npx prisma migrate deploy` chega sozinho no próximo `git push`/deploy do
-  Railway; e configurar `SUPER_ADMIN_EMAIL` no Railway antes de usar em
-  produção.
+  ambos opcionais) para o frontend exibir uma faixa de aviso (**ainda não
+  implementado no frontend** — "Missão 2" do próximo passo, ver §14).
+  **Migração `AuditLog` aplicada** (`npx prisma migrate dev --name
+  add_audit_log`, rodada e commitada — ver Onda 2026-07-23 em §11) e
+  **deploy em produção confirmado**: segundo relato de Caio (Onda
+  2026-07-23c em §11), a rota foi testada via Postman contra produção com
+  sucesso (200), incluindo a correção de um 400 de validação (era preciso
+  enviar `targetCompanyId` em formato UUID estrito) — e `AuditLog` está
+  gravando os acessos corretamente. **Testado ao vivo nesta sessão** (antes
+  da migração existir): sem `SUPER_ADMIN_EMAIL` → 403 (fail closed);
+  `CASHIER` → 403; empresa-alvo inexistente → 404; servidor não caiu com o
+  erro esperado de tabela ausente antes da migração. O fluxo de sucesso
+  completo (token real emitido) foi confirmado por Caio em produção via
+  Postman, não re-testado diretamente por mim nesta sessão.
 - ✅ **Entrada de XML/NFe** (§4.3): `/invoices/parse` (resolve o De/Para e já retorna
   `matchedVariant` com os dados reais do catálogo — nome do produto, SKU, preços —
   para o item auto-mapeado nunca exibir o `xProd` da nota como se fosse o nome
@@ -2412,9 +2437,10 @@ mesclada na `main`.
   `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros** em
   todos os commits.
 
-- 🚧 **Onda 2026-07-19 — Arquitetura Multi-Tenant (Plano Mestre V2.0)**
+- ✅ **Onda 2026-07-19 — Arquitetura Multi-Tenant (Plano Mestre V2.0)**
   (2026-07-19): branch `feature/multi-tenant` (criada a partir de `68f9579`)
-  — **ainda não mesclada na `main`**. Reestrutura o ERP de single-tenant
+  — **mesclada na `main`** (commit direto `230e74d`, sem PR — ver nota de
+  drift no topo do documento). Reestrutura o ERP de single-tenant
   para multi-tenant real, em 4 fases + uma leva final de blindagem.
   Documento externo "Plano Mestre V2.0" definiu as fases; execução em modo
   **MANUAL** (Comandante aprovou cada etapa antes de codar).
@@ -2753,6 +2779,46 @@ mesclada na `main`.
   de RBAC desta rota específica (ADMIN-only → afrouxado → ADMIN-only de
   novo) fica documentado inline para não se repetir.
 
+- ✅ **Onda 2026-07-23c — Merge para `main`, deploy em produção e backfill
+  de criptografia executado (Plano Mestre V2.0: Segurança/LGPD completo em
+  produção)** (2026-07-23). Origem: relato consolidado de Caio (dossiê
+  gerado com apoio do Gemini, repassado por Helom), **não uma sessão de
+  Claude Code documentada em primeira mão** — as ações abaixo (merge,
+  deploy, testes via Postman, backfill em produção) foram feitas fora
+  desta ferramenta; o texto aqui é a transcrição desse relato para o
+  registro central do projeto, mais a verificação que dava para fazer
+  localmente (git log/branches).
+  - **Merge**: `feature/lgpd-encryption` → `main` via **PR #24** (`6d68e3c`).
+    Cobre as Frentes 2, 3 e 4 completas (Ondas 2026-07-22b/c/d e
+    2026-07-23/23b) — criptografia de `Person`, anonimização e impersonate
+    administrativo com auditoria.
+  - **Deploy Railway**: subiu com sucesso (`ACTIVE`) com as novas variáveis
+    de ambiente (`ENCRYPTION_KEY`, `SUPER_ADMIN_EMAIL`) já configuradas.
+  - **Backfill de criptografia executado em produção**: `CONFIRM_
+    BACKFILL=1 npx tsx apps/api/prisma/backfill-person-encryption.ts`
+    rodado direto no Console do Railway — a base de produção real
+    (clientes/fornecedores já cadastrados antes desta Frente) está
+    cifrada, fechando a pendência que o §12.20 apontava.
+  - **Incidente local + correção** (`ERR_OSSL_BAD_DECRYPT`, 500): registros
+    de teste presos a uma `ENCRYPTION_KEY` local antiga (rotacionada em
+    algum momento) ficaram indecifráveis — resolvido limpando esses
+    registros; sem relação com o banco de produção. Ver nota técnica em §5
+    (bullet Pessoas) sobre a implicação disso para rotação de chave.
+  - **Impersonate validado em produção via Postman**: `POST
+    /api/admin/impersonate` retornou 200 com um `targetCompanyId` em
+    formato UUID estrito (um 400 de validação apareceu primeiro por causa
+    do formato do payload enviado, corrigido no teste); `AuditLog`
+    confirmado gravando os acessos.
+  - **Achado desta sessão, não coberto pelo relato de Caio**: a Frente 1
+    (Onboarding de Novas Lojas, `POST /api/onboarding`) **não faz parte
+    deste merge** — o commit (`1e0b103`) existe só na branch LOCAL
+    `feature/tenant-onboarding`, nunca enviada ao GitHub. Ver nota no topo
+    do documento e §12.19 — importa porque o próximo passo de frontend
+    ("Missão 1", §14) presume essa rota já existir em produção, e ela não
+    existe.
+  `git log`/`git branch --contains` (verificação direta desta sessão) →
+  merge confirmado, onboarding confirmado ausente de `main`.
+
 ---
 
 ## 12. Pendências, bloqueios e dívidas técnicas
@@ -2817,42 +2883,42 @@ mesclada na `main`.
     "livro" o título vai refletir quando for baixado — só é decidido depois,
     no momento da baixa em si (`SettleModal` já pergunta lá). Considerado
     aceitável: o `RegisterSelectionModal` na baixa já cobre a decisão real.
-18. **[NOVO] `feature/multi-tenant` tem trabalho não commitado**: a última
-    leva (constraints tenant-scoped + login com desambiguação, ver Onda
-    2026-07-19 em §11) está implementada e validada, mas **ainda não
-    commitada**. Próxima sessão: revisar e commitar antes de qualquer coisa
-    nova nessa branch.
-19. **[NOVO] Não existe rota de provisionamento de tenant**: `Company` só
-    nasce via script (`backfill-tenant.ts`, já aposentado) ou inserção
-    direta no banco — não há `POST`, listagem, nem qualquer fluxo de
-    onboarding de uma segunda loja de verdade. A arquitetura multi-tenant
-    está pronta na camada de dados/API/frontend, mas sem essa rota o sistema
-    ainda opera, na prática, como single-tenant (só o "Inquilino Zero"
-    existe). Candidato natural para a próxima onda desta frente, se for a
-    prioridade escolhida.
-20. **[NOVO, AÇÃO ANTES DO PRÓXIMO DEPLOY] Criptografia LGPD (Frente 2)
-    implementada, mas duas ações manuais ficam pendentes antes de ir para
-    produção**: (a) definir `ENCRYPTION_KEY` (32 bytes hex, `openssl rand
-    -hex 32`) nas variáveis de ambiente do Railway — sem ela o boot falha
-    fail-fast (`env.ts`); (b) rodar `CONFIRM_BACKFILL=1 npx tsx prisma/
-    backfill-person-encryption.ts` contra o banco de produção **depois** do
-    deploy que introduz a extensão — todo `Person.document`/`email`/`phone`
-    já existente (dados reais de clientes/fornecedores, sistema em produção
-    há meses) continua em texto claro até esse script rodar; a leitura não
-    quebra nesse meio-tempo (`decryptField` tolera texto claro), mas não é
-    LGPD-compliant até o backfill ser aplicado. Ver §5 (bullet Pessoas) para
-    o detalhamento técnico completo.
-21. ~~**Migração do `AuditLog` (Frente 4) ainda não rodou**~~ **RESOLVIDO
-    (2026-07-23)**: o Comandante rodou `npx prisma migrate dev --name
-    add_audit_log` — a tabela existe e a migração já está commitada (Onda
-    2026-07-23 em §11). Ainda pendente, não bloqueante: (a) configurar
-    `SUPER_ADMIN_EMAIL` no Railway antes de usar em produção (sem ela, o
-    endpoint fica indisponível para todo mundo — fail closed, não quebra
-    nada, só não funciona); (b) frontend ainda não tem NENHUMA tela/botão
-    para chamar `POST /api/admin/impersonate`, nem a faixa amarela de
-    aviso "Você está acessando como suporte" mencionada na missão original
-    — o payload (`isImpersonating`/`originalUserId`) já existe no JWT,
-    pronto para o frontend consumir quando essa tela for construída.
+18. ~~**`feature/multi-tenant` tem trabalho não commitado**~~ **RESOLVIDO**:
+    commit `230e74d` (constraints tenant-scoped + login com desambiguação,
+    Onda 2026-07-19 em §11) — branch inteira mesclada na `main` há tempo,
+    confirmado via `git log`.
+19. **[ATIVO — status corrigido em 2026-07-23] Não existe rota de
+    provisionamento de tenant EM PRODUÇÃO/`main`**: `Company` só nasce via
+    script (`backfill-tenant.ts`, já aposentado) ou inserção direta no
+    banco. A arquitetura multi-tenant está pronta na camada de dados/API/
+    frontend, mas sem essa rota o sistema ainda opera, na prática, como
+    single-tenant (só o "Inquilino Zero" existe). ⚠️ **Detalhe que não
+    dava para saber sem checar o git**: a rota (`POST /api/onboarding`)
+    **já foi implementada** (commit `1e0b103`), mas só existe na branch
+    LOCAL `feature/tenant-onboarding`, que nunca foi enviada ao GitHub nem
+    mesclada — não é "ainda não começada", é "feita mas perdida numa
+    branch órfã". Precisa ser resgatada, revalidada contra tudo que mudou
+    na `main` desde então (multi-tenant ficou obrigatório de verdade,
+    `withEncryption` entrou no meio, RBAC de várias rotas mudou), e só
+    então mesclada. Isso é pré-requisito direto da "Missão 1" do frontend
+    (ver §14) — sem a rota em produção, não há o que a tela de onboarding
+    consuma.
+20. ~~**Criptografia LGPD (Frente 2): configurar `ENCRYPTION_KEY` no
+    Railway + rodar o backfill em produção**~~ **RESOLVIDO (2026-07-23)**:
+    ambas as ações confirmadas — `ENCRYPTION_KEY` configurada no Railway,
+    boot em produção OK; backfill (`CONFIRM_BACKFILL=1`) rodado direto no
+    Console do Railway contra o banco real. Ver §5 (bullet Pessoas) e
+    Onda 2026-07-23c em §11 para o detalhamento completo.
+21. ~~**Migração do `AuditLog` (Frente 4) + `SUPER_ADMIN_EMAIL` em
+    produção**~~ **RESOLVIDO (2026-07-23)**: migração rodada e commitada;
+    `SUPER_ADMIN_EMAIL` configurada no Railway; `POST /api/admin/
+    impersonate` testado com sucesso em produção via Postman (ver Onda
+    2026-07-23c em §11). **Ainda pendente, não bloqueante**: frontend
+    continua sem NENHUMA tela/botão para chamar essa rota, nem a faixa
+    amarela de aviso "Você está acessando como suporte" — é a "Missão 2"
+    do próximo passo (ver §14); o payload (`isImpersonating`/
+    `originalUserId`) já existe no JWT, pronto para o frontend consumir
+    quando essa tela for construída.
 
 ---
 
@@ -2895,18 +2961,19 @@ PDV, Vendas e Financeiro.**~~ **RESOLVIDO (2026-07-18)** em duas ondas — ver
 Nenhuma pauta fixa aberta no momento — a próxima onda parte do backlog de
 maturidade (§14.2) ou de novo pedido direto do Comandante.
 
-### 14.1b Multi-tenant (branch `feature/multi-tenant`, ver §11 Onda 2026-07-19)
+### 14.1b Multi-tenant (Plano Mestre V2.0) — ✅ mesclado, ver §11 Onda 2026-07-19
 
 **Estado**: schema, `withTenant`, JWT, isolamento do Dexie e constraints
 tenant-scoped (com login capaz de desambiguar e-mail colidente) estão
-implementados e validados — mas a última leva ainda **não foi commitada**
-(§12.18) e a branch inteira ainda **não foi mesclada na `main`**. Antes de
-qualquer coisa nova aqui: revisar + commitar a leva pendente.
+implementados, validados e **mesclados na `main`** (commit `230e74d`, sem
+PR registrado — ver nota de drift no topo do documento).
 
-**Candidato natural de próxima onda**: rota de provisionamento de tenant
+**Pendência real que sobrevive daqui**: rota de provisionamento de tenant
 (§12.19) — hoje não existe nenhum jeito real de nascer uma segunda empresa
-além de inserir direto no banco. Sem isso, a arquitetura multi-tenant não
-tem porta de entrada de uso.
+em produção além de inserir direto no banco (a implementação existe, mas
+está presa numa branch local nunca enviada ao GitHub — ver §12.19). Sem
+isso, a arquitetura multi-tenant não tem porta de entrada de uso — e é
+bloqueio direto da "Missão 1" do frontend (§14.1d).
 
 > **Nota**: o Comandante recebeu do Gemini (avaliador externo, §13) uma
 > sugestão de que o próximo grande objetivo seria a construção do módulo de
@@ -2918,31 +2985,45 @@ tem porta de entrada de uso.
 > conversa registrada neste documento.
 
 ### 14.1c Segurança de Dados / LGPD (Plano Mestre V2.0, Frentes 2–4) — ✅
-**100% CONCLUÍDO** (2026-07-23)
+**100% CONCLUÍDO E EM PRODUÇÃO** (2026-07-23)
 
-Branch `feature/lgpd-encryption` (independente da `feature/multi-tenant`
-acima e da `feature/tenant-onboarding` — três frentes do Plano Mestre V2.0
-avançando em paralelo, ainda sem merge entre si; reconciliar na hora do
-merge). Quatro ondas seguidas, todas nesta mesma branch:
+`feature/lgpd-encryption` **mesclada na `main` via PR #24** (`6d68e3c`) e
+**já em produção no Railway**, com o backfill de criptografia já rodado
+contra o banco real (Onda 2026-07-23c em §11). As três frentes:
 
-- ✅ **Frente 2 — Criptografia** (Onda 2026-07-22b, §11): `Person.document`/
-  `email`/`phone` cifrados em repouso, transparente via `withEncryption`.
-- ✅ **Frente 3 — Anonimização / Direito ao Esquecimento** (Onda 2026-07-22c,
-  valores revistos na Onda 2026-07-23, RBAC corrigido de volta para
-  ADMIN-only na Onda 2026-07-23b, §11): `POST /persons/:id/anonymize`,
-  sempre `UPDATE`, só `ADMIN`, IDOR testado e bloqueado.
-- ✅ **Frente 4 — Impersonate + Auditoria** (Onda 2026-07-22d, migração
-  aplicada na Onda 2026-07-23, §11): `POST /api/admin/impersonate` + model
-  `AuditLog` (tabela existe de verdade agora).
+- ✅ **Frente 2 — Criptografia**: `Person.document`/`email`/`phone`
+  cifrados em repouso, transparente via `withEncryption`. Backfill de
+  produção executado.
+- ✅ **Frente 3 — Anonimização / Direito ao Esquecimento**:
+  `POST /persons/:id/anonymize`, sempre `UPDATE`, só `ADMIN` (RBAC
+  corrigido e confirmado), IDOR testado e bloqueado.
+- ✅ **Frente 4 — Impersonate + Auditoria**: `POST /api/admin/impersonate`
+  + model `AuditLog`, migração aplicada, testado em produção via Postman
+  (relato de Caio).
 
-**Ainda fora do código-fonte, mas não bloqueante para considerar as 4
-frentes concluídas** (ações operacionais/infra, não implementação — ver
-§12.20/§12.21): rodar o backfill de criptografia (`prisma/backfill-person-
-encryption.ts`) contra produção; configurar `ENCRYPTION_KEY` e
-`SUPER_ADMIN_EMAIL` no Railway; construir a tela/faixa de aviso de
-impersonate no frontend (zero UI ainda — só a API existe, o payload
-`isImpersonating`/`originalUserId` já está pronto para quando essa tela for
-feita).
+Nenhuma pendência de backend restante nestas três frentes — só frontend
+(ver Missões 1 e 2 logo abaixo) e a ressalva sobre a Frente 1/Onboarding
+(§12.19, não faz parte deste pacote e continua fora da `main`).
+
+### 14.1d Próximo passo: Frontend das Frentes de Segurança (plano de Caio,
+2026-07-23)
+
+Com o backend "selado", o próximo foco combinado pelos sócios é 100%
+frontend (React/Vite). Duas missões, na ordem que Caio propôs:
+
+**Missão 1 — Tela de Onboarding (pública)**: fluxo visual para um novo
+lojista se cadastrar sozinho, consumindo a rota de criação de tenant/
+company. ⚠️ **Bloqueio real antes de começar**: a rota
+(`POST /api/onboarding`) não está em produção nem na `main` — ver §12.19.
+Resgatar/mesclar essa rota é pré-requisito, não pode ser feito em paralelo
+assumindo que ela já existe.
+
+**Missão 2 — Interface do Impersonate (Admin)**: botão "Acessar Loja" no
+painel do Super Admin (dispara `POST /api/admin/impersonate` com o UUID da
+empresa) + uma faixa de aviso persistente (topo do ERP) quando
+`isImpersonating: true` estiver no JWT decodificado, para o operador nunca
+confundir a sessão de suporte com a própria conta. Sem bloqueio de
+backend — a API e o payload já existem (ver §5, bullet Impersonate).
 
 ### 14.2 Maturidade/robustez (backlog de funcionalidades dos sócios: 100% concluído)
 
