@@ -272,6 +272,35 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   bloqueando duplicata (P2002); dado legado em texto claro (inserido via
   Prisma cru, simulando um registro pré-Frente 2) é lido sem quebrar. Dados
   de teste removidos ao final.
+  **Anonimização / Direito ao Esquecimento (Plano Mestre V2.0, Frente 3 —
+  LGPD)**: **`POST /persons/:id/anonymize`** (só ADMIN — este sistema não
+  tem papel de "dono da loja" separado, `UserRole` é só `ADMIN`/`CASHIER`).
+  Sempre `UPDATE`, nunca `DELETE`: preserva o `id` para não quebrar
+  `Sale.clientId`/`Invoice.supplierId`/`FinancialAccount.personId` —
+  exatamente o cenário que hoje bloqueia o `DELETE` normal (vendas/notas/
+  títulos vinculados); a anonimização é a alternativa para "esquecer" os
+  dados reais sem apagar o histórico. Sobrescreve `name` ("Cliente
+  Anonimizado"), `tradeName` (também identifica a pessoa, limpo junto),
+  `document` (`ANON-{uuid}`), `email` (`anon-{uuid}@exodus-deleted.com`),
+  `phone` (`00000000000`) e todo o endereço (`zipCode`/`street`/`number`/
+  `district`/`city`/`state`, todos para `null`) — `crypto.randomUUID()`
+  nativo do Node. Os novos valores passam pelo `db.person.update` comum, e
+  a extensão `withEncryption` (Frente 2, acima) cifra `document`/`email`/
+  `phone` automaticamente como cifraria qualquer outra escrita — o
+  `ANON-{uuid}` fica duplamente ilegível no banco (texto já ofuscado,
+  depois cifrado). **Achado de premissa**: a missão pedia atualizar um
+  campo `updatedAt`, mas `Person` **não tem `updatedAt`/`createdAt`** no
+  schema — nenhuma migração foi criada só para isso (fora do escopo pedido
+  e adicionaria uma coluna em 15 outras leituras/serializações sem
+  necessidade real); o passo foi simplesmente omitido. **Testado ao vivo**:
+  pessoa de teste vinculada a um `FinancialAccount` real — `DELETE` normal
+  bloqueado (422) como esperado, `POST .../anonymize` retornou 200 com
+  todos os campos sobrescritos, o valor cru no Postgres confirmou
+  `document`/`email` cifrados (prefixos `encdet1:`/`encgcm1:`) sobre o
+  texto já anonimizado, e o `FinancialAccount.personId` continuou apontando
+  para o mesmo `id` (integridade referencial preservada). 404 para id
+  inexistente e 403 para usuário `CASHIER` confirmados. Dados de teste
+  removidos ao final.
 - ✅ **Entrada de XML/NFe** (§4.3): `/invoices/parse` (resolve o De/Para e já retorna
   `matchedVariant` com os dados reais do catálogo — nome do produto, SKU, preços —
   para o item auto-mapeado nunca exibir o `xProd` da nota como se fosse o nome
@@ -2538,6 +2567,41 @@ mesclada na `main`.
     o esquema determinístico preserva a unicidade; um registro inserido
     via Prisma cru simulando dado legado pré-Frente-2 foi lido sem quebrar.
     Todos os dados de teste removidos ao final (nenhum resíduo).
+  `npm run typecheck` + `npm run build` (api) → **0 erros**.
+
+- ✅ **Onda 2026-07-22c — Anonimização / Direito ao Esquecimento (Plano
+  Mestre V2.0, Frente 3 — LGPD)** (2026-07-22): mesma branch
+  `feature/lgpd-encryption` (continuação direta da Frente 2 — anonimização
+  depende da extensão de criptografia recém-criada). Commit único.
+  `POST /api/persons/:id/anonymize` (`routes/persons.ts`, só ADMIN) —
+  sempre `UPDATE`, nunca `DELETE`: sobrescreve `name`/`tradeName`/
+  `document`/`email`/`phone`/endereço com valores ofuscados
+  (`ANON-{crypto.randomUUID()}`/`anon-{uuid}@exodus-deleted.com`/
+  `00000000000`/`null`), preservando o `id` para não quebrar
+  `Sale.clientId`/`Invoice.supplierId`/`FinancialAccount.personId`. Os
+  novos valores passam pelo `db.person.update` comum — a extensão
+  `withEncryption` da Frente 2 cifra `document`/`email`/`phone`
+  automaticamente, sem nenhum código extra: o `ANON-{uuid}` fica
+  duplamente ilegível no banco (texto ofuscado, depois cifrado).
+  **Achado de premissa**: a missão pedia atualizar um campo `updatedAt` em
+  `Person` — o model **não tem** `updatedAt`/`createdAt` no schema; não foi
+  criada uma migração só para isso (fora do escopo pedido, afetaria toda
+  leitura/serialização de `Person` sem necessidade real) — o passo foi
+  simplesmente omitido, sem impacto no restante da funcionalidade. Nenhum
+  schema novo no `packages/shared` foi necessário — o único "param" é
+  `id: uuid()`, já coberto pelo padrão inline (`z.object({ id: z.string().
+  uuid() })`) que toda outra rota deste arquivo já usa; não havia
+  precedente de expor esse tipo de schema trivial no pacote compartilhado.
+  **Testado ao vivo**: pessoa de teste vinculada a um `FinancialAccount`
+  real — `DELETE /persons/:id` normal bloqueado com 422 (prova de que a
+  anonimização é mesmo a alternativa necessária); `POST .../anonymize`
+  retornou 200 com todos os campos sobrescritos; leitura direta do
+  Postgres (Prisma cru, sem a extensão) confirmou `document`/`email`
+  cifrados (`encdet1:`/`encgcm1:`) por cima do texto já anonimizado, não o
+  texto puro `ANON-{uuid}`; `FinancialAccount.personId` continuou
+  apontando para o mesmo `id` (integridade referencial preservada); 404
+  para id inexistente; 403 para usuário `CASHIER` (RBAC). Dados de teste
+  removidos ao final.
   `npm run typecheck` + `npm run build` (api) → **0 erros**.
 
 ---

@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
@@ -131,6 +132,53 @@ export async function personRoutes(app: FastifyInstance) {
 
       await db.person.delete({ where: { id: req.params.id } });
       return reply.status(204).send();
+    },
+  );
+
+  /**
+   * Anonimização (Plano Mestre V2.0, Frente 3 — Direito ao Esquecimento).
+   * Alternativa ao `DELETE` quando a pessoa tem vendas/notas/títulos
+   * vinculados (ou mesmo sem vínculo, se só se quer "esquecer" os dados sem
+   * apagar o histórico): sempre `UPDATE`, nunca `DELETE` — preserva o `id`
+   * para não quebrar `Sale.clientId`/`Invoice.supplierId`/
+   * `FinancialAccount.personId`. Só ADMIN (não existe papel de "dono da
+   * loja" separado neste sistema — `UserRole` é só `ADMIN`/`CASHIER`; ADMIN
+   * já É o dono/gestor da loja).
+   * Os novos valores passam pelo `db.person.update` normal — a extensão
+   * `withEncryption` (Frente 2, `lib/encryption.ts`) cifra `document`/
+   * `email`/`phone` automaticamente, como cifraria qualquer outra escrita.
+   */
+  r.post(
+    '/:id/anonymize',
+    { preHandler: app.authorize(['ADMIN']), schema: { params: z.object({ id: z.string().uuid() }) } },
+    async (req) => {
+      const { db } = tenantDb(req);
+      const existing = await db.person.findFirst({ where: { id: req.params.id } });
+      if (!existing) throw new NotFoundError('Pessoa');
+
+      const anonId = crypto.randomUUID();
+      const anonymized = await db.person.update({
+        where: { id: req.params.id },
+        data: {
+          name: 'Cliente Anonimizado',
+          // Nome fantasia/apelido também identifica a pessoa — limpo junto.
+          tradeName: null,
+          document: `ANON-${anonId}`,
+          email: `anon-${anonId}@exodus-deleted.com`,
+          phone: '00000000000',
+          zipCode: null,
+          street: null,
+          number: null,
+          district: null,
+          city: null,
+          state: null,
+        },
+      });
+
+      return {
+        message: 'Dados da pessoa foram anonimizados com sucesso.',
+        person: anonymized,
+      };
     },
   );
 }
