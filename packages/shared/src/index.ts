@@ -10,3 +10,4 @@ export * from './schemas/sale.js';
 export * from './schemas/cash.js';
 export * from './schemas/financial.js';
 export * from './schemas/settings.js';
+export * from './schemas/admin.js';

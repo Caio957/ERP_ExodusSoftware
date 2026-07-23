@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { authRoutes } from './auth.js';
+import { adminRoutes } from './admin.js';
 import { productRoutes } from './products.js';
 import { personRoutes } from './persons.js';
 import { invoiceRoutes } from './invoices.js';
@@ -13,6 +14,7 @@ import { dashboardRoutes } from './dashboard.js';
 /** Registra todos os grupos de rotas sob seus respectivos prefixos. */
 export async function registerRoutes(app: FastifyInstance) {
   await app.register(authRoutes, { prefix: '/auth' });
+  await app.register(adminRoutes, { prefix: '/admin' });
   await app.register(productRoutes, { prefix: '/products' });
   await app.register(personRoutes, { prefix: '/persons' });
   await app.register(invoiceRoutes, { prefix: '/invoices' });

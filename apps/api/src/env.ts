@@ -26,6 +26,15 @@ const envSchema = z.object({
         return false;
       }
     }, 'ENCRYPTION_KEY deve representar exatamente 32 bytes (AES-256) em hex de 64 caracteres ou base64'),
+  // Impersonate administrativo (Plano Mestre V2.0, Frente 4) — bypass
+  // temporário até existir um papel/painel de admin global de verdade
+  // (SYSTEM_ADMIN). Deliberadamente OPCIONAL (não fail-fast): se não
+  // configurada, o endpoint de impersonate fica indisponível para todo
+  // mundo — nenhum e-mail de usuário real é jamais igual a `undefined`,
+  // então o bypass falha FECHADO por padrão, em vez de derrubar o boot de
+  // toda a API por causa de uma variável que nem todo ambiente precisa
+  // configurar no dia 1.
+  SUPER_ADMIN_EMAIL: z.string().trim().toLowerCase().email().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

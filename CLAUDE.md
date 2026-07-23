@@ -301,6 +301,49 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   para o mesmo `id` (integridade referencial preservada). 404 para id
   inexistente e 403 para usuário `CASHIER` confirmados. Dados de teste
   removidos ao final.
+- 🟡 **Impersonate administrativo + Auditoria (Plano Mestre V2.0, Frente 4)**:
+  **`POST /api/admin/impersonate`** (`routes/admin.ts`, novo — rotas globais
+  fora do isolamento multi-tenant comum, sempre Prisma cru, nunca
+  `withTenant`/`tenantDb`). Suporte técnico da Exodus troca o contexto de
+  tenant para o de um cliente sem precisar de login próprio naquela empresa.
+  **Autorização** (bypass deliberadamente simples até existir um
+  papel/painel de admin global de verdade — `SYSTEM_ADMIN`, ainda não
+  implementado): compara `req.user.email` com a env var `SUPER_ADMIN_EMAIL`
+  (nova, `env.ts`, **opcional** — diferente do padrão fail-fast de
+  `JWT_SECRET`/`ENCRYPTION_KEY` porque, se não configurada, o endpoint
+  simplesmente fica indisponível para todo mundo: nenhum e-mail real é
+  jamais igual a `undefined`, então o bypass falha **fechado** por padrão,
+  em vez de derrubar o boot de toda a API por uma variável que nem todo
+  ambiente precisa configurar no dia 1). **Novo model `AuditLog`** (sem
+  `@relation`/FK de propósito — um log de auditoria precisa sobreviver à
+  exclusão do usuário/empresa que referencia, é o próprio registro jurídico
+  de "quem acessou o quê"; também sem `companyId`, é uma tabela GLOBAL,
+  nunca escopada por `withTenant`): grava `adminUserId`/`targetCompanyId`/
+  `action` (`'IMPERSONATE_LOGIN'`) **antes** de emitir o token — se o
+  registro falhar, a troca de contexto também falha (proteção jurídica sem
+  exceção). O token novo mantém `sub`/`email`/`name` do admin REAL
+  (rastreabilidade), troca só `companyId` para o tenant-alvo — é só isso
+  que `withTenant`/`tenantDb` olham, então basta para "enganá-lo" e escopar
+  toda rota de negócio subsequente para a empresa do cliente — e adiciona
+  `isImpersonating: true` + `originalUserId` (`jwtPayloadSchema`, shared,
+  ambos opcionais) para o frontend futuramente exibir uma faixa de aviso
+  (ainda não implementado no frontend — ver §12). **🟡 parcialmente
+  validado**: por pedido explícito do Comandante, a migração do Prisma
+  (`AuditLog` é tabela nova) foi deixada para ele rodar — código e
+  `prisma generate` (só codegen, não altera o banco) validados via
+  `npm run typecheck`/`build`; **testado ao vivo** até o limite possível
+  sem a tabela existir: sem `SUPER_ADMIN_EMAIL` configurada → 403 (fail
+  closed); `CASHIER` (não é o super admin) → 403; empresa-alvo inexistente
+  → 404 (checado antes de qualquer escrita); super admin + empresa real →
+  falhou com 500 **exatamente** no `tx.auditLog.create` ("table
+  `public.AuditLog` does not exist"), confirmando que todo o resto do
+  fluxo (autorização, busca da empresa, geração de payload) está correto —
+  só falta a migração rodar. Servidor **não caiu** com esse erro (handler
+  global tratou normalmente). **Ação pendente do Comandante**: rodar
+  `npx prisma migrate dev --name add_audit_log` (dev) e depois
+  `npx prisma migrate deploy` chega sozinho no próximo `git push`/deploy do
+  Railway; e configurar `SUPER_ADMIN_EMAIL` no Railway antes de usar em
+  produção.
 - ✅ **Entrada de XML/NFe** (§4.3): `/invoices/parse` (resolve o De/Para e já retorna
   `matchedVariant` com os dados reais do catálogo — nome do produto, SKU, preços —
   para o item auto-mapeado nunca exibir o `xProd` da nota como se fosse o nome
@@ -2604,6 +2647,49 @@ mesclada na `main`.
   removidos ao final.
   `npm run typecheck` + `npm run build` (api) → **0 erros**.
 
+- 🟡 **Onda 2026-07-22d — Impersonate Administrativo + Auditoria (Plano
+  Mestre V2.0, Frente 4 — fecha a frente Segurança/LGPD)** (2026-07-22):
+  mesma branch `feature/lgpd-encryption`. Commit único.
+  - **Schema**: novo model `AuditLog` (`id`/`adminUserId`/`targetCompanyId`/
+    `action`/`createdAt`) — deliberadamente sem `@relation`/FK (sobrevive à
+    exclusão do que referencia — é o próprio registro jurídico) e sem
+    `companyId` (tabela global, nunca escopada por `withTenant`). **Por
+    pedido explícito do Comandante, a migração (`prisma migrate dev`) foi
+    deixada para ele rodar** — só `npx prisma generate` (codegen puro, não
+    toca no banco) foi executado, o suficiente para `tx.auditLog.create`
+    tipar corretamente e o typecheck/build passarem.
+  - **`env.ts`**: `SUPER_ADMIN_EMAIL` nova, opcional (não fail-fast) — nota
+    própria no código explicando a escolha (endpoint fica indisponível pra
+    todo mundo se não configurada, em vez de derrubar o boot da API).
+  - **`jwtPayloadSchema`** (shared): ganhou `isImpersonating`/
+    `originalUserId`, ambos opcionais — não quebra nenhum token já emitido
+    (campos ausentes = sessão normal).
+  - **`routes/admin.ts`** (novo, prefixo `/admin`): `POST /impersonate`
+    exige `authenticate` (qualquer usuário logado pode chamar), mas só
+    passa da checagem de e-mail == `SUPER_ADMIN_EMAIL`. Busca a `Company`
+    alvo (404 se não existir) → grava `AuditLog` (`action:
+    'IMPERSONATE_LOGIN'`) **antes** de assinar o token — se a auditoria
+    falhar, a troca de contexto falha junto, sem exceção. Token novo:
+    `sub`/`email`/`name` do admin real (rastreabilidade), `companyId` do
+    tenant-alvo (é só isso que `withTenant`/`tenantDb` olham — basta pra
+    escopar toda rota de negócio subsequente pro cliente), `role: 'ADMIN'`,
+    `isImpersonating: true`, `originalUserId`.
+  - **Testado ao vivo até o limite possível sem a migração**: sem
+    `SUPER_ADMIN_EMAIL` configurada → 403 em qualquer usuário (fail
+    closed, confirmado); com a variável configurada para
+    `admin@exodus.local`, login como `CASHIER` → 403 (não é o super
+    admin); `admin@exodus.local` contra `targetCompanyId` inexistente →
+    404 (checagem de empresa roda antes de qualquer escrita);
+    `admin@exodus.local` contra a empresa real ("Inquilino Zero") → 500
+    exatamente em `tx.auditLog.create` ("table `public.AuditLog` does not
+    exist"), confirmando que autorização + busca de empresa + montagem do
+    payload estão corretos, faltando só a tabela existir; servidor
+    permaneceu no ar depois do erro (handler global tratou normalmente,
+    sem crash). **Fluxo de sucesso completo (token emitido de verdade)
+    ainda não foi validado** — depende da migração, que é a próxima ação
+    do Comandante (ver §12).
+  `npm run typecheck` + `npm run build` (shared+api) → **0 erros**.
+
 ---
 
 ## 12. Pendências, bloqueios e dívidas técnicas
@@ -2693,6 +2779,22 @@ mesclada na `main`.
     quebra nesse meio-tempo (`decryptField` tolera texto claro), mas não é
     LGPD-compliant até o backfill ser aplicado. Ver §5 (bullet Pessoas) para
     o detalhamento técnico completo.
+21. **[NOVO, AÇÃO OBRIGATÓRIA — SEM ISSO O IMPERSONATE NÃO FUNCIONA]
+    Migração do `AuditLog` (Frente 4) ainda não rodou**: o model foi
+    adicionado ao `schema.prisma` e o Prisma Client já foi regenerado
+    (`npx prisma generate`, só codegen), mas a tabela em si só existe depois
+    de `npx prisma migrate dev --name add_audit_log` rodar (deixado para o
+    Comandante rodar de propósito, por pedido explícito) — sem isso,
+    `POST /api/admin/impersonate` falha com 500 assim que passa da
+    autorização (confirmado ao vivo, ver Onda 2026-07-22d em §11). Também
+    pendente: (a) configurar `SUPER_ADMIN_EMAIL` no Railway antes de usar
+    em produção (sem ela, o endpoint fica indisponível para todo mundo —
+    fail closed, não quebra nada, só não funciona); (b) frontend ainda não
+    tem NENHUMA tela/botão para chamar `POST /api/admin/impersonate`, nem a
+    faixa amarela de aviso "Você está acessando como suporte" mencionada na
+    missão original — o payload (`isImpersonating`/`originalUserId`) já
+    existe no JWT, pronto para o frontend consumir quando essa tela for
+    construída.
 
 ---
 
@@ -2756,6 +2858,33 @@ tem porta de entrada de uso.
 > intenção for uma reformulação maior dele, vale alinhar com o Comandante o
 > escopo exato antes de iniciar, já que não foi detalhado em nenhuma
 > conversa registrada neste documento.
+
+### 14.1c Segurança de Dados / LGPD (Plano Mestre V2.0, Frentes 2–4) —
+implementação de código 100% concluída
+
+Branch `feature/lgpd-encryption` (independente da `feature/multi-tenant`
+acima e da `feature/tenant-onboarding` — três frentes do Plano Mestre V2.0
+avançando em paralelo, ainda sem merge entre si; reconciliar na hora do
+merge). Três frentes seguidas, todas nesta mesma branch:
+
+- ✅ **Frente 2 — Criptografia** (Onda 2026-07-22b, §11): `Person.document`/
+  `email`/`phone` cifrados em repouso, transparente via `withEncryption`.
+- ✅ **Frente 3 — Anonimização / Direito ao Esquecimento** (Onda 2026-07-22c,
+  §11): `POST /persons/:id/anonymize`, sempre `UPDATE`.
+- 🟡 **Frente 4 — Impersonate + Auditoria** (Onda 2026-07-22d, §11):
+  `POST /api/admin/impersonate` + model `AuditLog` — **código completo e
+  testado até onde dá sem a migração** (ver §12.21); falta rodar
+  `npx prisma migrate dev` (deixado para o Comandante de propósito),
+  configurar `SUPER_ADMIN_EMAIL` em produção, e construir a tela/faixa de
+  aviso no frontend (zero UI ainda — só a API existe).
+
+**Como avaliar "100% concluído"**: as três frentes têm o código e a lógica
+de negócio prontos e validados (typecheck + testes ao vivo, dentro do que
+cada uma permitia sem tocar em produção). O que falta para produção de
+verdade é operacional, não de implementação: rodar a migração do
+`AuditLog`, rodar o backfill de criptografia (§12.20), e configurar duas
+env vars no Railway (`ENCRYPTION_KEY`, `SUPER_ADMIN_EMAIL`) — nenhuma
+delas é "mais código a escrever".
 
 ### 14.2 Maturidade/robustez (backlog de funcionalidades dos sócios: 100% concluído)
 
