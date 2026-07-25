@@ -62,6 +62,14 @@ model Company {
   id        String   @id @default(uuid())
   name      String
   document  String?  @unique // CNPJ do tenant (opcional nesta fase)
+  // Ciclo de vida do tenant (onboarding de lojistas, Plano Mestre V2.0 —
+  // Frente 1). String (não enum nativo) para seguir a convenção do projeto:
+  // todo campo de "status/type/role" é String no Prisma e validado por
+  // `z.enum` na borda (CompanyStatus em packages/shared/src/enums.ts) — ver
+  // §9 do CLAUDE.md. Valores: PENDING (auto-cadastro aguardando aprovação da
+  // Exodus) · ACTIVE · REJECTED · BLOCKED. Toda empresa criada pela rota
+  // pública /api/onboarding nasce PENDING até um admin da Exodus aprovar.
+  status    String   @default("PENDING")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

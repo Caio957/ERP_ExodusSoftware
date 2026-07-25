@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { authRoutes } from './auth.js';
 import { adminRoutes } from './admin.js';
+import { onboardingRoutes } from './onboarding.js';
 import { productRoutes } from './products.js';
 import { personRoutes } from './persons.js';
 import { invoiceRoutes } from './invoices.js';
@@ -15,6 +16,8 @@ import { dashboardRoutes } from './dashboard.js';
 export async function registerRoutes(app: FastifyInstance) {
   await app.register(authRoutes, { prefix: '/auth' });
   await app.register(adminRoutes, { prefix: '/admin' });
+  // Pública (sem authenticate) — auto-cadastro de novos lojistas.
+  await app.register(onboardingRoutes, { prefix: '/onboarding' });
   await app.register(productRoutes, { prefix: '/products' });
   await app.register(personRoutes, { prefix: '/persons' });
   await app.register(invoiceRoutes, { prefix: '/invoices' });
