@@ -71,7 +71,12 @@
   `@@unique([companyId, campo])` com login capaz de desambiguar e-mail
   colidente entre empresas — ver Onda 2026-07-19 em §11 para o
   detalhamento completo (Fases 1-2 `b2039ad`, prep. Fase 3 `0b0ff54`,
-  Fase 4 `7f7d001`, Fase 3 frontend `e3c534b`, última leva `230e74d`).
+  Fase 4 `7f7d001`, Fase 3 frontend `e3c534b`, última leva `230e74d`) —
+  seguida, ainda na mesma branch antes dela virar `main`, pelo cadastro
+  multi-variante de produto (`eb1b2dd`, 2026-07-20, ver Onda 2026-07-20 em
+  §11 e §12 item 6 — ficou sem registro neste documento até a reconciliação
+  desta rodada, por ter avançado em paralelo à branch que documentou o
+  merge da LGPD abaixo).
   ✅ **`feature/lgpd-encryption` mesclada na `main` via PR #24** (`6d68e3c`,
   2026-07-23 — Plano Mestre V2.0: Segurança/LGPD, Frentes 2-4: criptografia
   de `Person.document`/`email`/`phone` (`withEncryption`), anonimização
@@ -693,11 +698,22 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   cabeçalho e rodapé `shrink-0` fixos. **Cabeçalho do modal Editar** exibe `#N`.
   **Campo SKU** restaurado no card de variante (obrigatório, validado por
   `buildVariantSchema`, enviado ao `PUT /api/products/variants/:id`).
-  **Validação Zod dinâmica**: `buildProductFormSchema(brandReq, groupReq, subgroupReq,
-  barcodeReq, tracksLotValidity, requireAverageCost)` e `buildVariantSchema(barcodeReq,
-  tracksLotValidity, requireAverageCost)` geram schemas em runtime. `submit()` /
-  `handleSave()` usam `safeParse` — erros por campo exibidos inline. Campos numéricos
-  usam `z.coerce.number().min(0).catch(0)` para evitar "Dados inválidos" com campo vazio.
+  **Validação Zod dinâmica**: `buildVariantSchema(barcodeReq, tracksLotValidity,
+  requireAverageCost)` gera o schema de variante em runtime, reaproveitado tanto no
+  cadastro quanto na edição; `submit()`/`handleSave()` usam `safeParse` — erros por
+  campo exibidos inline. Campos numéricos usam `z.coerce.number().min(0).catch(0)`
+  para evitar "Dados inválidos" com campo vazio.
+  **Cadastro multi-variante** (commit `eb1b2dd`, 2026-07-20, ver §11): o modal "Novo
+  produto" (`ProductForm`) deixou de aceitar só 1 variante por produto — `variants:
+  NewVariantRow[]` (client-side, chave `crypto.randomUUID()`) permite cadastrar
+  várias variantes (ex.: perfume 50ml/100ml, batom em várias cores) numa única
+  chamada a `POST /api/products`, que **já** aceitava `variants[]` desde sempre
+  (nenhuma mudança de backend/contrato foi necessária — só a UI criava sempre 1).
+  Cada linha tem SKU/código de barras/descrição/estoque inicial/lote-validade e
+  precificação (custo/margem-markup/venda) **independentes**; botão "+ Adicionar
+  variante" + remover por linha (bloqueado em 1, batendo com
+  `createProductSchema.variants.min(1)`). `buildProductFormSchema` (schema de
+  1 variante só) foi **removido** — virou código morto com a mudança.
   **Sanitização de payload**: `brand || undefined`, `group || undefined` ao salvar (strings
   vazias seriam rejeitadas pelo Zod `.min(1)` do backend; `undefined` é descartado pelo
   JSON.stringify e o Prisma ignora o campo).
@@ -2567,6 +2583,41 @@ mesclada na `main`.
     nenhuma rota de provisionamento de tenant — `Company` só nasce via
     script/inserção direta no banco. Ver §12.
 
+- ✅ **Onda 2026-07-20 — Kickoff "Motor da Loja: Catálogo e Estoque"
+  (multi-variante no cadastro de produto)** (2026-07-20): branch
+  `feature/multi-tenant`, commit `eb1b2dd` (topo da branch antes de ela
+  virar `main`). Sprint curto, iniciado a partir da sugestão do Gemini
+  (§14.1b) de investir no módulo de Catálogo/Estoque.
+  - **Achado de premissa (backend)**: a missão pedia criar/atualizar
+    `routes/products.ts` com `GET`/`POST` tenant-isolados e citava um model
+    `Inventory` — **nenhum dos dois existe como gap real**. `routes/
+    products.ts` já tinha `GET /` (lista paginada/filtros/ordenação) e
+    `POST /` (cria produto + variantes + `StockMovement` inicial) completos e
+    escopados por `tenantDb(req)` desde a Fase 4 (ver Onda 2026-07-19), e já
+    registrado em `routes/index.ts`. Não existe model `Inventory` — estoque
+    vive em `ProductVariant.stockQty` + o ledger `StockMovement`. **Nenhuma
+    linha de backend foi tocada** — reescrever um arquivo em produção já
+    validado sem gap real seria risco de regressão sem ganho.
+  - **Gap real identificado e fechado (frontend)**: `ProductForm`
+    (`ProductsPage.tsx`, modal "Novo produto") só permitia cadastrar 1
+    variante por produto, apesar de `POST /api/products` **já aceitar**
+    `variants: CreateVariantInput[]` (sem nenhuma mudança de contrato
+    necessária). Reescrito para multi-variante — ver §5 Produtos para o
+    detalhamento completo (`NewVariantRow[]`, `addVariant`/`removeVariant`,
+    precificação independente por linha). `buildProductFormSchema` (schema
+    de "exatamente 1 variante") **removido** — virou código morto;
+    `buildVariantSchema` (por linha) foi reaproveitado tal como já usado por
+    `EditProductModal`. Cobre o caso de uso citado (perfume 50ml/100ml,
+    batom em várias cores) numa única chamada ao endpoint que já existia.
+  - ⚠️ **Achado ao reconciliar com a Onda 2026-07-22b/§14 seguintes**: este
+    commit ficou sem registro em `CLAUDE.md` até agora — a sessão que
+    documentou o merge da `feature/lgpd-encryption` (PR #24, ver Onda
+    2026-07-23c) não tinha visibilidade deste commit paralelo (ambos
+    avançaram a partir de `230e74d` de forma independente antes de
+    convergirem em `main`). §12 item 6 estava incorretamente listado como
+    pendência até esta correção.
+  `npm run typecheck -w @exodus/web` → **0 erros**.
+
 - ✅ **Onda 2026-07-22b — Criptografia de Dados Sensíveis (Plano Mestre
   V2.0, Frente 2 — LGPD)** (2026-07-22): branch `feature/lgpd-encryption`
   (criada a partir da `main`, **independente** da branch de onboarding —
@@ -2830,10 +2881,14 @@ mesclada na `main`.
 5. ~~**BrasilAPI** ainda não integrada no formulário de fornecedor~~ **RESOLVIDO
    (2026-07-02)**: CEP via BrasilAPI (endereço completo) + CNPJ via ReceitaWS
    (proxeada pelo backend, ver §5 Cadastros).
-6. **Cadastro de produto** cria 1 variante por vez (multi-variante a fazer) —
-   ainda vale para a tela de Produtos; o cadastro in-line na importação de XML
-   (2026-07-13, ver §5 Compras/§11) cobre só o caso pontual de item sem De/Para
-   durante a importação, sempre 1 variante, não substitui essa pendência.
+6. ~~**Cadastro de produto** cria 1 variante por vez~~ **RESOLVIDO (2026-07-20)**:
+   `ProductForm` (`ProductsPage.tsx`, commit `eb1b2dd`) agora cadastra N
+   variantes numa única chamada — ver §5 Produtos e Onda 2026-07-20 em §11.
+   Esta entrada ficou incorretamente marcada como pendente até esta correção
+   porque o commit avançou numa branch paralela à que documentou o merge da
+   LGPD (ver nota na própria Onda 2026-07-20). O cadastro in-line na
+   importação de XML (2026-07-13) continua sendo um fluxo à parte (sempre
+   1 variante, contexto de item de nota sem De/Para).
 7. ~~**Pagamento único por venda**~~ **RESOLVIDO** (PDV-B): split de pagamento + "A prazo".
 8. **Estoque pode ficar negativo** em vendas offline (decisão consciente). Avaliar política de bloqueio/alerta.
 9. **JWT sem refresh token** e sem revogação (expira em 12h).
@@ -3034,7 +3089,8 @@ backend — a API e o payload já existem (ver §5, bullet Impersonate).
 2. **Validar em produção** os fluxos novos (venda a prazo→contas a receber, baixa
    parcial, dashboard, tipos de recebimento customizados).
 3. Integração BrasilAPI no cadastro de fornecedor (autocomplete de CNPJ — §4.2).
-4. Cadastro multi-variante de produto (formulário dinâmico de variantes).
+4. ~~Cadastro multi-variante de produto~~ **RESOLVIDO (2026-07-20)** — ver §5
+   Produtos e Onda 2026-07-20 em §11.
 5. Tela de **devoluções** de venda (estorno de itens com `StockMovement`).
 6. Endurecer segurança: refresh token, rate limiting, validação XXE no parser XML.
 7. Resolver `npm audit` (3 vulnerabilidades em deps transitivas).
