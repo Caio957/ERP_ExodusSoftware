@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../store/auth';
 import { StatusBadge } from './StatusBadge';
+import { ImpersonateBanner } from './ImpersonateBanner';
 
 const navItems: { to: string; label: string; icon: LucideIcon; pageKey: string }[] = [
   { to: '/dashboard', label: 'Dashboard', icon: LineChart, pageKey: 'dashboard' },
@@ -67,57 +68,63 @@ export function Layout() {
 
   return (
     <div className="flex min-h-screen flex-col">
-      {/* Header */}
-      <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-3 border-b border-white/40 bg-white/70 px-3 backdrop-blur-xl sm:px-4">
-        <div className="flex items-center gap-2.5">
-          <span className="relative grid h-10 w-10 place-items-center">
-            <span className="absolute inset-0 rounded-xl bg-brand-gradient opacity-70 blur-md animate-glow-pulse" />
-            <span className="relative grid h-10 w-10 place-items-center rounded-xl bg-brand-gradient text-lg font-bold text-white shadow-brand ring-2 ring-accent-400/80">
-              E
+      {/* Header (+ faixa de impersonate, quando ativa) — os dois vivem num
+          único wrapper sticky: dois irmãos `sticky top-0` se sobrepõem em
+          vez de empilhar, então o header perdeu a própria stickiness e
+          passou a herdar a do wrapper. */}
+      <div className="sticky top-0 z-30">
+        <ImpersonateBanner />
+        <header className="flex h-16 items-center justify-between gap-3 border-b border-white/40 bg-white/70 px-3 backdrop-blur-xl sm:px-4">
+          <div className="flex items-center gap-2.5">
+            <span className="relative grid h-10 w-10 place-items-center">
+              <span className="absolute inset-0 rounded-xl bg-brand-gradient opacity-70 blur-md animate-glow-pulse" />
+              <span className="relative grid h-10 w-10 place-items-center rounded-xl bg-brand-gradient text-lg font-bold text-white shadow-brand ring-2 ring-accent-400/80">
+                E
+              </span>
             </span>
-          </span>
-          <div className="leading-none">
-            <div className="font-display text-lg font-extrabold gradient-text">Exodus</div>
-            <div className="text-[11px] font-medium text-slate-400">Beauty ERP</div>
-          </div>
-        </div>
-
-        <StatusBadge />
-
-        <div className="flex items-center gap-3">
-          <div className="hidden text-right sm:block">
-            <div className="text-sm font-semibold leading-tight">{user?.name}</div>
-            <div className="text-[11px] font-medium uppercase tracking-wide text-brand-600">
-              {user?.role === 'ADMIN' ? 'Administrador' : 'Operador'}
+            <div className="leading-none">
+              <div className="font-display text-lg font-extrabold gradient-text">Exodus</div>
+              <div className="text-[11px] font-medium text-slate-400">Beauty ERP</div>
             </div>
           </div>
-          <span className="grid h-10 w-10 place-items-center rounded-full bg-brand-gradient text-sm font-bold text-white shadow-brand ring-2 ring-accent-300">
-            {initials(user?.name)}
-          </span>
-          {user?.isSuperAdmin && (
-            <NavLink
-              to="/admin/contratos"
-              title="Painel Administrativo Exodus"
-              className={({ isActive }) =>
-                `grid h-10 w-10 place-items-center rounded-xl transition ${
-                  isActive
-                    ? 'bg-gold-gradient text-ink-900 shadow-gold'
-                    : 'text-accent-600 hover:bg-accent-50'
-                }`
-              }
+
+          <StatusBadge />
+
+          <div className="flex items-center gap-3">
+            <div className="hidden text-right sm:block">
+              <div className="text-sm font-semibold leading-tight">{user?.name}</div>
+              <div className="text-[11px] font-medium uppercase tracking-wide text-brand-600">
+                {user?.role === 'ADMIN' ? 'Administrador' : 'Operador'}
+              </div>
+            </div>
+            <span className="grid h-10 w-10 place-items-center rounded-full bg-brand-gradient text-sm font-bold text-white shadow-brand ring-2 ring-accent-300">
+              {initials(user?.name)}
+            </span>
+            {user?.isSuperAdmin && (
+              <NavLink
+                to="/admin/contratos"
+                title="Painel Administrativo Exodus"
+                className={({ isActive }) =>
+                  `grid h-10 w-10 place-items-center rounded-xl transition ${
+                    isActive
+                      ? 'bg-gold-gradient text-ink-900 shadow-gold'
+                      : 'text-accent-600 hover:bg-accent-50'
+                  }`
+                }
+              >
+                <ShieldCheck className="h-5 w-5" />
+              </NavLink>
+            )}
+            <button
+              className="grid h-10 w-10 place-items-center rounded-xl text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
+              title="Sair"
+              onClick={doLogout}
             >
-              <ShieldCheck className="h-5 w-5" />
-            </NavLink>
-          )}
-          <button
-            className="grid h-10 w-10 place-items-center rounded-xl text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
-            title="Sair"
-            onClick={doLogout}
-          >
-            <LogOut className="h-5 w-5" />
-          </button>
-        </div>
-      </header>
+              <LogOut className="h-5 w-5" />
+            </button>
+          </div>
+        </header>
+      </div>
 
       <div className="flex flex-1">
         {/* Sidebar (tablet/desktop) — sticky, com scroll próprio se necessário */}

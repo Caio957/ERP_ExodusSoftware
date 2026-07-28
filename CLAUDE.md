@@ -95,10 +95,13 @@
   Segurança/LGPD (criptografia, `AuditLog`, desambiguação de login).
   **`main` e `origin/main` estão em sincronia em `3d2d2a5`.**
   ✅ **`feature/admin-contracts-panel` (frontend do Back-Office — Painel de
-  Gestão de Contratos)** — sinal `isSuperAdmin` em `/auth/me`, rota
-  protegida `/admin/contratos` (`<SuperAdminRoute>`) e `AdminContractsPage.tsx`
-  (Padrão Ouro), ver Onda 2026-07-28 em §11. Enviada para revisão do
-  Comandante antes do commit/push (instrução em aberto).
+  Gestão de Contratos + Impersonate)** — sinal `isSuperAdmin` em `/auth/me`,
+  rota protegida `/admin/contratos` (`<SuperAdminRoute>`) e
+  `AdminContractsPage.tsx` (Padrão Ouro) — commit `ae6b65c`; botão "Acessar
+  Loja", `<ImpersonateBanner>` e a estratégia de troca de token no Zustand
+  (`impersonateLogin`/`exitImpersonate`) — ver Onda 2026-07-28/2026-07-28b
+  em §11. Push para `origin` autorizado pelo Comandante — aguardando
+  abertura do PR.
   ⚠️ **Padrão observado na rodada de correções de impressão (PRs #14→#16)**: cada uma das 3 PRs
   seguidas (#14→#16) tentou resolver o mesmo sintoma relatado pelo Comandante (página em
   branco/layout quebrado ao imprimir no Android) com uma causa raiz diferente — cada
@@ -903,8 +906,9 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   logo, tabela de itens e dados da empresa. Impressão via `window.print()` com
   `@page` e `print-color-adjust: exact` injetados dinamicamente.
 - ✅ **PWA**: manifest + Service Worker (Workbox) com cache de app shell e API.
-- ✅ **Back-Office da Exodus — Painel de Gestão de Contratos** (Plano Mestre
-  V2.0, Frente 1, frontend — ver Onda 2026-07-28 em §11): rota protegida
+- ✅ **Back-Office da Exodus — Painel de Gestão de Contratos + Impersonate**
+  (Plano Mestre V2.0, Frente 1, frontend — ver Onda 2026-07-28/2026-07-28b
+  em §11): rota protegida
   `/admin/contratos` (`AdminContractsPage.tsx`), acessível **apenas** a quem
   tem `user.isSuperAdmin === true` no store Zustand — sinal novo, lido
   fresco de `GET /auth/me` a cada login (mesmo raciocínio de
@@ -928,9 +932,20 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   `user.isSuperAdmin` — **não** entra na lista `navItems`/sidebar/bottom-nav
   (esses são filtrados por `canAccess(pageKey)`, um conceito de RBAC de
   tenant que não se aplica aqui). Novo método `api.patch` em `lib/api.ts`
-  (faltava — só existiam `get`/`post`/`put`/`del`). Deliberadamente **não**
-  mexe na rota/UI de impersonate ("Acessar Loja") — fica para uma etapa
-  separada (ver §14.1d).
+  (faltava — só existiam `get`/`post`/`put`/`del`).
+  **Impersonate ("Acessar Loja") — Missão 2, ver Onda 2026-07-28b em §11**:
+  botão na linha de cada empresa `ACTIVE` (exceto a do próprio super admin)
+  dispara `POST /api/admin/impersonate`; `store/auth.ts` ganhou
+  `impersonateLogin`/`exitImpersonate`/`originalAdminToken`/
+  `originalAdminUser`/`impersonatingCompanyName` — a sessão real do super
+  admin fica guardada para retorno sem novo login, e o `user` ativo é
+  reconstruído localmente (não via `GET /auth/me`, que sempre devolveria o
+  `companyId` do PRÓPRIO usuário, não o da empresa-alvo). `<ImpersonateBanner>`
+  fica fixa no topo do `Layout` (faixa "MODO SUPORTE" + botão "Encerrar
+  Suporte") sempre que `impersonatingCompanyName` não for nulo; entrar e
+  sair fazem `window.location.href` (reload completo, não `navigate`) para
+  remontar o React Query do zero, sem risco de cache de um tenant vazar
+  para o outro por uma fração de segundo.
 
 ---
 
@@ -2977,9 +2992,9 @@ mesclada na `main`.
 - ✅ **Onda 2026-07-28 — Frontend do Back-Office: Painel de Gestão de
   Contratos (Plano Mestre V2.0, Frente 1)** (2026-07-28): branch
   `feature/admin-contracts-panel` (criada a partir da `main` já pós-merge da
-  PR #25, `3d2d2a5`) — **commit ainda não criado nesta onda, aguardando
-  aprovação do Comandante** (mesmo protocolo da Onda 2026-07-27: implementar
-  + validar + reportar antes de commitar). Missão explícita do Caio: por
+  PR #25, `3d2d2a5`) — **commitada em `ae6b65c`** após aprovação do
+  Comandante (mesmo protocolo da Onda 2026-07-27: implementar + validar +
+  reportar antes de commitar). Missão explícita do Caio: por
   razão de processo/segurança, começar o frontend do pacote Multi-tenant/
   LGPD pelo **Back-Office** (gestão de contratos), não pelo onboarding
   público — a infraestrutura de aprovação precisa existir antes de abrir a
@@ -3075,6 +3090,79 @@ mesclada na `main`.
     como pendência de maturidade, não como bug.
   `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros**.
 
+- ✅ **Onda 2026-07-28b — Interface do Impersonate: "Acessar Loja", faixa
+  "MODO SUPORTE" e troca de sessão no Zustand (Missão 2 do frontend)**
+  (2026-07-28): mesma branch `feature/admin-contracts-panel`, continuação
+  direta da Onda 2026-07-28 (contracts panel, já commitada em `ae6b65c`).
+  Fecha o §12.21 e a "Missão 2" de §14.1d.
+  - **O desafio real**: o `/auth/me` sempre lê `companyId` fresco do
+    **próprio usuário** no banco (não do JWT — mesmo raciocínio de
+    `allowedPages`, nunca confiar numa claim com até 12h de idade). Chamar
+    `/me` com o token de impersonate devolveria o `companyId` do super
+    admin, não o da empresa-alvo, quebrando a troca de tenant no frontend
+    de forma silenciosa mesmo com o backend correto. Por isso
+    `impersonateLogin` **não chama `/me`** — monta o `user` da sessão
+    disfarçada localmente a partir do usuário real já em memória
+    (`sub`/`email`/`name` não mudam — o próprio backend preserva isso no
+    token, base da rastreabilidade em `AuditLog`) + os dois campos que o
+    token novo realmente altera: `role: 'ADMIN'` (forçado pelo backend) e
+    `companyId` (que já vem pronto em `company.id` na resposta do
+    `POST /impersonate`, sem round-trip nenhum).
+  - **`store/auth.ts`**: `originalAdminToken`/`originalAdminUser`
+    guardam a sessão REAL do super admin antes de `impersonateLogin`
+    sobrescrever `token`/`user` — é daí que `exitImpersonate()` restaura
+    sem exigir novo login. `impersonatingCompanyName` funciona como a
+    própria flag "está impersonando?" (`null` = sessão normal), consumida
+    por `isImpersonating()` e por `<ImpersonateBanner>`. `logout()` também
+    passou a limpar os três campos novos — sem isso, um "Sair" comum no
+    meio de uma sessão de suporte deixaria `originalAdminToken` órfão no
+    localStorage com `token: null`, um estado inconsistente (achado
+    durante a implementação, não pedido explicitamente, mas decorrência
+    direta do novo estado introduzido).
+  - **Dexie deliberadamente intocado**: `saleQueue`/`variants` já são
+    filtrados por `companyId` em toda leitura (`lib/sync.ts`,
+    `lib/products.ts` — isolamento multi-tenant da Onda 2026-07-19), então
+    o cache do tenant do super admin fica simplesmente inerte durante o
+    impersonate, e continua íntegro quando ele volta — purgar (como
+    `logout()` faz) arriscaria apagar uma venda offline pendente do
+    próprio super admin, se ele tiver alguma.
+  - **`<ImpersonateBanner>`** (`components/ImpersonateBanner.tsx`, novo):
+    faixa com listras diagonais âmbar/grafite (`repeating-linear-gradient`)
+    e o texto num "pill" escuro sobreposto para contraste; só renderiza
+    quando `impersonatingCompanyName !== null`. Botão "Encerrar Suporte"
+    chama `exitImpersonate()` e força `window.location.href =
+    '/admin/contratos'`.
+  - **Encaixe no `Layout.tsx` sem sobrepor o header**: o header já é
+    `sticky top-0`; dois elementos irmãos ambos `sticky top-0` não
+    empilham, **se sobrepõem**. Resolvido envolvendo banner + header num
+    único `<div className="sticky top-0 z-30">` (o header perdeu a própria
+    stickiness, herdada do wrapper) — funciona para qualquer altura de
+    faixa, inclusive se ela quebrar em duas linhas no mobile, sem
+    matemática de offset em pixels. **Efeito colateral conhecido e aceito
+    conscientemente**: a sidebar (`sticky top-16`, assume header de 4rem)
+    fica com o offset levemente curto quando a faixa está visível — só um
+    pequeno gap cosmético, nunca sobreposição/conteúdo escondido, e só
+    durante um modo raro e temporário; não corrigido com um valor fixo em
+    rem porque destoaria ainda mais se a faixa quebrasse linha.
+  - **Botão "Acessar Loja"** (`AdminContractsPage.tsx`): aparece só em
+    empresas `status === 'ACTIVE'` que não sejam a do próprio super admin
+    (mesmo raciocínio já aplicado ao botão "Bloquear"). `window.confirm`
+    antes de disparar, coerente com o resto da tela e justificado pelo
+    peso da ação (acesso total a dado real de cliente, com rastro
+    obrigatório em `AuditLog`). No sucesso, chama `impersonateLogin` e
+    força `window.location.href = '/dashboard'` — reload completo, não
+    `navigate()`: remonta o React Query do zero, eliminando o risco de uma
+    tela ainda exibir cache da empresa do super admin por uma fração de
+    segundo após a troca de tenant.
+  - **Validação**: `npm run typecheck` + `npm run build` (shared+api+web)
+    → **0 erros**. Não testado ao vivo via curl nesta onda — a rota
+    `POST /api/admin/impersonate` e o `AuditLog` já foram exaustivamente
+    validados em produção em ondas anteriores (Onda 2026-07-23c); o que
+    mudou aqui é só a camada de frontend consumindo uma rota já
+    comprovada, e a troca de token no Zustand não tem como ser exercitada
+    de forma significativa fora do navegador — recomendado teste manual no
+    browser antes do merge.
+
 ---
 
 ## 12. Pendências, bloqueios e dívidas técnicas
@@ -3168,12 +3256,12 @@ mesclada na `main`.
     produção**~~ **RESOLVIDO (2026-07-23)**: migração rodada e commitada;
     `SUPER_ADMIN_EMAIL` configurada no Railway; `POST /api/admin/
     impersonate` testado com sucesso em produção via Postman (ver Onda
-    2026-07-23c em §11). **Ainda pendente, não bloqueante**: frontend
-    continua sem NENHUMA tela/botão para chamar essa rota, nem a faixa
-    amarela de aviso "Você está acessando como suporte" — é a "Missão 2"
-    do próximo passo (ver §14); o payload (`isImpersonating`/
-    `originalUserId`) já existe no JWT, pronto para o frontend consumir
-    quando essa tela for construída.
+    2026-07-23c em §11). ~~**Frontend do impersonate**~~ **RESOLVIDO
+    (2026-07-28)**: botão "Acessar Loja" + faixa de aviso "MODO SUPORTE" +
+    estratégia de troca de token no Zustand implementados — ver §5 (bullet
+    Back-Office) e Onda 2026-07-28 em §11 para o detalhamento completo.
+    Commitado e enviado ao GitHub — branch `feature/admin-contracts-panel`
+    pronta para abertura de PR.
 
 ---
 
@@ -3278,20 +3366,19 @@ iniciada** — deliberadamente adiada pelo Caio (2026-07-28): "por questões
 estritas de segurança e processo", o Back-Office precisa existir primeiro,
 para não abrir auto-cadastro público sem ter como triar/aprovar quem entra.
 
-**Missão 2 — Interface do Impersonate (Admin)**: botão "Acessar Loja" no
-painel do Super Admin (dispara `POST /api/admin/impersonate` com o UUID da
-empresa) + uma faixa de aviso persistente (topo do ERP) quando
-`isImpersonating: true` estiver no JWT decodificado, para o operador nunca
-confundir a sessão de suporte com a própria conta. Sem bloqueio de
-backend — a API e o payload já existem (ver §5, bullet Impersonate).
-**Ainda não iniciada** — explicitamente adiada de novo em 2026-07-28
-("Não mexa com a rota de 'Impersonate' ainda... faremos isso em uma etapa
-separada para garantir a segurança da faixa de aviso").
+✅ **Missão 2 — Interface do Impersonate (Admin)** — **CONCLUÍDA
+(2026-07-28)**: botão "Acessar Loja" no painel do Super Admin (dispara
+`POST /api/admin/impersonate` com o UUID da empresa) + `<ImpersonateBanner>`
+persistente (topo do ERP, faixa "MODO SUPORTE") quando a sessão ativa tem
+`isImpersonating: true` — ver §5 (bullet Back-Office) e Onda 2026-07-28b em
+§11 para o detalhamento completo (estratégia de troca de token no Zustand,
+motivo de não reaproveitar `GET /auth/me` nesse fluxo, e por que o reload é
+completo em vez de `navigate`).
 ⚠️ **Não confundir com a "Missão 2" de §14.1e** (nomenclatura reaproveitada
 pelo Caio para duas coisas diferentes em relatos separados): esta aqui é a
-**interface de impersonate no frontend** (ainda não iniciada); a outra é o
-**painel administrativo de aprovação de contratos no backend** (já
-implementado por Helom, ver §14.1e) — são frentes distintas.
+**interface de impersonate no frontend**; a outra é o **painel
+administrativo de aprovação de contratos no backend** (implementado por
+Helom, ver §14.1e) — são frentes distintas, ambas concluídas agora.
 
 ✅ **Terceira peça, construída antes das duas acima (2026-07-28) — Painel
 do Super Admin (Gestão de Contratos), frontend**: fundação do Back-Office
@@ -3301,9 +3388,9 @@ infraestrutura de gestão pronta antes de abrirmos a porta para novos
 cadastros". Cobre roteamento protegido (`<SuperAdminRoute>`, sinal
 `isSuperAdmin` em `/auth/me`) + `AdminContractsPage.tsx` (listar/aprovar/
 rejeitar/bloquear/reativar `Company`) — ver §5 (bullet Back-Office) e Onda
-2026-07-28 em §11 para o detalhamento completo. **Implementada e testada
-ao vivo, aguardando aprovação do Comandante para commit/push** (mesmo
-protocolo da Onda 2026-07-27).
+2026-07-28 em §11 para o detalhamento completo. **Implementada, testada ao
+vivo e commitada** (`ae6b65c`, aprovada pelo Comandante — mesmo protocolo
+da Onda 2026-07-27).
 
 ### 14.1e Onboarding de Lojas — backend reconstruído e reconciliado
 (branch `feature/tenant-onboarding`, ver §11 Onda 2026-07-27)

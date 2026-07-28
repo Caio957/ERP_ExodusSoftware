@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { CompanyStatus } from '@exodus/shared';
+import type { CompanyStatus, ImpersonateResponse } from '@exodus/shared';
 import {
   ShieldCheck,
   ShieldAlert,
@@ -12,6 +12,7 @@ import {
   Ban,
   List,
   RotateCcw,
+  LogIn,
   Mail,
   type LucideIcon,
 } from 'lucide-react';
@@ -60,11 +61,12 @@ function fmtDate(iso: string) {
  * `user.isSuperAdmin` no store. A trava de verdade é sempre o backend
  * (`assertSuperAdmin`, routes/admin.ts) — esta tela só lista/aprova.
  *
- * Deliberadamente NÃO mexe em impersonate ("Acessar Loja") — fica para uma
- * etapa separada (faixa de aviso de sessão de suporte).
+ * "Acessar Loja" (impersonate) dispara `POST /api/admin/impersonate` e
+ * delega a troca de sessão para `impersonateLogin` (store/auth.ts) — ver lá
+ * o motivo de não reaproveitar `GET /auth/me` nesse fluxo.
  */
 export function AdminContractsPage() {
-  const { user } = useAuth();
+  const { user, impersonateLogin } = useAuth();
   const qc = useQueryClient();
   const [tab, setTab] = useState<TabKey>('PENDING');
   const [search, setSearch] = useState('');
@@ -110,6 +112,32 @@ export function AdminContractsPage() {
   function confirmAndChange(company: CompanyRow, status: CompanyStatus, confirmMsg: string) {
     if (!window.confirm(confirmMsg)) return;
     changeStatus.mutate({ id: company.id, status });
+  }
+
+  // Impersonate ("Acessar Loja"): troca a sessão ativa para a empresa-alvo
+  // e força um reload completo em /dashboard — não um `navigate` do router.
+  // O reload é deliberado: remonta o React Query do zero, sem risco de uma
+  // tela ainda exibir cache da própria empresa do super admin por um
+  // instante após a troca de tenant.
+  const impersonate = useMutation({
+    mutationFn: (targetCompanyId: string) =>
+      api.post<ImpersonateResponse>('/api/admin/impersonate', { targetCompanyId }),
+    onSuccess: (res) => {
+      impersonateLogin(res.token, res.company);
+      window.location.href = '/dashboard';
+    },
+    onError: (e) =>
+      window.alert(e instanceof ApiError ? e.message : 'Falha ao acessar a loja como suporte.'),
+  });
+
+  function accessAsSupport(company: CompanyRow) {
+    if (
+      !window.confirm(
+        `Acessar a loja "${company.name}" como suporte? Essa ação fica registrada em auditoria.`,
+      )
+    )
+      return;
+    impersonate.mutate(company.id);
   }
 
   return (
@@ -251,6 +279,16 @@ export function AdminContractsPage() {
                               <XCircle className="h-3.5 w-3.5" /> Rejeitar
                             </button>
                           </>
+                        )}
+                        {c.status === 'ACTIVE' && !isOwnCompany && (
+                          <button
+                            className="inline-flex items-center gap-1 rounded-lg bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700 transition hover:bg-brand-100 disabled:opacity-50"
+                            disabled={impersonate.isPending}
+                            title="Entrar nesta loja como suporte técnico Exodus"
+                            onClick={() => accessAsSupport(c)}
+                          >
+                            <LogIn className="h-3.5 w-3.5" /> Acessar Loja
+                          </button>
                         )}
                         {c.status === 'ACTIVE' && (
                           <button
