@@ -14,6 +14,7 @@ import {
   LogOut,
   LayoutGrid,
   X,
+  ShieldCheck,
   type LucideIcon,
 } from 'lucide-react';
 import { useAuth } from '../store/auth';
@@ -93,6 +94,21 @@ export function Layout() {
           <span className="grid h-10 w-10 place-items-center rounded-full bg-brand-gradient text-sm font-bold text-white shadow-brand ring-2 ring-accent-300">
             {initials(user?.name)}
           </span>
+          {user?.isSuperAdmin && (
+            <NavLink
+              to="/admin/contratos"
+              title="Painel Administrativo Exodus"
+              className={({ isActive }) =>
+                `grid h-10 w-10 place-items-center rounded-xl transition ${
+                  isActive
+                    ? 'bg-gold-gradient text-ink-900 shadow-gold'
+                    : 'text-accent-600 hover:bg-accent-50'
+                }`
+              }
+            >
+              <ShieldCheck className="h-5 w-5" />
+            </NavLink>
+          )}
           <button
             className="grid h-10 w-10 place-items-center rounded-xl text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
             title="Sair"

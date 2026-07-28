@@ -20,6 +20,15 @@ interface AuthUser {
    * no mesmo dispositivo).
    */
   companyId: string | null;
+  /**
+   * Sinal de UX (não de autorização): true quando o e-mail do usuário bate
+   * com `SUPER_ADMIN_EMAIL` no backend (ver `GET /auth/me`). Só serve para o
+   * React decidir se mostra a entrada do Back-Office (`/admin/contratos`) —
+   * a autorização real acontece de novo no backend a cada chamada
+   * administrativa (`assertSuperAdmin`, routes/admin.ts). Lido fresco a cada
+   * login (mesmo raciocínio de `allowedPages`/`companyId`), não vem do JWT.
+   */
+  isSuperAdmin: boolean;
 }
 
 /** Resultado do logout — pode ser recusado se houver vendas locais pendentes. */
@@ -42,6 +51,7 @@ interface AuthState {
   login: (input: LoginInput) => Promise<LoginResult>;
   logout: () => Promise<LogoutResult>;
   isAdmin: () => boolean;
+  isSuperAdmin: () => boolean;
   canAccess: (pageKey: string) => boolean;
 }
 
@@ -66,7 +76,12 @@ export const useAuth = create<AuthState>()(
         const me = await api.get<AuthUser>('/api/auth/me');
         set({
           token: data.token,
-          user: { ...data.user, allowedPages: me.allowedPages ?? null, companyId: me.companyId },
+          user: {
+            ...data.user,
+            allowedPages: me.allowedPages ?? null,
+            companyId: me.companyId,
+            isSuperAdmin: me.isSuperAdmin ?? false,
+          },
         });
         return { ok: true };
       },
@@ -102,6 +117,7 @@ export const useAuth = create<AuthState>()(
         return { ok: true };
       },
       isAdmin: () => get().user?.role === 'ADMIN',
+      isSuperAdmin: () => get().user?.isSuperAdmin === true,
       canAccess: (pageKey: string) => {
         const user = get().user;
         if (!user) return false;

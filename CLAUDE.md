@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-07-27
+- **Última atualização:** 2026-07-28
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -86,21 +86,19 @@
   de cada frente, e Onda 2026-07-23c para o deploy em produção e a
   execução do backfill de criptografia contra o banco real).
   **`main` e `origin/main` estão em sincronia em `6d68e3c`.**
-  🔄 **`feature/tenant-onboarding` (Frente 1 — Onboarding de Novas Lojas)
-  reconstruída do zero e em andamento** — a branch local antiga apontada
-  como órfã (commit `1e0b103`) não existe mais (`git show 1e0b103` falha:
-  `Not a valid object name`); o Helom recomeçou a branch a partir da `main`
-  já pós-merge da LGPD (`c6c301e`), então **não tem** o problema de
-  desatualização que a nota anterior temia. Estado real, verificado nesta
-  sessão (2026-07-27): **Missão 1 (onboarding público + guarda de login por
-  status) commitada** (`a28220b`) — ver Onda 2026-07-27 em §11 para o
-  detalhamento completo e a reconciliação ponto a ponto com a arquitetura
-  de Segurança/LGPD (criptografia, `AuditLog`, desambiguação de login).
-  **Missão 2 (painel administrativo de aprovação de contratos)
-  implementada mas ainda não commitada** neste momento (`routes/admin.ts` +
-  `packages/shared/src/schemas/admin.ts` com alterações pendentes de
-  commit) — ver a mesma Onda. Ainda **não mesclada na `main`** nem enviada
-  ao GitHub.
+  ✅ **`feature/tenant-onboarding` mesclada na `main` via PR #25**
+  (`3d2d2a5`, 2026-07-27) — Frente 1 (Onboarding de Novas Lojas) completa:
+  onboarding público + guarda de login por status (`a28220b`) e o painel
+  administrativo de aprovação de contratos — backend (`routes/admin.ts` +
+  `packages/shared/src/schemas/admin.ts`, commit `b056a42`). Ver Onda
+  2026-07-27 em §11 para a reconciliação ponto a ponto com a arquitetura de
+  Segurança/LGPD (criptografia, `AuditLog`, desambiguação de login).
+  **`main` e `origin/main` estão em sincronia em `3d2d2a5`.**
+  ✅ **`feature/admin-contracts-panel` (frontend do Back-Office — Painel de
+  Gestão de Contratos)** — sinal `isSuperAdmin` em `/auth/me`, rota
+  protegida `/admin/contratos` (`<SuperAdminRoute>`) e `AdminContractsPage.tsx`
+  (Padrão Ouro), ver Onda 2026-07-28 em §11. Enviada para revisão do
+  Comandante antes do commit/push (instrução em aberto).
   ⚠️ **Padrão observado na rodada de correções de impressão (PRs #14→#16)**: cada uma das 3 PRs
   seguidas (#14→#16) tentou resolver o mesmo sintoma relatado pelo Comandante (página em
   branco/layout quebrado ao imprimir no Android) com uma causa raiz diferente — cada
@@ -905,6 +903,34 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   logo, tabela de itens e dados da empresa. Impressão via `window.print()` com
   `@page` e `print-color-adjust: exact` injetados dinamicamente.
 - ✅ **PWA**: manifest + Service Worker (Workbox) com cache de app shell e API.
+- ✅ **Back-Office da Exodus — Painel de Gestão de Contratos** (Plano Mestre
+  V2.0, Frente 1, frontend — ver Onda 2026-07-28 em §11): rota protegida
+  `/admin/contratos` (`AdminContractsPage.tsx`), acessível **apenas** a quem
+  tem `user.isSuperAdmin === true` no store Zustand — sinal novo, lido
+  fresco de `GET /auth/me` a cada login (mesmo raciocínio de
+  `allowedPages`/`companyId`: nunca no JWT, sempre recalculado no backend
+  comparando o e-mail do usuário com `SUPER_ADMIN_EMAIL`). Eixo de
+  autorização **separado** do RBAC por papel (`ADMIN`/`CASHIER` de tenant) —
+  um `ADMIN` comum de uma loja cliente é bloqueado normalmente.
+  `<SuperAdminRoute>` (`components/SuperAdminRoute.tsx`) é a trava de UX no
+  frontend (redireciona para `/pdv` se `isSuperAdmin` for `false`); a
+  autorização real continua sendo `assertSuperAdmin` no backend
+  (`routes/admin.ts`), reavaliada a cada chamada administrativa — a rota
+  frontend nunca é, sozinha, o limite de segurança. Página em Padrão Ouro:
+  cabeçalho com faixa de aviso de área restrita, abas por status
+  (`PENDING`/`ACTIVE`/`REJECTED`/`BLOCKED`/Todas), busca client-side
+  (nome/CNPJ/administrador) sobre a lista já filtrada por aba, e botões de
+  ação por linha (Aprovar/Rejeitar/Bloquear/Reativar) que chamam `PATCH
+  /api/admin/companies/:id/status` (`useMutation`) — salvaguarda
+  anti-autobloqueio do backend replicada na UI (botão "Bloquear" desabilitado
+  na própria empresa do super admin). Entrada de acesso discreta: ícone
+  `ShieldCheck` no header do `Layout.tsx`, visível só quando
+  `user.isSuperAdmin` — **não** entra na lista `navItems`/sidebar/bottom-nav
+  (esses são filtrados por `canAccess(pageKey)`, um conceito de RBAC de
+  tenant que não se aplica aqui). Novo método `api.patch` em `lib/api.ts`
+  (faltava — só existiam `get`/`post`/`put`/`del`). Deliberadamente **não**
+  mexe na rota/UI de impersonate ("Acessar Loja") — fica para uma etapa
+  separada (ver §14.1d).
 
 ---
 
@@ -2948,6 +2974,107 @@ mesclada na `main`.
   `npm run typecheck` (shared+api+web) → **0 erros** (nenhuma mudança de
   código nesta onda, só a migração local e o CLAUDE.md).
 
+- ✅ **Onda 2026-07-28 — Frontend do Back-Office: Painel de Gestão de
+  Contratos (Plano Mestre V2.0, Frente 1)** (2026-07-28): branch
+  `feature/admin-contracts-panel` (criada a partir da `main` já pós-merge da
+  PR #25, `3d2d2a5`) — **commit ainda não criado nesta onda, aguardando
+  aprovação do Comandante** (mesmo protocolo da Onda 2026-07-27: implementar
+  + validar + reportar antes de commitar). Missão explícita do Caio: por
+  razão de processo/segurança, começar o frontend do pacote Multi-tenant/
+  LGPD pelo **Back-Office** (gestão de contratos), não pelo onboarding
+  público — a infraestrutura de aprovação precisa existir antes de abrir a
+  porta de auto-cadastro.
+  - **Sinal `isSuperAdmin` (backend, `GET /auth/me`)**: gap identificado
+    antes de qualquer código de frontend — não existia NENHUM sinal, nem no
+    JWT nem em `/me`, para o React saber se o usuário logado é o super
+    admin (`SUPER_ADMIN_EMAIL`). Resolvido replicando o padrão já usado
+    para `allowedPages`/`companyId`: `/me` lê fresco do banco a cada
+    chamada e calcula `isSuperAdmin = user.email === env.SUPER_ADMIN_EMAIL`
+    (nunca grava no JWT — evitaria refletir uma troca de
+    `SUPER_ADMIN_EMAIL` só depois de até 12h; nunca expõe o valor da env
+    var em si, só o resultado do comparativo). **Puramente um sinal de
+    UX** — a autorização de verdade continua 100% no backend
+    (`assertSuperAdmin`, `routes/admin.ts`), reavaliada a cada chamada
+    administrativa real; o frontend nunca é, sozinho, o limite de
+    segurança.
+  - **`<SuperAdminRoute>`** (`components/SuperAdminRoute.tsx`, novo):
+    componente próprio, não uma variante de `ProtectedRoute roles={[...]}`
+    — `isSuperAdmin` é um eixo ortogonal ao RBAC por papel (`ADMIN`/
+    `CASHIER` são conceitos de dentro do tenant; super admin é "funcionário
+    da Exodus dona do SaaS"). Redireciona para `/login` sem sessão, para
+    `/pdv` se `user.isSuperAdmin` for `false` — inclusive para um `ADMIN`
+    comum de loja cliente. Registrada em `App.tsx` aninhada dentro de
+    `ProtectedRoute` + `Layout` (reaproveita o header/logout/StatusBadge
+    "de graça"; a rota `/admin/contratos` não entra em `navItems` do
+    `Layout.tsx`, então fica naturalmente ausente da sidebar/bottom-nav/
+    drawer sem precisar de nenhum tratamento especial nesses componentes).
+  - **`AdminContractsPage.tsx`** (novo, Padrão Ouro): cabeçalho com
+    `icon-tile-gold` + faixa de aviso "área restrita" (`ShieldAlert`);
+    abas por status (`PENDING`/`ACTIVE`/`REJECTED`/`BLOCKED`/Todas, mesmo
+    padrão `btn-primary`/`btn-ghost` de Financeiro); busca client-side
+    (nome/CNPJ-CPF/nome ou e-mail do administrador) sobre a lista já
+    filtrada por aba — mesmo espírito da "busca onisciente" de Cadastros,
+    sem round-trip extra por tecla; tabela com empresa, administrador(es),
+    data de cadastro, badge de status e ações por linha. Ações condicionadas
+    ao status atual (`PENDING` → Aprovar/Rejeitar; `ACTIVE` → Bloquear;
+    `REJECTED`/`BLOCKED` → Reativar), cada uma com `window.confirm` antes de
+    disparar `PATCH /api/admin/companies/:id/status` (`useMutation` +
+    `qc.invalidateQueries`); toast de confirmação reaproveitando o mesmo
+    padrão visual do PDV (`fixed bottom-24 ... animate-slide-up`). Erros de
+    mutation via `window.alert` (mesmo padrão de `FinancialPage.tsx`/
+    `SettingsPage.tsx` para ações de lista); erro de carregamento da lista
+    via banner inline com botão "Tentar novamente". **Salvaguarda
+    anti-autobloqueio replicada na UI**: botão "Bloquear" desabilitado
+    (com `title` explicativo) quando a linha é a própria empresa do super
+    admin logado (`company.id === user.companyId`) — o backend já barra
+    isso com 422, mas evita um clique fadado a falhar.
+  - **`api.patch`** (`lib/api.ts`, novo): faltava — só existiam `get`/
+    `post`/`put`/`del`; a rota de aprovação é `PATCH`. Adicionado seguindo
+    exatamente o mesmo formato dos demais métodos do objeto `api`.
+  - **Entrada de acesso no Layout**: ícone `ShieldCheck` discreto no header
+    (`Layout.tsx`), ao lado do avatar/botão de logout, renderizado só
+    quando `user?.isSuperAdmin` — não fazia parte do pedido literal da
+    missão ("roteamento e proteção" + "tela"), mas sem algum ponto de
+    entrada real a "fundação da área restrita" ficaria inacessível exceto
+    digitando a URL de cabeça; decisão de escopo mínimo, não uma feature à
+    parte.
+  - **Testado ao vivo, ponta a ponta, contra a API local** (não só
+    typecheck/build): reaproveitada a mesma técnica seria de teste de
+    credencial real já usada na Onda 2026-07-27 — hash de senha do usuário
+    `SUPER_ADMIN_EMAIL` (`exodus.developer@exodus.com`) lido e guardado
+    ANTES de qualquer alteração, substituído por senha de teste conhecida,
+    e **restaurado ao valor exato original** ao final (confirmado por
+    comparação de string). Confirmado via curl: `GET /auth/me` como o
+    super admin → `isSuperAdmin: true`; como `admin@exodus.local` (`ADMIN`
+    comum de tenant, mesmo papel `ADMIN`) → `isSuperAdmin: false` **e**
+    `GET /api/admin/companies` → 403 (prova de que os dois eixos de
+    autorização — `role` e `isSuperAdmin` — são independentes, um `ADMIN`
+    de loja não vaza para o painel só por ter o papel certo). Duas
+    empresas de teste (`PENDING`) criadas direto no banco, com um
+    ADMIN cada (para popular a coluna "Administrador(es)"); todo o ciclo
+    de transições exercitado via `PATCH .../status`: Aprovar
+    (PENDING→ACTIVE), Rejeitar (PENDING→REJECTED), Bloquear
+    (ACTIVE→BLOCKED, numa empresa de terceiro), Reativar
+    (REJECTED→ACTIVE) — todas as 4 confirmadas com o `status` de retorno
+    batendo; salvaguarda anti-autobloqueio testada tentando `BLOCKED` na
+    própria empresa do super admin ("Inquilino Zero") → 422
+    `BUSINESS_RULE`, exatamente como o botão desabilitado da UI previne.
+    Dados de teste (2 `Company`, 2 `User`, `AuditLog` correlato) removidos
+    ao final via script descartável (apagado depois); `passwordHash`
+    restaurado, confirmado idêntico ao original por comparação de string.
+  - **Gargalo real identificado na listagem, não corrigido nesta onda
+    (fora do escopo pedido — "concentre-se estritamente na proteção da
+    rota e na listagem/aprovação")**: `GET /api/admin/companies` não tem
+    paginação (`skip`/`take`) nem busca no servidor — traz **todas** as
+    empresas do filtro de status de uma vez, e a busca por nome/CNPJ/
+    administrador implementada nesta onda é inteira client-side, sobre
+    esse retorno completo. Para o volume atual (poucos tenants) é
+    imperceptível; se a base de clientes crescer bastante, essa rota
+    precisará do mesmo tratamento de paginação/servidor que outras listas
+    grandes do sistema já têm (Vendas, Compras, Financeiro). Registrado
+    como pendência de maturidade, não como bug.
+  `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros**.
+
 ---
 
 ## 12. Pendências, bloqueios e dívidas técnicas
@@ -3020,20 +3147,17 @@ mesclada na `main`.
     commit `230e74d` (constraints tenant-scoped + login com desambiguação,
     Onda 2026-07-19 em §11) — branch inteira mesclada na `main` há tempo,
     confirmado via `git log`.
-19. **[ATIVO — status atualizado em 2026-07-27] Rota de provisionamento de
-    tenant implementada, mas ainda não está EM PRODUÇÃO/`main`**:
-    `POST /api/onboarding` existe de verdade na branch `feature/tenant-
-    onboarding` (reconstruída do zero por cima da `main` pós-LGPD, commit
-    `a28220b` — a branch órfã antiga com o commit `1e0b103` não existe
-    mais, então não há mais nada "perdido" para resgatar). Reconciliada e
-    validada nesta sessão (ver Onda 2026-07-27 em §11): guarda de login por
-    status (`COMPANY_NOT_ACTIVE`), painel administrativo de aprovação
-    (Missão 2) e compatibilidade com `withTenant`/`withEncryption`/
-    `AuditLog` — tudo testado ao vivo, sem conflito real encontrado. Falta
-    só **commitar a Missão 2** (`routes/admin.ts`/`schemas/admin.ts` estão
-    com alterações no working tree) e **abrir o PR/mesclar na `main`** —
-    aí sim a arquitetura multi-tenant ganha uma porta de entrada real em
-    produção. Pré-requisito direto da "Missão 1" do frontend (§14).
+19. ~~**Rota de provisionamento de tenant implementada, mas ainda não está
+    EM PRODUÇÃO/`main`**~~ **RESOLVIDO (2026-07-27)**: `feature/tenant-
+    onboarding` mesclada na `main` via **PR #25** (`3d2d2a5`) —
+    `POST /api/onboarding`, a guarda de login por status
+    (`COMPANY_NOT_ACTIVE`) e o painel administrativo de aprovação
+    (`routes/admin.ts`, commit `b056a42`) estão todos em `main`. Reconciliação
+    completa com `withTenant`/`withEncryption`/`AuditLog` documentada na
+    Onda 2026-07-27 em §11. A arquitetura multi-tenant já tem porta de
+    entrada real disponível — falta só o frontend consumir (ver §14.1d: o
+    Back-Office/Painel de Contratos já foi construído em 2026-07-28, a
+    tela pública de onboarding continua deliberadamente adiada).
 20. ~~**Criptografia LGPD (Frente 2): configurar `ENCRYPTION_KEY` no
     Railway + rodar o backfill em produção**~~ **RESOLVIDO (2026-07-23)**:
     ambas as ações confirmadas — `ENCRYPTION_KEY` configurada no Railway,
@@ -3140,16 +3264,19 @@ Nenhuma pendência de backend restante nestas três frentes — só frontend
 2026-07-23)
 
 Com o backend "selado", o próximo foco combinado pelos sócios é 100%
-frontend (React/Vite). Duas missões, na ordem que Caio propôs:
+frontend (React/Vite). Duas missões foram propostas por Caio nesta ordem —
+**mas o Caio decidiu, na prática, inverter a sequência por questão de
+processo/segurança** (ver terceira entrada abaixo): construir primeiro o
+Back-Office (gestão de contratos) antes de abrir a porta pública de
+onboarding.
 
 **Missão 1 — Tela de Onboarding (pública)**: fluxo visual para um novo
 lojista se cadastrar sozinho, consumindo a rota de criação de tenant/
-company. 🔄 **Status atualizado (2026-07-27)**: a rota
-(`POST /api/onboarding`) **já existe e foi validada** na branch
-`feature/tenant-onboarding` (ver §12.19/§14.1e) — deixou de ser um bloqueio
-de "rota nem existe" para virar um bloqueio de "aguardando commit da
-Missão 2 dessa branch + PR/merge". Ainda não dá pra começar a tela
-assumindo a rota em produção — só depois do merge.
+company. A rota (`POST /api/onboarding`) **está mesclada na `main` via PR
+#25** (`3d2d2a5`, ver §14.1e) — deixou de ser bloqueio técnico. **Ainda não
+iniciada** — deliberadamente adiada pelo Caio (2026-07-28): "por questões
+estritas de segurança e processo", o Back-Office precisa existir primeiro,
+para não abrir auto-cadastro público sem ter como triar/aprovar quem entra.
 
 **Missão 2 — Interface do Impersonate (Admin)**: botão "Acessar Loja" no
 painel do Super Admin (dispara `POST /api/admin/impersonate` com o UUID da
@@ -3157,11 +3284,26 @@ empresa) + uma faixa de aviso persistente (topo do ERP) quando
 `isImpersonating: true` estiver no JWT decodificado, para o operador nunca
 confundir a sessão de suporte com a própria conta. Sem bloqueio de
 backend — a API e o payload já existem (ver §5, bullet Impersonate).
+**Ainda não iniciada** — explicitamente adiada de novo em 2026-07-28
+("Não mexa com a rota de 'Impersonate' ainda... faremos isso em uma etapa
+separada para garantir a segurança da faixa de aviso").
 ⚠️ **Não confundir com a "Missão 2" de §14.1e** (nomenclatura reaproveitada
 pelo Caio para duas coisas diferentes em relatos separados): esta aqui é a
 **interface de impersonate no frontend** (ainda não iniciada); a outra é o
 **painel administrativo de aprovação de contratos no backend** (já
 implementado por Helom, ver §14.1e) — são frentes distintas.
+
+✅ **Terceira peça, construída antes das duas acima (2026-07-28) — Painel
+do Super Admin (Gestão de Contratos), frontend**: fundação do Back-Office
+pedida explicitamente pelo Caio como pré-requisito de segurança/processo
+antes de qualquer uma das duas missões originais — "Precisamos da
+infraestrutura de gestão pronta antes de abrirmos a porta para novos
+cadastros". Cobre roteamento protegido (`<SuperAdminRoute>`, sinal
+`isSuperAdmin` em `/auth/me`) + `AdminContractsPage.tsx` (listar/aprovar/
+rejeitar/bloquear/reativar `Company`) — ver §5 (bullet Back-Office) e Onda
+2026-07-28 em §11 para o detalhamento completo. **Implementada e testada
+ao vivo, aguardando aprovação do Comandante para commit/push** (mesmo
+protocolo da Onda 2026-07-27).
 
 ### 14.1e Onboarding de Lojas — backend reconstruído e reconciliado
 (branch `feature/tenant-onboarding`, ver §11 Onda 2026-07-27)
@@ -3179,13 +3321,13 @@ frente, distinta das Missões 1/2 do frontend em §14.1d):
   `20260725014349_add_company_status` com backfill `ACTIVE` para toda
   empresa pré-existente); guarda em `/auth/login` bloqueia contas cuja
   empresa não está `ACTIVE` (`code: 'COMPANY_NOT_ACTIVE'`).
-- 🔄 **"Missão 2" (backend) — Painel de aprovação de contratos**:
-  implementada, **ainda não commitada** neste momento (`routes/admin.ts` +
-  `packages/shared/src/schemas/admin.ts` no working tree) — `GET
-  /api/admin/companies` (lista tenants por status, com os ADMINs de cada
-  um) e `PATCH /api/admin/companies/:id/status` (aprova/rejeita/suspende/
-  reativa, grava `AuditLog` antes de aplicar, salvaguarda anti-
-  autobloqueio). Ambas atrás do mesmo `assertSuperAdmin` do impersonate.
+- ✅ **"Missão 2" (backend) — Painel de aprovação de contratos**:
+  commitada (`b056a42`, 2026-07-27) — `routes/admin.ts` +
+  `packages/shared/src/schemas/admin.ts`. `GET /api/admin/companies`
+  (lista tenants por status, com os ADMINs de cada um) e `PATCH
+  /api/admin/companies/:id/status` (aprova/rejeita/suspende/reativa, grava
+  `AuditLog` antes de aplicar, salvaguarda anti-autobloqueio). Ambas atrás
+  do mesmo `assertSuperAdmin` do impersonate.
 
 **Reconciliação com a arquitetura de Segurança/LGPD (Frentes 2-4),
 verificada e testada ao vivo nesta sessão (2026-07-27)** — ver Onda
@@ -3195,8 +3337,12 @@ corretamente com a desambiguação de login multi-tenant, o `AuditLog` já
 usa o schema certo, e nada nas rotas novas toca `Person`/`withEncryption`.
 `npm run typecheck` (shared+api+web) → **0 erros**.
 
-**Falta para fechar esta frente**: commitar a "Missão 2" (backend) e
-abrir o PR para `main` — ver §12.19.
+✅ **Frente fechada (2026-07-27)**: branch `feature/tenant-onboarding`
+mesclada na `main` via **PR #25** (`3d2d2a5`) — Missões 1 e 2 (backend)
+ambas em `main`. Ver §12.19 (RESOLVIDO) e a nova entrada no topo do
+documento. O que resta desta frente é 100% frontend — ver §14.1d (Missões
+1/2 do frontend, ainda pendentes; terceira peça — o Back-Office desta
+seção — já entregue em 2026-07-28).
 
 ### 14.2 Maturidade/robustez (backlog de funcionalidades dos sócios: 100% concluído)
 
