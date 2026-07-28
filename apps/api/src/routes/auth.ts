@@ -4,7 +4,7 @@ import { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { createUserSchema, loginSchema, type JwtPayload, type LoginNeedsCompany } from '@exodus/shared';
 import { prisma } from '../lib/prisma.js';
 import { hashPassword, verifyPassword } from '../lib/password.js';
-import { AppError, NotFoundError, UnauthorizedError } from '../lib/errors.js';
+import { AppError, ForbiddenError, NotFoundError, UnauthorizedError } from '../lib/errors.js';
 import { tenantDb } from '../lib/tenant.js';
 
 const idParam = z.object({ id: z.string().uuid() });
@@ -34,6 +34,10 @@ export async function authRoutes(app: FastifyInstance) {
 
     const candidates = await prisma.user.findMany({
       where: { email, ...(companyId ? { companyId } : {}) },
+      // Status da empresa: guarda de onboarding (Frente 1) — só empresas
+      // ACTIVE podem logar. `companyId` null (futuro SYSTEM_ADMIN global) não
+      // tem empresa e passa direto.
+      include: { company: { select: { status: true } } },
     });
 
     // Valida a senha contra cada candidato ANTES de decidir qualquer coisa
@@ -49,14 +53,32 @@ export async function authRoutes(app: FastifyInstance) {
       throw new UnauthorizedError('Credenciais inválidas');
     }
 
+    // Guarda de status da empresa (onboarding — Frente 1): a senha já foi
+    // validada acima, então aqui já é seguro revelar o estado da conta. Só
+    // contas cuja empresa está ACTIVE (ou sem empresa — SYSTEM_ADMIN futuro)
+    // seguem no fluxo. Empresas PENDING/REJECTED/BLOCKED são barradas com um
+    // `code` próprio (COMPANY_NOT_ACTIVE) e mensagem amigável — diferente do
+    // NO_TENANT, não dispara logout automático no frontend (login nem tem
+    // token ainda), só exibe o aviso na tela.
+    const activeMatches = matches.filter((m) => !m.company || m.company.status === 'ACTIVE');
+    if (activeMatches.length === 0) {
+      const anyPending = matches.some((m) => m.company?.status === 'PENDING');
+      throw new ForbiddenError(
+        anyPending
+          ? 'Sua empresa está aguardando aprovação da equipe Exodus.'
+          : 'O acesso desta empresa está indisponível. Fale com o suporte Exodus.',
+        'COMPANY_NOT_ACTIVE',
+      );
+    }
+
     // Mais de uma empresa com o mesmo e-mail + mesma senha — caso raro
     // (contador/franqueado com acesso a várias lojas usando a mesma senha
     // em ambas). Só é possível chegar aqui sem `companyId` no body (com ele,
     // `candidates` já vem restrito a no máximo 1 pela unicidade composta).
     // Sem token ainda: o frontend mostra um seletor e reenvia o login com
     // `companyId` preenchido.
-    if (matches.length > 1) {
-      const companyIds = matches
+    if (activeMatches.length > 1) {
+      const companyIds = activeMatches
         .map((m) => m.companyId)
         .filter((id): id is string => id != null);
       const companies = await prisma.company.findMany({
@@ -66,7 +88,7 @@ export async function authRoutes(app: FastifyInstance) {
       return { needsCompanySelection: true, companies } satisfies LoginNeedsCompany;
     }
 
-    const user = matches[0]!;
+    const user = activeMatches[0]!;
     const payload: JwtPayload = {
       sub: user.id,
       email: user.email,

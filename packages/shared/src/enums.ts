@@ -10,6 +10,15 @@ import { z } from 'zod';
 export const UserRole = z.enum(['ADMIN', 'CASHIER']);
 export type UserRole = z.infer<typeof UserRole>;
 
+/**
+ * Ciclo de vida de um tenant (onboarding de lojistas, Plano Mestre V2.0 —
+ * Frente 1). PENDING = auto-cadastro público aguardando aprovação da equipe
+ * Exodus · ACTIVE = liberado para uso · REJECTED = recusado na triagem ·
+ * BLOCKED = suspenso depois de ativo (inadimplência etc.).
+ */
+export const CompanyStatus = z.enum(['PENDING', 'ACTIVE', 'REJECTED', 'BLOCKED']);
+export type CompanyStatus = z.infer<typeof CompanyStatus>;
+
 export const PersonType = z.enum(['CLIENT', 'SUPPLIER']);
 export type PersonType = z.infer<typeof PersonType>;
 
