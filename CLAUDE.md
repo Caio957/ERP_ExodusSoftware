@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-07-23
+- **Última atualização:** 2026-07-27
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -86,18 +86,21 @@
   de cada frente, e Onda 2026-07-23c para o deploy em produção e a
   execução do backfill de criptografia contra o banco real).
   **`main` e `origin/main` estão em sincronia em `6d68e3c`.**
-  ⚠️ **`feature/tenant-onboarding` (Frente 1 — Onboarding de Novas Lojas)
-  NÃO foi mesclada e sequer foi enviada ao GitHub** — existe só como branch
-  LOCAL numa máquina de trabalho (commit `1e0b103`, `POST /api/onboarding`).
-  A rota **não existe em produção nem na `main`** — confirmado checando
-  `apps/api/src/routes/index.ts` e `git branch --contains 1e0b103`
-  diretamente nesta sessão (2026-07-23). Isso importa porque um relato
-  recente (Caio, ver Onda 2026-07-23c) descreve o próximo passo do
-  frontend como "consumir a rota de onboarding que já existe no backend" —
-  **essa premissa está incorreta**: a rota precisa ser resgatada dessa
-  branch local, revalidada contra as mudanças de multi-tenant/criptografia
-  que entraram na `main` depois dela ter sido criada, e só então mesclada,
-  antes de qualquer tela de frontend poder consumi-la de verdade.
+  🔄 **`feature/tenant-onboarding` (Frente 1 — Onboarding de Novas Lojas)
+  reconstruída do zero e em andamento** — a branch local antiga apontada
+  como órfã (commit `1e0b103`) não existe mais (`git show 1e0b103` falha:
+  `Not a valid object name`); o Helom recomeçou a branch a partir da `main`
+  já pós-merge da LGPD (`c6c301e`), então **não tem** o problema de
+  desatualização que a nota anterior temia. Estado real, verificado nesta
+  sessão (2026-07-27): **Missão 1 (onboarding público + guarda de login por
+  status) commitada** (`a28220b`) — ver Onda 2026-07-27 em §11 para o
+  detalhamento completo e a reconciliação ponto a ponto com a arquitetura
+  de Segurança/LGPD (criptografia, `AuditLog`, desambiguação de login).
+  **Missão 2 (painel administrativo de aprovação de contratos)
+  implementada mas ainda não commitada** neste momento (`routes/admin.ts` +
+  `packages/shared/src/schemas/admin.ts` com alterações pendentes de
+  commit) — ver a mesma Onda. Ainda **não mesclada na `main`** nem enviada
+  ao GitHub.
   ⚠️ **Padrão observado na rodada de correções de impressão (PRs #14→#16)**: cada uma das 3 PRs
   seguidas (#14→#16) tentou resolver o mesmo sintoma relatado pelo Comandante (página em
   branco/layout quebrado ao imprimir no Android) com uma causa raiz diferente — cada
@@ -2870,6 +2873,81 @@ mesclada na `main`.
   `git log`/`git branch --contains` (verificação direta desta sessão) →
   merge confirmado, onboarding confirmado ausente de `main`.
 
+- ✅ **Onda 2026-07-27 — Reconciliação da Frente 1 (Onboarding) com a
+  arquitetura de Segurança/LGPD** (2026-07-27): branch `feature/tenant-
+  onboarding`, reconstruída do zero por Helom (com apoio de outro agente
+  de IA — commit `a28220b` tem `Co-Authored-By: Claude Opus 4.8`) a partir
+  da `main` já pós-merge da LGPD (`c6c301e`) — **não** a branch órfã antiga
+  (`1e0b103`, que não existe mais: `git show 1e0b103` retorna `Not a valid
+  object name`). Missão: verificar e adequar esse código à arquitetura
+  atual (criptografia, `AuditLog`, desambiguação de login), sem commitar
+  nada — só relatar. Nenhum código novo escrito nesta onda; só investigação,
+  testes ao vivo e uma migração aplicada localmente.
+  - **Achado principal — a preocupação do Caio não se confirmou**: a
+    hipótese era que a guarda de login por status (`COMPANY_NOT_ACTIVE`)
+    quebraria o seletor de desambiguação multi-tenant (`needsCompanySelection`)
+    quando o mesmo e-mail existe em uma empresa `ACTIVE` e outra `PENDING`.
+    Rastreamento manual do código (`routes/auth.ts`) já mostrava a ordem
+    certa: valida senha contra TODOS os candidatos → filtra para só os de
+    empresa `ACTIVE` (`activeMatches`) → só DEPOIS decide entre bloquear
+    (0 matches), desambiguar (>1 match) ou logar direto (exatamente 1
+    match). Confirmado ao vivo com 3 cenários reais (usuário de teste
+    `reconciliacao.teste@exodus.local`, senha compartilhada):
+    1. E-mail só na empresa `PENDING` recém-criada via `/api/onboarding` →
+       login bloqueado com 403 `COMPANY_NOT_ACTIVE` e mensagem "aguardando
+       aprovação".
+    2. Mesmo e-mail/senha TAMBÉM cadastrado numa empresa `ACTIVE`
+       ("Inquilino Zero") → login **direto**, token da empresa `ACTIVE`,
+       **sem** pedir seleção — a `PENDING` fica completamente invisível
+       nesse fluxo.
+    3. Mesmo e-mail/senha numa SEGUNDA empresa `ACTIVE` também (3 contas no
+       total: 2 `ACTIVE` + 1 `PENDING`) → `needsCompanySelection: true`
+       com a lista mostrando **só as duas `ACTIVE`** — a `PENDING` some do
+       seletor sozinha, sem nenhum tratamento especial ter sido necessário
+       no código do Helom.
+    **Nenhuma alteração de código foi necessária** para o Requisito 1 da
+    missão — a implementação original já estava correta.
+  - **Auditoria (`AuditLog`)**: `PATCH /api/admin/companies/:id/status`
+    (`routes/admin.ts`, ainda não commitado no momento desta onda) grava
+    `{ adminUserId, targetCompanyId, action: 'COMPANY_STATUS_' + status }`
+    — campos batem exatamente com o schema (`AuditLog` não tem `@relation`,
+    então qualquer string serve para `action`, sem constraint). Testado ao
+    vivo: aprovar a empresa de teste (`PENDING` → `ACTIVE`) gravou um
+    registro `COMPANY_STATUS_ACTIVE` correto, convivendo na mesma tabela
+    com o `IMPERSONATE_LOGIN` real do Caio (nenhuma colisão). Salvaguarda
+    anti-autobloqueio (`id === req.user.companyId && status !== 'ACTIVE'`)
+    testada tentando bloquear a própria empresa do super admin → 422
+    `BUSINESS_RULE`, bloqueado como esperado.
+  - **`withEncryption`/`Person`**: `grep` em `routes/onboarding.ts` e
+    `routes/admin.ts` não encontrou nenhuma chamada `.person.` — as duas
+    rotas só tocam `Company`/`User`/`AuditLog`, nenhum dos quais passa pela
+    extensão `withEncryption` (escopada só a `Person`). Nenhum conflito
+    possível, confirmado por leitura de código (não precisou de teste ao
+    vivo específico para isso).
+  - **RBAC do painel**: `assertSuperAdmin` (extraído do impersonate,
+    reaproveitado por `GET /companies` e `PATCH /companies/:id/status`)
+    testado ao vivo — `admin@exodus.local` (ADMIN comum, não é o
+    `SUPER_ADMIN_EMAIL`) → 403 em `GET /api/admin/companies`, confirmando
+    que o painel não vaza para admins de tenant comuns.
+  - **Migração aplicada localmente**: `20260725014349_add_company_status`
+    estava no repositório mas não tinha sido aplicada neste ambiente —
+    rodado `npx prisma migrate deploy` (não-interativo, só aplica
+    pendentes) + `npx prisma generate`. Confirmado que o backfill da
+    migração (`UPDATE "Company" SET status = 'ACTIVE'`) preservou as
+    empresas reais já existentes (`Inquilino Zero` e `Império dos
+    Cosméticos`) como `ACTIVE`, sem travar ninguém.
+  - **Metodologia de teste sensível**: os testes de login precisavam da
+    senha real do usuário `SUPER_ADMIN_EMAIL` (`exodus.developer@exodus.com`),
+    que não era conhecida nesta sessão. Em vez de usar uma conta
+    descartável, o hash de senha original desse usuário real foi lido e
+    guardado ANTES de qualquer alteração, substituído por uma senha de
+    teste temporária só durante os testes, e **restaurado ao valor exato
+    original** ao final (confirmado por comparação de string após a
+    restauração). Todos os usuários/empresas/`AuditLog` de teste criados
+    foram removidos ao final; nenhum resíduo.
+  `npm run typecheck` (shared+api+web) → **0 erros** (nenhuma mudança de
+  código nesta onda, só a migração local e o CLAUDE.md).
+
 ---
 
 ## 12. Pendências, bloqueios e dívidas técnicas
@@ -2942,22 +3020,20 @@ mesclada na `main`.
     commit `230e74d` (constraints tenant-scoped + login com desambiguação,
     Onda 2026-07-19 em §11) — branch inteira mesclada na `main` há tempo,
     confirmado via `git log`.
-19. **[ATIVO — status corrigido em 2026-07-23] Não existe rota de
-    provisionamento de tenant EM PRODUÇÃO/`main`**: `Company` só nasce via
-    script (`backfill-tenant.ts`, já aposentado) ou inserção direta no
-    banco. A arquitetura multi-tenant está pronta na camada de dados/API/
-    frontend, mas sem essa rota o sistema ainda opera, na prática, como
-    single-tenant (só o "Inquilino Zero" existe). ⚠️ **Detalhe que não
-    dava para saber sem checar o git**: a rota (`POST /api/onboarding`)
-    **já foi implementada** (commit `1e0b103`), mas só existe na branch
-    LOCAL `feature/tenant-onboarding`, que nunca foi enviada ao GitHub nem
-    mesclada — não é "ainda não começada", é "feita mas perdida numa
-    branch órfã". Precisa ser resgatada, revalidada contra tudo que mudou
-    na `main` desde então (multi-tenant ficou obrigatório de verdade,
-    `withEncryption` entrou no meio, RBAC de várias rotas mudou), e só
-    então mesclada. Isso é pré-requisito direto da "Missão 1" do frontend
-    (ver §14) — sem a rota em produção, não há o que a tela de onboarding
-    consuma.
+19. **[ATIVO — status atualizado em 2026-07-27] Rota de provisionamento de
+    tenant implementada, mas ainda não está EM PRODUÇÃO/`main`**:
+    `POST /api/onboarding` existe de verdade na branch `feature/tenant-
+    onboarding` (reconstruída do zero por cima da `main` pós-LGPD, commit
+    `a28220b` — a branch órfã antiga com o commit `1e0b103` não existe
+    mais, então não há mais nada "perdido" para resgatar). Reconciliada e
+    validada nesta sessão (ver Onda 2026-07-27 em §11): guarda de login por
+    status (`COMPANY_NOT_ACTIVE`), painel administrativo de aprovação
+    (Missão 2) e compatibilidade com `withTenant`/`withEncryption`/
+    `AuditLog` — tudo testado ao vivo, sem conflito real encontrado. Falta
+    só **commitar a Missão 2** (`routes/admin.ts`/`schemas/admin.ts` estão
+    com alterações no working tree) e **abrir o PR/mesclar na `main`** —
+    aí sim a arquitetura multi-tenant ganha uma porta de entrada real em
+    produção. Pré-requisito direto da "Missão 1" do frontend (§14).
 20. ~~**Criptografia LGPD (Frente 2): configurar `ENCRYPTION_KEY` no
     Railway + rodar o backfill em produção**~~ **RESOLVIDO (2026-07-23)**:
     ambas as ações confirmadas — `ENCRYPTION_KEY` configurada no Railway,
@@ -3068,10 +3144,12 @@ frontend (React/Vite). Duas missões, na ordem que Caio propôs:
 
 **Missão 1 — Tela de Onboarding (pública)**: fluxo visual para um novo
 lojista se cadastrar sozinho, consumindo a rota de criação de tenant/
-company. ⚠️ **Bloqueio real antes de começar**: a rota
-(`POST /api/onboarding`) não está em produção nem na `main` — ver §12.19.
-Resgatar/mesclar essa rota é pré-requisito, não pode ser feito em paralelo
-assumindo que ela já existe.
+company. 🔄 **Status atualizado (2026-07-27)**: a rota
+(`POST /api/onboarding`) **já existe e foi validada** na branch
+`feature/tenant-onboarding` (ver §12.19/§14.1e) — deixou de ser um bloqueio
+de "rota nem existe" para virar um bloqueio de "aguardando commit da
+Missão 2 dessa branch + PR/merge". Ainda não dá pra começar a tela
+assumindo a rota em produção — só depois do merge.
 
 **Missão 2 — Interface do Impersonate (Admin)**: botão "Acessar Loja" no
 painel do Super Admin (dispara `POST /api/admin/impersonate` com o UUID da
@@ -3079,6 +3157,46 @@ empresa) + uma faixa de aviso persistente (topo do ERP) quando
 `isImpersonating: true` estiver no JWT decodificado, para o operador nunca
 confundir a sessão de suporte com a própria conta. Sem bloqueio de
 backend — a API e o payload já existem (ver §5, bullet Impersonate).
+⚠️ **Não confundir com a "Missão 2" de §14.1e** (nomenclatura reaproveitada
+pelo Caio para duas coisas diferentes em relatos separados): esta aqui é a
+**interface de impersonate no frontend** (ainda não iniciada); a outra é o
+**painel administrativo de aprovação de contratos no backend** (já
+implementado por Helom, ver §14.1e) — são frentes distintas.
+
+### 14.1e Onboarding de Lojas — backend reconstruído e reconciliado
+(branch `feature/tenant-onboarding`, ver §11 Onda 2026-07-27)
+
+Helom construiu, numa sessão separada, o backend completo da Frente 1
+(usando outro agente de IA — commit `a28220b` tem `Co-Authored-By: Claude
+Opus 4.8`) — duas partes que Caio rotulou como **"Missão 1"** e
+**"Missão 2"** no pedido de reconciliação (nomenclatura própria desta
+frente, distinta das Missões 1/2 do frontend em §14.1d):
+
+- ✅ **"Missão 1" (backend) — Onboarding público + guarda de login por
+  status**: commitada (`a28220b`). `POST /api/onboarding` (pública) cria
+  `Company` (status `PENDING`) + primeiro `User` ADMIN numa transação;
+  `Company.status` (`PENDING`/`ACTIVE`/`REJECTED`/`BLOCKED`, migração
+  `20260725014349_add_company_status` com backfill `ACTIVE` para toda
+  empresa pré-existente); guarda em `/auth/login` bloqueia contas cuja
+  empresa não está `ACTIVE` (`code: 'COMPANY_NOT_ACTIVE'`).
+- 🔄 **"Missão 2" (backend) — Painel de aprovação de contratos**:
+  implementada, **ainda não commitada** neste momento (`routes/admin.ts` +
+  `packages/shared/src/schemas/admin.ts` no working tree) — `GET
+  /api/admin/companies` (lista tenants por status, com os ADMINs de cada
+  um) e `PATCH /api/admin/companies/:id/status` (aprova/rejeita/suspende/
+  reativa, grava `AuditLog` antes de aplicar, salvaguarda anti-
+  autobloqueio). Ambas atrás do mesmo `assertSuperAdmin` do impersonate.
+
+**Reconciliação com a arquitetura de Segurança/LGPD (Frentes 2-4),
+verificada e testada ao vivo nesta sessão (2026-07-27)** — ver Onda
+2026-07-27 em §11 para o detalhamento completo dos testes; resumo:
+nenhum conflito real encontrado, a guarda de `PENDING` já harmoniza
+corretamente com a desambiguação de login multi-tenant, o `AuditLog` já
+usa o schema certo, e nada nas rotas novas toca `Person`/`withEncryption`.
+`npm run typecheck` (shared+api+web) → **0 erros**.
+
+**Falta para fechar esta frente**: commitar a "Missão 2" (backend) e
+abrir o PR para `main` — ver §12.19.
 
 ### 14.2 Maturidade/robustez (backlog de funcionalidades dos sócios: 100% concluído)
 
