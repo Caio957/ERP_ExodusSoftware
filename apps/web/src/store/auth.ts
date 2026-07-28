@@ -20,6 +20,15 @@ interface AuthUser {
    * no mesmo dispositivo).
    */
   companyId: string | null;
+  /**
+   * Sinal de UX (não de autorização): true quando o e-mail do usuário bate
+   * com `SUPER_ADMIN_EMAIL` no backend (ver `GET /auth/me`). Só serve para o
+   * React decidir se mostra a entrada do Back-Office (`/admin/contratos`) —
+   * a autorização real acontece de novo no backend a cada chamada
+   * administrativa (`assertSuperAdmin`, routes/admin.ts). Lido fresco a cada
+   * login (mesmo raciocínio de `allowedPages`/`companyId`), não vem do JWT.
+   */
+  isSuperAdmin: boolean;
 }
 
 /** Resultado do logout — pode ser recusado se houver vendas locais pendentes. */
@@ -39,9 +48,25 @@ export type LoginResult = { ok: true } | { ok: false; companies: LoginCompanyOpt
 interface AuthState {
   user: AuthUser | null;
   token: string | null;
+  /**
+   * Presentes só durante uma sessão de impersonate (Plano Mestre V2.0,
+   * Frente 4 — "Acessar Loja" no Back-Office). Guardam a sessão REAL do
+   * super admin enquanto `token`/`user` passam a ser os da empresa-alvo —
+   * permite voltar sem exigir login de novo. `impersonatingCompanyName`
+   * também funciona como flag "está impersonando?" (null = sessão normal).
+   */
+  originalAdminToken: string | null;
+  originalAdminUser: AuthUser | null;
+  impersonatingCompanyName: string | null;
   login: (input: LoginInput) => Promise<LoginResult>;
   logout: () => Promise<LogoutResult>;
+  /** Troca a sessão ativa para a empresa-alvo, preservando a sessão real do super admin para retorno (ver `exitImpersonate`). */
+  impersonateLogin: (newToken: string, company: { id: string; name: string }) => void;
+  /** Restaura a sessão real do super admin, descartando o token "disfarçado". */
+  exitImpersonate: () => void;
   isAdmin: () => boolean;
+  isSuperAdmin: () => boolean;
+  isImpersonating: () => boolean;
   canAccess: (pageKey: string) => boolean;
 }
 
@@ -53,6 +78,9 @@ export const useAuth = create<AuthState>()(
     (set, get) => ({
       user: null,
       token: null,
+      originalAdminToken: null,
+      originalAdminUser: null,
+      impersonatingCompanyName: null,
       login: async (input) => {
         const data = await api.post<LoginResponse>('/api/auth/login', input, { auth: false });
         if ('needsCompanySelection' in data) {
@@ -66,7 +94,12 @@ export const useAuth = create<AuthState>()(
         const me = await api.get<AuthUser>('/api/auth/me');
         set({
           token: data.token,
-          user: { ...data.user, allowedPages: me.allowedPages ?? null, companyId: me.companyId },
+          user: {
+            ...data.user,
+            allowedPages: me.allowedPages ?? null,
+            companyId: me.companyId,
+            isSuperAdmin: me.isSuperAdmin ?? false,
+          },
         });
         return { ok: true };
       },
@@ -98,10 +131,58 @@ export const useAuth = create<AuthState>()(
         await db.saleQueue.clear();
         await db.variants.clear();
         tokenStore.clear();
-        set({ token: null, user: null });
+        set({
+          token: null,
+          user: null,
+          originalAdminToken: null,
+          originalAdminUser: null,
+          impersonatingCompanyName: null,
+        });
         return { ok: true };
       },
+      // Troca lateral de sessão (não passa por logout/login): guarda o
+      // token+user REAIS do super admin em originalAdminToken/originalAdminUser
+      // para o "Encerrar Suporte" poder voltar sem novo login. O `user`
+      // ativo é reconstruído a partir do usuário real (mesma identidade —
+      // sub/email/name não mudam no token de impersonate, ver
+      // routes/admin.ts) só trocando `role`/`companyId`/`allowedPages` para
+      // refletir o que o backend emitiu (role forçado para 'ADMIN' no
+      // token-alvo; allowedPages não se aplica a ADMIN). Deliberadamente NÃO
+      // chama GET /auth/me com o token novo: esse endpoint sempre lê
+      // `companyId` fresco do PRÓPRIO usuário no banco (não do JWT), então
+      // devolveria o companyId do super admin, não o da empresa-alvo — o
+      // `company` já veio pronto na resposta do /impersonate.
+      // Não mexe no Dexie de propósito: saleQueue/variants já são
+      // filtrados por companyId em toda leitura (lib/sync.ts, lib/products.ts),
+      // então o cache do tenant do super admin fica simplesmente inerte
+      // durante o impersonate, e continua íntegro quando ele voltar.
+      impersonateLogin: (newToken, company) => {
+        const { token, user } = get();
+        if (!token || !user) return;
+        tokenStore.set(newToken);
+        set({
+          token: newToken,
+          user: { ...user, role: 'ADMIN', companyId: company.id, allowedPages: null },
+          originalAdminToken: token,
+          originalAdminUser: user,
+          impersonatingCompanyName: company.name,
+        });
+      },
+      exitImpersonate: () => {
+        const { originalAdminToken, originalAdminUser } = get();
+        if (!originalAdminToken || !originalAdminUser) return;
+        tokenStore.set(originalAdminToken);
+        set({
+          token: originalAdminToken,
+          user: originalAdminUser,
+          originalAdminToken: null,
+          originalAdminUser: null,
+          impersonatingCompanyName: null,
+        });
+      },
       isAdmin: () => get().user?.role === 'ADMIN',
+      isSuperAdmin: () => get().user?.isSuperAdmin === true,
+      isImpersonating: () => get().impersonatingCompanyName !== null,
       canAccess: (pageKey: string) => {
         const user = get().user;
         if (!user) return false;

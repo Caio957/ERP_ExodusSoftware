@@ -6,6 +6,7 @@ import { prisma } from '../lib/prisma.js';
 import { hashPassword, verifyPassword } from '../lib/password.js';
 import { AppError, ForbiddenError, NotFoundError, UnauthorizedError } from '../lib/errors.js';
 import { tenantDb } from '../lib/tenant.js';
+import { env } from '../env.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 
@@ -132,13 +133,22 @@ export async function authRoutes(app: FastifyInstance) {
   // Deliberadamente NÃO usa tenantDb/withTenant: é o próprio usuário lendo o
   // próprio registro por `id` (nenhum risco de IDOR), e precisa continuar
   // funcionando mesmo para um futuro usuário global (companyId null).
+  //
+  // `isSuperAdmin`: mesmo raciocínio de "sempre fresco" — nunca gravado no
+  // JWT (evitaria refletir uma troca de SUPER_ADMIN_EMAIL só depois de até
+  // 12h) e nunca expõe o valor da env var em si, só o resultado do
+  // comparativo. É puramente um sinal de UX para o frontend decidir se
+  // mostra a entrada do Back-Office — a autorização de verdade continua
+  // sendo `assertSuperAdmin` no backend (routes/admin.ts), reavaliada a cada
+  // chamada real às rotas administrativas.
   r.get('/me', { preHandler: app.authenticate }, async (req) => {
     const user = await prisma.user.findUnique({
       where: { id: req.user.sub },
       select: { id: true, name: true, email: true, role: true, allowedPages: true, companyId: true },
     });
     if (!user) throw new UnauthorizedError('Usuário não encontrado');
-    return { ...req.user, allowedPages: user.allowedPages ?? null, companyId: user.companyId };
+    const isSuperAdmin = !!env.SUPER_ADMIN_EMAIL && user.email === env.SUPER_ADMIN_EMAIL;
+    return { ...req.user, allowedPages: user.allowedPages ?? null, companyId: user.companyId, isSuperAdmin };
   });
 
   // GET /api/auth/users — lista usuários do próprio tenant (ADMIN)

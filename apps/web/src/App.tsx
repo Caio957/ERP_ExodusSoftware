@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { SuperAdminRoute } from './components/SuperAdminRoute';
 import { LoginPage } from './pages/LoginPage';
 import { PdvPage } from './pages/PdvPage';
 import { ProductsPage } from './pages/ProductsPage';
@@ -12,6 +13,7 @@ import { SalesPage } from './pages/SalesPage';
 import { RegistrationsPage } from './pages/RegistrationsPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { StockAdjustPage } from './pages/StockAdjustPage';
+import { AdminContractsPage } from './pages/AdminContractsPage';
 
 export function App() {
   return (
@@ -35,6 +37,12 @@ export function App() {
               <Route path="/compras" element={<PurchasesPage />} />
               <Route path="/financeiro" element={<FinancialPage />} />
               <Route path="/configuracoes" element={<SettingsPage />} />
+            </Route>
+
+            {/* Back-Office da Exodus (super admin) — eixo de autorização
+                separado do RBAC por papel (role) do tenant, ver SuperAdminRoute. */}
+            <Route element={<SuperAdminRoute />}>
+              <Route path="/admin/contratos" element={<AdminContractsPage />} />
             </Route>
           </Route>
         </Route>
