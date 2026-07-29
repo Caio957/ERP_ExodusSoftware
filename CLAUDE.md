@@ -94,14 +94,28 @@
   2026-07-27 em §11 para a reconciliação ponto a ponto com a arquitetura de
   Segurança/LGPD (criptografia, `AuditLog`, desambiguação de login).
   **`main` e `origin/main` estão em sincronia em `3d2d2a5`.**
-  ✅ **`feature/admin-contracts-panel` (frontend do Back-Office — Painel de
-  Gestão de Contratos + Impersonate)** — sinal `isSuperAdmin` em `/auth/me`,
-  rota protegida `/admin/contratos` (`<SuperAdminRoute>`) e
-  `AdminContractsPage.tsx` (Padrão Ouro) — commit `ae6b65c`; botão "Acessar
-  Loja", `<ImpersonateBanner>` e a estratégia de troca de token no Zustand
-  (`impersonateLogin`/`exitImpersonate`) — ver Onda 2026-07-28/2026-07-28b
-  em §11. Push para `origin` autorizado pelo Comandante — aguardando
-  abertura do PR.
+  ✅ **`feature/admin-contracts-panel` mesclada na `main` via PR #26**
+  (`388c213`) — frontend do Back-Office (Painel de Gestão de Contratos +
+  Impersonate): sinal `isSuperAdmin` em `/auth/me`, rota protegida
+  `/admin/contratos` (`<SuperAdminRoute>`), `AdminContractsPage.tsx`
+  (Padrão Ouro), botão "Acessar Loja", `<ImpersonateBanner>` e a estratégia
+  de troca de token no Zustand (`impersonateLogin`/`exitImpersonate`) — ver
+  Onda 2026-07-28/2026-07-28b em §11. **`main` e `origin/main` estão em
+  sincronia em `388c213`.**
+  ✅ **`feature/public-onboarding` (frontend da Frente 1 — Tela Pública de
+  Onboarding + compliance LGPD + validação matemática de CPF/CNPJ +
+  política de senha forte)** — `OnboardingPage.tsx` (React Hook Form +
+  Zod, primeira tela do projeto nesse padrão, aprovado pelo Comandante como
+  novo padrão a manter), máscara de CNPJ/CPF, modais Padrão Ouro de Termos
+  de Uso/Política de Privacidade (`components/legal/`) para o checkbox de
+  consentimento nunca apontar para um link morto,
+  `packages/shared/src/utils/validators.ts` (dígito verificador Módulo 11,
+  empilhado só no `cnpj` do onboarding), e `strongPasswordSchema`
+  (`schemas/common.ts`, Módulo 11 do lado da senha: mínimo 8 + maiúscula +
+  minúscula + número + especial) propagado para onboarding, criação e
+  edição de usuário (não para login, de propósito) — ver Onda
+  2026-07-28c/2026-07-28d/2026-07-28e em §11. Push para `origin` autorizado
+  pelo Comandante — aguardando abertura do PR.
   ⚠️ **Padrão observado na rodada de correções de impressão (PRs #14→#16)**: cada uma das 3 PRs
   seguidas (#14→#16) tentou resolver o mesmo sintoma relatado pelo Comandante (página em
   branco/layout quebrado ao imprimir no Android) com uma causa raiz diferente — cada
@@ -900,6 +914,14 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   `type="email"` no frontend desde antes; único gap real encontrado (2026-07-12)
   era uma pré-checagem fraca (`email.includes('@')`) no `submit()` do
   `UserFormModal`, substituída por `createUserSchema.shape.email.safeParse(...)`.
+  **Política de senha forte** (2026-07-28, ver Onda 2026-07-28e em §11):
+  `UserFormModal.submit()` trocou o length-check manual (`password.trim().
+  length < 8`) por `strongPasswordSchema.safeParse(password)` — mesmo
+  padrão já usado para e-mail nessa função —, então a mensagem de erro
+  exibida agora é a específica da regra que falhou (maiúscula/minúscula/
+  número/especial), não mais um genérico "ao menos 8 caracteres". Na
+  edição, campo vazio (`password.trim()` falsy) continua pulando a
+  validação por completo — "deixar em branco para manter" intacto.
 - ✅ **Recibo térmico** 58/80mm e **comprovante A4** (§4.7): `ThermalReceipt` renderiza
   cabeçalho completo (nome, endereço, cidade, tel) + itens + totais + pagamento.
   `SaleReceipt` (componente unificado) entrega cupom térmico ou folha A4 estilizada com
@@ -946,6 +968,54 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   sair fazem `window.location.href` (reload completo, não `navigate`) para
   remontar o React Query do zero, sem risco de cache de um tenant vazar
   para o outro por uma fração de segundo.
+- ✅ **Onboarding público — Tela de Cadastro de Loja** (Plano Mestre V2.0,
+  Frente 1, frontend — ver Onda 2026-07-28c em §11): rota pública
+  `/onboarding` (`OnboardingPage.tsx`, fora de `ProtectedRoute`, irmã de
+  `/login`), acessível via link "Não tem uma conta? Crie sua loja" no
+  rodapé do formulário de login. **Primeira tela do projeto construída com
+  React Hook Form + Zod** (`react-hook-form`/`@hookform/resolvers` novos em
+  `apps/web/package.json`) — decisão explícita do Comandante, que aprovou
+  manter esse padrão daqui em diante (todo o resto do app ainda usa
+  `useState` manual + `schema.safeParse()`). Formulário reaproveita
+  `onboardingSchema` do `@exodus/shared` como base da validação (mesma
+  fonte de verdade do backend) estendido só localmente com um campo
+  `consent` (checkbox de LGPD, nunca enviado à API — `z.boolean().refine
+  (v => v === true)`, desmarcado por padrão). Máscara de CNPJ/CPF via
+  `Controller` do RHF chamando `maskCpfCnpj` (não dá pra usar a opção
+  `onChange` do `register` para isso — ela roda depois que o RHF já
+  capturou o valor cru do evento, então mutar `e.target.value` não
+  sincroniza de volta). Ao receber `201`, o formulário é substituído por um
+  "Success State" (sem tentar logar — a conta nasce `PENDING`) com botão
+  "Voltar ao Login".
+  **Modais legais de compliance** (`components/legal/`, novo diretório):
+  `LegalDocumentModal.tsx` (Padrão Ouro genérico — `createPortal`, header/
+  body-com-scroll/footer) reaproveitado por `TermsOfUseContent`
+  (`TermsOfUse.tsx`) e `PrivacyPolicyContent` (`PrivacyPolicy.tsx`), textos
+  de Termos de Uso (SaaS) e Política de Privacidade (LGPD) genéricos porém
+  plausíveis — cada um com um aviso âmbar fixo no topo deixando explícito
+  que é um documento-base para revisão jurídica, não um contrato validado.
+  No checkbox de consentimento, "Termos de Uso" e "Política de Privacidade"
+  viraram `<button type="button" onClick={() => setShowTerms(true)}>` (não
+  mais `<a href="#">`) — **`type="button"` é load-bearing**: sem ele, um
+  `<button>` dentro de um `<form>` é `type="submit"` por padrão e dispararia
+  o envio do formulário ao clicar no link. Os modais só sobrepõem a tela
+  (não desmontam o `<form>` por trás), então fechar um modal preserva 100%
+  do que já foi digitado — exatamente o requisito de retenção pedido.
+  **Validação matemática de CPF/CNPJ (Módulo 11)** — ver Onda 2026-07-28d em
+  §11: `packages/shared/src/utils/validators.ts` (`isValidCPF`/
+  `isValidCNPJ`/`isValidCpfOrCnpj`) empilhado como `.refine()` extra só no
+  campo `cnpj` de `onboardingSchema` — `Person.document` (Cadastros)
+  continua só validando tamanho, de propósito. Como o schema é
+  compartilhado, o RHF no frontend passou a exibir "CPF ou CNPJ inválido"
+  automaticamente sem nenhuma mudança em `OnboardingPage.tsx`.
+  **Política de senha forte** — ver Onda 2026-07-28e em §11:
+  `onboardingSchema.password` passou de `z.string().min(8)` para
+  `strongPasswordSchema` (`schemas/common.ts`) — mesma zero-mudança-de-
+  frontend do CPF/CNPJ acima, o RHF já exibe as mensagens específicas por
+  regra (maiúscula/minúscula/número/especial) sem tocar em
+  `OnboardingPage.tsx`. Placeholder e texto de apoio abaixo do campo
+  atualizados para descrever a regra real (antes só diziam "mínimo 8
+  caracteres").
 
 ---
 
@@ -3163,13 +3233,241 @@ mesclada na `main`.
     de forma significativa fora do navegador — recomendado teste manual no
     browser antes do merge.
 
+- ✅ **Onda 2026-07-28c — Tela Pública de Onboarding + Modais de Compliance
+  LGPD (Plano Mestre V2.0, Frente 1 — Missão 1 do frontend)** (2026-07-28):
+  branch `feature/public-onboarding` (criada a partir da `main` já
+  pós-merge da PR #26, `388c213`). Fecha a "Missão 1" de §14.1d. Dois
+  rounds: a tela em si, depois os modais legais (pedido de acompanhamento
+  do Comandante, disparado por um ponto de compliance levantado pelo Caio —
+  o checkbox de LGPD não podia apontar para um link morto).
+  - **Achado de premissa antes de codar**: a missão descrevia o payload do
+    `POST /api/onboarding` como `companyName`/`document`/`ownerName`/
+    `ownerEmail`/`ownerPassword`. Conferido contra
+    `packages/shared/src/schemas/onboarding.ts` e `routes/onboarding.ts`
+    (já em produção): o contrato real é `companyName`/`cnpj`/`adminName`/
+    `email`/`password`. O formulário foi construído contra o schema real —
+    `onboardingSchema` (shared) reaproveitado como base direta da
+    validação do formulário, não recriado do zero — mantendo os labels
+    pedidos ("Nome do Proprietário", "E-mail") mapeados para os campos
+    reais por baixo.
+  - **React Hook Form + Zod — primeira tela do projeto nesse padrão**:
+    todo o resto do app usa `useState` manual + `schema.safeParse()`
+    (Produtos, Pessoas, Usuários, Financeiro...); a missão pediu RHF
+    explicitamente para esta tela. Instalado `react-hook-form@^7.83.0` +
+    `@hookform/resolvers@^5.5.7` (não existiam no `package.json` do
+    workspace `web`). **Aprovado pelo Comandante como novo padrão a manter**
+    (não é mais uma decisão isolada desta tela) — decisão registrada aqui
+    para a próxima sessão saber que RHF é agora aceitável (e preferível)
+    em telas novas, sem precisar migrar as existentes retroativamente.
+    `onboardingFormSchema = onboardingSchema.extend({ consent: z.boolean().
+    refine(v => v === true, {...}) })` — o `consent` só existe no schema
+    local do formulário; no `onSubmit`, é desestruturado para fora antes do
+    `POST` (a API não tem, nem deve ter, esse campo).
+  - **Máscara de CNPJ/CPF via `Controller`, não `register`**: reaproveita
+    `maskCpfCnpj` (`lib/masks.ts`, mesma função de Cadastros). Tentativa
+    óbvia de usar a opção `onChange` do `register` para mascarar foi
+    descartada antes de implementar — o `onChange` gerado pelo RHF já
+    captura o valor cru do evento antes de chamar o callback custom, então
+    mutar `e.target.value` ali não sincroniza de volta ao estado do
+    formulário. `Controller` resolve isso de forma direta:
+    `onChange={(e) => field.onChange(maskCpfCnpj(e.target.value))}`.
+  - **Tela de sucesso**: ao `201`, o formulário inteiro é substituído (não
+    escondido via CSS, desmontado via render condicional) por um painel com
+    a mensagem exata pedida e botão "Voltar ao Login" — sem tentar logar
+    (a conta nasce `PENDING`, login falharia com `COMPANY_NOT_ACTIVE`).
+  - **Design**: `OnboardingPage.tsx` replica a estrutura de dois painéis do
+    `LoginPage.tsx` (único lugar do app com o motivo visual escuro/dourado
+    — brilho cônico, orbes, grade) com copy própria; link "Não tem uma
+    conta? Crie sua loja" adicionado no rodapé do formulário de acesso da
+    `LoginPage.tsx`. Rota `/onboarding` registrada em `App.tsx` como irmã
+    de `/login`, fora de `ProtectedRoute`.
+  - **Rodada 2 — Modais de compliance LGPD** (mesmo dia, pedido de
+    acompanhamento): novo diretório `components/legal/`.
+    `LegalDocumentModal.tsx` é o único componente de modal (Padrão Ouro —
+    `createPortal`, header com ícone/título fixo, corpo com
+    `overflow-y-auto`, rodapé fixo com botão "Fechar") — reaproveitado
+    tanto para Termos quanto para Privacidade, evitando duplicar a mesma
+    casca duas vezes. `TermsOfUse.tsx`/`PrivacyPolicy.tsx` exportam só o
+    *conteúdo* (`TermsOfUseContent`/`PrivacyPolicyContent`), sem chrome de
+    modal — separação deliberada entre "o documento" e "como ele é
+    exibido". `LegalSection.tsx` é um terceiro componente minúsculo
+    (título + parágrafos) compartilhado pelos dois textos, para não
+    duplicar a mesma classe Tailwind repetida ~12 vezes por arquivo.
+    Textos gerados são genéricos porém plausíveis (Termos de Uso SaaS: 12
+    seções — aceitação, descrição do serviço, cadastro/aprovação PENDING,
+    obrigações, dados inseridos pelo Contratante, planos, propriedade
+    intelectual, disponibilidade, limitação de responsabilidade, suspensão,
+    alterações, foro; Política de Privacidade LGPD: 11 seções — controlador,
+    dados coletados, finalidade, base legal art. 7º, compartilhamento,
+    segurança — citando a criptografia de dados sensíveis que o backend
+    **já implementa de verdade**, não é só retórica —, retenção, direitos
+    do titular art. 18, cookies, DPO, alterações). Cada documento tem um
+    aviso âmbar fixo no topo ("documento-base... precisa de revisão
+    jurídica") — pedido explícito da missão, para não passar a falsa
+    impressão de que é um contrato validado.
+  - **Retenção de dados do formulário**: "Termos de Uso" e "Política de
+    Privacidade" no label do checkbox viraram `<button type="button"
+    onClick={...}>` (não mais texto estático nem `<a href="#">`).
+    **`type="button"` é load-bearing** — sem ele, um `<button>` dentro de
+    um `<form>` é `type="submit"` por padrão e o clique no link dispararia
+    o envio do formulário. Os modais só sobrepõem a tela via portal; o
+    `<form>` por trás nunca é desmontado, então fechar o modal preserva
+    100% do que já foi digitado (nenhum estado do RHF é tocado pelos
+    modais).
+  - **Efeito colateral honesto**: a nova dependência aumentou o bundle do
+    PWA de ~782KB para ~842KB de precache (react-hook-form +
+    @hookform/resolvers). Rodado `npm audit` de verdade (não só o resumo do
+    `npm install`) para não atribuir errado: o total do monorepo está em
+    **11 vulnerabilidades** (1 baixa, 3 moderadas, 5 altas, 2 críticas) —
+    bem mais que as "3" registradas em §12 item 3, mas **nenhuma delas
+    vem de `react-hook-form`/`@hookform/resolvers`**; todas as 11 são de
+    dependências transitivas pré-existentes (`@fastify/static`,
+    `brace-expansion`, `esbuild`, `fast-jwt`/`@fastify/jwt`, `fast-uri`,
+    `fast-xml-parser`, `find-my-way`, `postcss`, `react-router`/
+    `react-router-dom`) — o número já tinha driftado com o tempo
+    (novos advisories contra deps já instaladas), independente desta onda.
+    §12 item 3 atualizado com a contagem real.
+  `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros** em
+  ambos os rounds.
+
+- ✅ **Onda 2026-07-28d — Validação matemática de CPF/CNPJ (Módulo 11)**
+  (2026-07-28): mesma branch `feature/public-onboarding`. Pedido de
+  qualidade de dados levantado pelo Caio depois de aprovar os textos dos
+  modais legais — o campo de documento aceitava qualquer sequência com o
+  tamanho certo (11/14 dígitos), sem checar se os dígitos verificadores
+  batiam de verdade.
+  - **`packages/shared/src/utils/validators.ts`** (novo arquivo, novo
+    diretório `utils/` em `packages/shared`): `isValidCPF`/`isValidCNPJ`
+    implementam o algoritmo oficial de dígito verificador (Módulo 11 — soma
+    ponderada dos dígitos, resto da divisão por 11, dígito = 0 se resto < 2
+    senão `11 - resto`, repetido para os dois dígitos verificadores).
+    `isAllSameDigit` (regex `/^(\d)\1+$/`) rejeita sequências tipo
+    `00000000000`/`11111111111` — matematicamente "válidas" pelo módulo 11
+    mas nunca documentos reais; mais robusto que listar as 10 sequências
+    uma a uma. `isValidCpfOrCnpj` despacha por tamanho (11→CPF, 14→CNPJ,
+    qualquer outro→`false`). Todas as três funções limpam a máscara
+    internamente (reaproveitando `onlyDigits`, já exportado por
+    `schemas/common.ts` — não duplicado), então aceitam tanto
+    `"111.444.777-35"` quanto `"11144477735"` como entrada.
+  - **Exportado na raiz do pacote** (`index.ts`: `export * from
+    './utils/validators.js'`) — mesmo padrão de `pricing.ts`, disponível
+    para qualquer consumidor de `@exodus/shared`, não só o onboarding.
+  - **Blindagem cirúrgica, não global**: o `.refine()` extra foi empilhado
+    **só** no campo `cnpj` de `onboardingSchema`
+    (`cnpj: document.refine((val) => isValidCpfOrCnpj(val), {message:
+    'CPF ou CNPJ inválido'})`), não no validador `document` base de
+    `schemas/common.ts` usado por `Person.document` (Cadastros). Decisão
+    deliberada, não pedida explicitamente mas necessária para não
+    extrapolar o escopo: apertar `document` globalmente arriscaria rejeitar
+    silenciosamente clientes/fornecedores já cadastrados em produção com
+    documentos de tamanho válido mas dígito verificador nunca conferido
+    (o campo sempre foi só length-check) — o onboarding, sendo a porta de
+    entrada de um tenant **novo**, pode e deve ser mais estrito sem esse
+    risco retroativo.
+  - **Zero mudança necessária no frontend**: como `onboardingFormSchema`
+    (`OnboardingPage.tsx`) já fazia `onboardingSchema.extend({consent:...})`
+    — reaproveitando o campo `cnpj` do schema compartilhado tal como está —
+    o `.refine()` novo passou a valer automaticamente para o React Hook
+    Form assim que o pacote `shared` foi recompilado; a mensagem "CPF ou
+    CNPJ inválido" já aparece inline sob o campo sem tocar em nenhum
+    arquivo do `apps/web`.
+  - **Testado com vetores conhecidos** (script descartável via `tsx`,
+    fora do repositório): CPF `111.444.777-35` (válido, testado com e sem
+    máscara) → `true`; CPF com dígito verificador errado
+    (`123.456.789-00`) → `false`; `00000000000`/`11111111111` → `false`;
+    CNPJ `11.222.333/0001-81` (válido) → `true`; CNPJ com dígito errado
+    (`12.345.678/0001-00`) → `false`; tamanho fora de 11/14 → `false` — 14
+    casos, todos batendo com o esperado.
+  - **Testado ao vivo contra a API real** (`dev:api` já rodando local):
+    `POST /api/onboarding` com CNPJ de dígito verificador inválido
+    (`11.222.333/0001-99`) → `400 VALIDATION_ERROR`, mensagem "CPF ou CNPJ
+    inválido" exatamente no campo `cnpj`; o mesmo endpoint com o CPF válido
+    `111.444.777-35` → `201`, empresa criada `PENDING` normalmente
+    (confirma que o `.refine()` novo não introduziu falso-negativo em
+    documento real). Empresa + usuário de teste removidos ao final via
+    script descartável; `LEFTOVER_COMPANIES=0` confirmado.
+  `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros**.
+
+- ✅ **Onda 2026-07-28e — Política de Senha Forte universal (Módulo 11 da
+  senha)** (2026-07-28): mesma branch `feature/public-onboarding`. Pedido
+  de segurança levantado pelo Caio depois da validação de CPF/CNPJ — a
+  criptografia de dados sensíveis (Frente 2 LGPD) não protege nada se a
+  porta de entrada aceitar qualquer senha fraca.
+  - **`strongPasswordSchema`** (novo, `packages/shared/src/schemas/
+    common.ts`, ao lado de `document`): mínimo 8 caracteres + regex para
+    minúscula/maiúscula/número/caractere especial, cada regra com sua
+    própria mensagem em português (Zod acumula todas as regras que
+    falharem na mesma resposta, não só a primeira — confirmado ao vivo,
+    ver teste abaixo). `strongPasswordSchema` exportado na raiz do pacote
+    via `export * from './schemas/common.js'` (já existia).
+  - **Aplicado em exatamente 3 lugares** (confirmado por grep antes de
+    codar — `grep -rn "password.*min(8"` no monorepo achou só estes 3, sem
+    nenhum quarto lugar escondido): `onboardingSchema.password` e
+    `createUserSchema.password` (ambos em `@exodus/shared`, trocados
+    diretamente por `strongPasswordSchema`); `updateUserSchema.password`
+    — **achado de premissa**: a missão presumia que `updateUserSchema`
+    também vivia em `@exodus/shared` (o cabeçalho do plano dizia "no
+    monorepo `@exodus/shared`"), mas na verdade é definido localmente em
+    `apps/api/src/routes/auth.ts` (nunca foi exportado para o pacote
+    compartilhado). Em vez de mover o schema para `shared` (refactor não
+    pedido, fora de escopo), só importei `strongPasswordSchema` de lá e
+    apliquei no campo local: `password: strongPasswordSchema.or(z.literal
+    ('')).optional()` — aceita `undefined` (campo omitido) e `''` (campo
+    deixado em branco no formulário) como "não mudar a senha", e só aplica
+    a política forte quando uma senha de verdade é enviada. O handler já
+    fazia `if (password) data.passwordHash = ...` — `''` já era falsy,
+    então nenhuma mudança de lógica foi necessária ali.
+  - **Deliberadamente NÃO aplicado em `loginSchema.password`**: login
+    valida a senha digitada contra o hash já salvo, que pode ter sido
+    criado sob uma política mais fraca no passado — os próprios usuários
+    seed locais (`admin12345`/`caixa12345`) não teriam maiúscula nem
+    caractere especial. Aplicar a política atual ali travaria contas
+    antigas fora do sistema até troca forçada de senha (fora de escopo
+    desta missão). Documentado como comentário no próprio
+    `strongPasswordSchema`, não só aqui.
+  - **`UserFormModal.submit()` corrigido** (`SettingsPage.tsx`, Configurações
+    → Usuários): a missão pediu para "verificar" esse modal, e havia um gap
+    real — ele nunca usou nenhum schema Zod para senha, só um length-check
+    manual (`password.trim().length < 8`) que não saberia das novas regras.
+    Trocado por `strongPasswordSchema.safeParse(password)`, mesmo padrão já
+    usado nessa função para e-mail (`createUserSchema.shape.email.
+    safeParse(...)`) — a mensagem de erro exibida agora é a específica da
+    regra que falhou. Placeholder e texto de apoio do campo também
+    atualizados (e o mesmo texto de apoio adicionado em
+    `OnboardingPage.tsx`, que antes só dizia "Mínimo de 8 caracteres").
+  - **Testado ao vivo contra a API real** (`dev:api` rodando local), 6
+    cenários: (1) `POST /api/onboarding` com senha fraca (`senhafraca`) →
+    `400`, com as 3 mensagens específicas que faltavam (maiúscula, número,
+    especial) na mesma resposta; (2) mesmo endpoint com senha forte
+    (`SenhaForte#123`) → `201`; (3) `PUT /api/auth/users/:id` com
+    `password: ""` → `200`, sem erro de validação (confirma que campo
+    vazio não aciona a política forte); (4) mesmo endpoint com senha fraca
+    (`fraca123`) → `400`; (5) mesmo endpoint com senha forte nova
+    (`NovaSenha#456`) → `200`; (6) **login com a senha nova** → token JWT
+    emitido normalmente, prova de ponta a ponta que o hash foi realmente
+    atualizado no banco (não só que a rota retornou 200). Usuário e
+    empresas de teste removidos ao final (via `DELETE /api/auth/users/:id`
+    para o usuário, script descartável via Prisma para a empresa do
+    onboarding); nenhum resíduo.
+  `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros**.
+
 ---
 
 ## 12. Pendências, bloqueios e dívidas técnicas
 
 1. ~~**[BLOQUEIO] Docker não instalado**~~ **RESOLVIDO (2026-06-02)**.
 2. ~~**Deploy Railway não configurado**~~ **RESOLVIDO (2026-06-03)**: sistema em produção em https://exodus-web-production.up.railway.app.
-3. **`npm audit`**: 3 vulnerabilidades reportadas (1 moderada, 2 críticas) em deps transitivas — revisar antes de escalar.
+3. **`npm audit`**: **atualizado (2026-07-28, Onda 2026-07-28c)** — 11
+   vulnerabilidades (1 baixa, 3 moderadas, 5 altas, 2 críticas) em deps
+   transitivas pré-existentes (`@fastify/static`, `brace-expansion`,
+   `esbuild`, `fast-jwt`/`@fastify/jwt`, `fast-uri`, `fast-xml-parser`,
+   `find-my-way`, `postcss`, `react-router`/`react-router-dom`) — número
+   antigo (3) estava desatualizado por drift natural de novos advisories,
+   não por dependência nova adicionada nesta sessão (`react-hook-form`/
+   `@hookform/resolvers` não aparecem no relatório). Revisar antes de
+   escalar — a maioria tem `npm audit fix --force` disponível, mas envolve
+   breaking changes (`@fastify/jwt@10`, `fast-xml-parser@5`,
+   `@fastify/static@10.1.2`) que precisam de teste antes de aplicar.
 4. **Sem testes automatizados** (Vitest/Supertest) — apenas smoke test manual.
 5. ~~**BrasilAPI** ainda não integrada no formulário de fornecedor~~ **RESOLVIDO
    (2026-07-02)**: CEP via BrasilAPI (endereço completo) + CNPJ via ReceitaWS
@@ -3358,13 +3656,16 @@ processo/segurança** (ver terceira entrada abaixo): construir primeiro o
 Back-Office (gestão de contratos) antes de abrir a porta pública de
 onboarding.
 
-**Missão 1 — Tela de Onboarding (pública)**: fluxo visual para um novo
-lojista se cadastrar sozinho, consumindo a rota de criação de tenant/
-company. A rota (`POST /api/onboarding`) **está mesclada na `main` via PR
-#25** (`3d2d2a5`, ver §14.1e) — deixou de ser bloqueio técnico. **Ainda não
-iniciada** — deliberadamente adiada pelo Caio (2026-07-28): "por questões
-estritas de segurança e processo", o Back-Office precisa existir primeiro,
-para não abrir auto-cadastro público sem ter como triar/aprovar quem entra.
+✅ **Missão 1 — Tela de Onboarding (pública)** — **CONCLUÍDA (2026-07-28)**:
+fluxo visual para um novo lojista se cadastrar sozinho, consumindo
+`POST /api/onboarding` (mesclada na `main` via PR #25, `3d2d2a5`, ver
+§14.1e). Deliberadamente adiada até o Back-Office existir primeiro (feito
+em 2026-07-28, ver "Terceira peça" abaixo) — só então retomada. Cobre
+`OnboardingPage.tsx` (React Hook Form + Zod, novo padrão), máscara de
+CNPJ/CPF e, numa segunda rodada no mesmo dia, os modais legais de
+compliance (Termos de Uso/Política de Privacidade) — ver §5 (bullet
+Onboarding público) e Onda 2026-07-28c em §11 para o detalhamento
+completo.
 
 ✅ **Missão 2 — Interface do Impersonate (Admin)** — **CONCLUÍDA
 (2026-07-28)**: botão "Acessar Loja" no painel do Super Admin (dispara
@@ -3444,7 +3745,7 @@ seção — já entregue em 2026-07-28).
    Produtos e Onda 2026-07-20 em §11.
 5. Tela de **devoluções** de venda (estorno de itens com `StockMovement`).
 6. Endurecer segurança: refresh token, rate limiting, validação XXE no parser XML.
-7. Resolver `npm audit` (3 vulnerabilidades em deps transitivas).
+7. Resolver `npm audit` (11 vulnerabilidades em deps transitivas — ver §12 item 3).
 
 ---
 

@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { document } from './common.js';
+import { document, strongPasswordSchema } from './common.js';
+import { isValidCpfOrCnpj } from '../utils/validators.js';
 
 /**
  * Auto-cadastro público de um novo lojista (Plano Mestre V2.0 — Frente 1,
@@ -10,12 +11,16 @@ import { document } from './common.js';
 export const onboardingSchema = z.object({
   companyName: z.string().trim().min(2, 'Nome da empresa obrigatório'),
   // Reaproveita o validador `document` do projeto (remove máscara e exige
-  // 11/14 dígitos). O campo é chamado `cnpj` no contrato público, mas aceita
-  // CPF (MEI/autônomo) também — mesma regra de `Person.document`.
-  cnpj: document,
+  // 11/14 dígitos) — mesma regra de `Person.document` — e empilha mais um
+  // `.refine()` só aqui: dígito verificador (Módulo 11) real. Deliberadamente
+  // NÃO aplicado ao `document` base em `common.ts` (usado por `Person`) —
+  // o onboarding é a porta de entrada de um tenant novo e pode ser mais
+  // estrito; apertar `Person.document` também afetaria cadastros de
+  // clientes/fornecedores já existentes fora do escopo desta missão.
+  cnpj: document.refine((val) => isValidCpfOrCnpj(val), { message: 'CPF ou CNPJ inválido' }),
   adminName: z.string().trim().min(2, 'Nome do responsável obrigatório'),
   email: z.string().trim().toLowerCase().email('E-mail inválido'),
-  password: z.string().min(8, 'Senha deve ter ao menos 8 caracteres'),
+  password: strongPasswordSchema,
 });
 export type OnboardingInput = z.infer<typeof onboardingSchema>;
 

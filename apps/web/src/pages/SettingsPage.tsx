@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createUserSchema, type ProductFormSettings, type CompanyProfile, type PaymentType, type SalesSettings } from '@exodus/shared';
+import { createUserSchema, strongPasswordSchema, type ProductFormSettings, type CompanyProfile, type PaymentType, type SalesSettings } from '@exodus/shared';
 import { Settings, Save, Check, Package, CreditCard, Building2, Plus, Trash2, Users, Pencil, X, ShieldCheck, UserCheck, Search } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../store/auth';
@@ -608,8 +608,14 @@ function UserFormModal({
     setLocalError(null);
     if (name.trim().length < 2) return setLocalError('Nome deve ter pelo menos 2 caracteres.');
     if (!createUserSchema.shape.email.safeParse(email).success) return setLocalError('E-mail inválido.');
-    if (!isEdit && password.trim().length < 8) return setLocalError('Senha deve ter ao menos 8 caracteres.');
-    if (isEdit && password.trim() && password.trim().length < 8) return setLocalError('Nova senha deve ter ao menos 8 caracteres.');
+    // Na criação, senha é sempre obrigatória; na edição, só valida se o
+    // operador digitou algo novo (campo vazio = manter a senha atual).
+    if (!isEdit || password.trim()) {
+      const passwordCheck = strongPasswordSchema.safeParse(password);
+      if (!passwordCheck.success) {
+        return setLocalError(passwordCheck.error.issues[0]?.message ?? 'Senha inválida.');
+      }
+    }
     save.mutate();
   }
 
@@ -647,6 +653,9 @@ function UserFormModal({
               placeholder={isEdit ? '••••••••' : 'Mínimo 8 caracteres'}
               autoComplete="new-password"
             />
+            <p className="mt-1 text-xs text-slate-400">
+              Mínimo 8 caracteres, com maiúscula, minúscula, número e caractere especial.
+            </p>
           </label>
           <label className="block">
             <span className="label">Perfil *</span>

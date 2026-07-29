@@ -3,6 +3,7 @@ import { Layout } from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { SuperAdminRoute } from './components/SuperAdminRoute';
 import { LoginPage } from './pages/LoginPage';
+import { OnboardingPage } from './pages/OnboardingPage';
 import { PdvPage } from './pages/PdvPage';
 import { ProductsPage } from './pages/ProductsPage';
 import { CashPage } from './pages/CashPage';
@@ -20,6 +21,7 @@ export function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/onboarding" element={<OnboardingPage />} />
 
         {/* Rotas autenticadas (CASHIER + ADMIN) */}
         <Route element={<ProtectedRoute />}>

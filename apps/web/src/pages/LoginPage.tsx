@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { loginSchema, type LoginCompanyOption } from '@exodus/shared';
 import { Sparkles, Mail, Lock, ArrowRight, ShieldCheck, Zap, WifiOff, Gem, Building2, ArrowLeft } from 'lucide-react';
 import { useAuth } from '../store/auth';
@@ -247,6 +247,13 @@ export function LoginPage() {
                     </>
                   )}
                 </button>
+
+                <p className="text-center text-sm text-slate-500">
+                  Não tem uma conta?{' '}
+                  <Link to="/onboarding" className="font-semibold text-brand-700 hover:underline">
+                    Crie sua loja
+                  </Link>
+                </p>
               </form>
             </>
           )}

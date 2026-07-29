@@ -1,7 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { createUserSchema, loginSchema, type JwtPayload, type LoginNeedsCompany } from '@exodus/shared';
+import {
+  createUserSchema,
+  loginSchema,
+  strongPasswordSchema,
+  type JwtPayload,
+  type LoginNeedsCompany,
+} from '@exodus/shared';
 import { prisma } from '../lib/prisma.js';
 import { hashPassword, verifyPassword } from '../lib/password.js';
 import { AppError, ForbiddenError, NotFoundError, UnauthorizedError } from '../lib/errors.js';
@@ -10,10 +16,17 @@ import { env } from '../env.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 
+// `updateUserSchema` continua local (não faz parte de @exodus/shared, ao
+// contrário de createUserSchema/onboardingSchema) — a única peça
+// reaproveitada de lá é `strongPasswordSchema`, a mesma política de senha
+// forte usada em toda parte que cria/altera senha. Na edição, senha é
+// opcional (deixar em branco = manter a atual) — `.or(z.literal(''))`
+// aceita string vazia sem forçar a política forte nela; `if (password)` no
+// handler abaixo já trata '' como "nada a fazer" (falsy).
 const updateUserSchema = z.object({
   name: z.string().trim().min(2).optional(),
   email: z.string().trim().toLowerCase().email().optional(),
-  password: z.string().min(8).optional(),
+  password: strongPasswordSchema.or(z.literal('')).optional(),
   role: z.enum(['ADMIN', 'CASHIER']).optional(),
   allowedPages: z.array(z.string()).nullable().optional(),
 });
