@@ -103,13 +103,15 @@
   Onda 2026-07-28/2026-07-28b em §11. **`main` e `origin/main` estão em
   sincronia em `388c213`.**
   ✅ **`feature/public-onboarding` (frontend da Frente 1 — Tela Pública de
-  Onboarding + compliance LGPD)** — `OnboardingPage.tsx` (React Hook Form +
-  Zod, primeira tela do projeto nesse padrão, aprovado pelo Comandante como
-  novo padrão a manter), máscara de CNPJ/CPF, e modais Padrão Ouro de
-  Termos de Uso/Política de Privacidade (`components/legal/`) para o
-  checkbox de consentimento nunca apontar para um link morto — ver Onda
-  2026-07-28c em §11. Commitada a pedido do Comandante — push para
-  `origin` ainda não solicitado explicitamente nesta rodada.
+  Onboarding + compliance LGPD + validação matemática de CPF/CNPJ)** —
+  `OnboardingPage.tsx` (React Hook Form + Zod, primeira tela do projeto
+  nesse padrão, aprovado pelo Comandante como novo padrão a manter),
+  máscara de CNPJ/CPF, modais Padrão Ouro de Termos de Uso/Política de
+  Privacidade (`components/legal/`) para o checkbox de consentimento nunca
+  apontar para um link morto, e `packages/shared/src/utils/validators.ts`
+  (dígito verificador Módulo 11, empilhado só no `cnpj` do onboarding) —
+  ver Onda 2026-07-28c/2026-07-28d em §11. Push para `origin` autorizado
+  pelo Comandante — aguardando abertura do PR.
   ⚠️ **Padrão observado na rodada de correções de impressão (PRs #14→#16)**: cada uma das 3 PRs
   seguidas (#14→#16) tentou resolver o mesmo sintoma relatado pelo Comandante (página em
   branco/layout quebrado ao imprimir no Android) com uma causa raiz diferente — cada
@@ -969,7 +971,7 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   (v => v === true)`, desmarcado por padrão). Máscara de CNPJ/CPF via
   `Controller` do RHF chamando `maskCpfCnpj` (não dá pra usar a opção
   `onChange` do `register` para isso — ela roda depois que o RHF já
-  capturou o valor cru do evento, then mutar `e.target.value` não
+  capturou o valor cru do evento, então mutar `e.target.value` não
   sincroniza de volta). Ao receber `201`, o formulário é substituído por um
   "Success State" (sem tentar logar — a conta nasce `PENDING`) com botão
   "Voltar ao Login".
@@ -987,6 +989,13 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   o envio do formulário ao clicar no link. Os modais só sobrepõem a tela
   (não desmontam o `<form>` por trás), então fechar um modal preserva 100%
   do que já foi digitado — exatamente o requisito de retenção pedido.
+  **Validação matemática de CPF/CNPJ (Módulo 11)** — ver Onda 2026-07-28d em
+  §11: `packages/shared/src/utils/validators.ts` (`isValidCPF`/
+  `isValidCNPJ`/`isValidCpfOrCnpj`) empilhado como `.refine()` extra só no
+  campo `cnpj` de `onboardingSchema` — `Person.document` (Cadastros)
+  continua só validando tamanho, de propósito. Como o schema é
+  compartilhado, o RHF no frontend passou a exibir "CPF ou CNPJ inválido"
+  automaticamente sem nenhuma mudança em `OnboardingPage.tsx`.
 
 ---
 
@@ -3300,6 +3309,64 @@ mesclada na `main`.
     §12 item 3 atualizado com a contagem real.
   `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros** em
   ambos os rounds.
+
+- ✅ **Onda 2026-07-28d — Validação matemática de CPF/CNPJ (Módulo 11)**
+  (2026-07-28): mesma branch `feature/public-onboarding`. Pedido de
+  qualidade de dados levantado pelo Caio depois de aprovar os textos dos
+  modais legais — o campo de documento aceitava qualquer sequência com o
+  tamanho certo (11/14 dígitos), sem checar se os dígitos verificadores
+  batiam de verdade.
+  - **`packages/shared/src/utils/validators.ts`** (novo arquivo, novo
+    diretório `utils/` em `packages/shared`): `isValidCPF`/`isValidCNPJ`
+    implementam o algoritmo oficial de dígito verificador (Módulo 11 — soma
+    ponderada dos dígitos, resto da divisão por 11, dígito = 0 se resto < 2
+    senão `11 - resto`, repetido para os dois dígitos verificadores).
+    `isAllSameDigit` (regex `/^(\d)\1+$/`) rejeita sequências tipo
+    `00000000000`/`11111111111` — matematicamente "válidas" pelo módulo 11
+    mas nunca documentos reais; mais robusto que listar as 10 sequências
+    uma a uma. `isValidCpfOrCnpj` despacha por tamanho (11→CPF, 14→CNPJ,
+    qualquer outro→`false`). Todas as três funções limpam a máscara
+    internamente (reaproveitando `onlyDigits`, já exportado por
+    `schemas/common.ts` — não duplicado), então aceitam tanto
+    `"111.444.777-35"` quanto `"11144477735"` como entrada.
+  - **Exportado na raiz do pacote** (`index.ts`: `export * from
+    './utils/validators.js'`) — mesmo padrão de `pricing.ts`, disponível
+    para qualquer consumidor de `@exodus/shared`, não só o onboarding.
+  - **Blindagem cirúrgica, não global**: o `.refine()` extra foi empilhado
+    **só** no campo `cnpj` de `onboardingSchema`
+    (`cnpj: document.refine((val) => isValidCpfOrCnpj(val), {message:
+    'CPF ou CNPJ inválido'})`), não no validador `document` base de
+    `schemas/common.ts` usado por `Person.document` (Cadastros). Decisão
+    deliberada, não pedida explicitamente mas necessária para não
+    extrapolar o escopo: apertar `document` globalmente arriscaria rejeitar
+    silenciosamente clientes/fornecedores já cadastrados em produção com
+    documentos de tamanho válido mas dígito verificador nunca conferido
+    (o campo sempre foi só length-check) — o onboarding, sendo a porta de
+    entrada de um tenant **novo**, pode e deve ser mais estrito sem esse
+    risco retroativo.
+  - **Zero mudança necessária no frontend**: como `onboardingFormSchema`
+    (`OnboardingPage.tsx`) já fazia `onboardingSchema.extend({consent:...})`
+    — reaproveitando o campo `cnpj` do schema compartilhado tal como está —
+    o `.refine()` novo passou a valer automaticamente para o React Hook
+    Form assim que o pacote `shared` foi recompilado; a mensagem "CPF ou
+    CNPJ inválido" já aparece inline sob o campo sem tocar em nenhum
+    arquivo do `apps/web`.
+  - **Testado com vetores conhecidos** (script descartável via `tsx`,
+    fora do repositório): CPF `111.444.777-35` (válido, testado com e sem
+    máscara) → `true`; CPF com dígito verificador errado
+    (`123.456.789-00`) → `false`; `00000000000`/`11111111111` → `false`;
+    CNPJ `11.222.333/0001-81` (válido) → `true`; CNPJ com dígito errado
+    (`12.345.678/0001-00`) → `false`; tamanho fora de 11/14 → `false` — 14
+    casos, todos batendo com o esperado.
+  - **Testado ao vivo contra a API real** (`dev:api` já rodando local):
+    `POST /api/onboarding` com CNPJ de dígito verificador inválido
+    (`11.222.333/0001-99`) → `400 VALIDATION_ERROR`, mensagem "CPF ou CNPJ
+    inválido" exatamente no campo `cnpj`; o mesmo endpoint com o CPF válido
+    `111.444.777-35` → `201`, empresa criada `PENDING` normalmente
+    (confirma que o `.refine()` novo não introduziu falso-negativo em
+    documento real). Empresa + usuário de teste removidos ao final via
+    script descartável; `LEFTOVER_COMPANIES=0` confirmado.
+  `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros**.
 
 ---
 

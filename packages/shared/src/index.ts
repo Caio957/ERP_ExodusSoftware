@@ -1,6 +1,7 @@
 // Ponto único de entrada do contrato compartilhado entre API e PWA.
 export * from './enums.js';
 export * from './pricing.js';
+export * from './utils/validators.js';
 export * from './schemas/common.js';
 export * from './schemas/auth.js';
 export * from './schemas/person.js';
