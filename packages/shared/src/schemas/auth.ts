@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { UserRole } from '../enums.js';
+import { strongPasswordSchema } from './common.js';
 
 export const loginSchema = z.object({
   email: z.string().trim().toLowerCase().email('E-mail inválido'),
@@ -18,7 +19,7 @@ export type LoginInput = z.infer<typeof loginSchema>;
 export const createUserSchema = z.object({
   name: z.string().trim().min(2, 'Nome muito curto'),
   email: z.string().trim().toLowerCase().email('E-mail inválido'),
-  password: z.string().min(8, 'Senha deve ter ao menos 8 caracteres'),
+  password: strongPasswordSchema,
   role: UserRole,
 });
 export type CreateUserInput = z.infer<typeof createUserSchema>;

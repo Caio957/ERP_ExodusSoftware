@@ -33,3 +33,22 @@ export const document = z
   .refine((d) => d.length === 11 || d.length === 14, {
     message: 'Documento deve ser um CPF (11) ou CNPJ (14) válido',
   });
+
+/**
+ * Política de senha forte (segurança — porta de entrada para dados
+ * criptografados na LGPD não vale nada se a senha for fraca): mínimo 8
+ * caracteres, com letra minúscula, maiúscula, número e caractere especial.
+ * Única fonte de verdade para toda rota que CRIA ou ALTERA uma senha
+ * (onboarding público, criação/edição de usuário) — backend e frontend.
+ * Deliberadamente NÃO usada em `loginSchema.password`: login valida a
+ * senha contra o hash já salvo, que pode ter sido criado sob uma política
+ * mais fraca no passado (ex.: os usuários seed `admin12345`/`caixa12345`);
+ * aplicar a política atual ali travaria contas antigas fora do sistema.
+ */
+export const strongPasswordSchema = z
+  .string()
+  .min(8, 'A senha deve ter no mínimo 8 caracteres')
+  .regex(/[a-z]/, 'A senha deve conter pelo menos uma letra minúscula')
+  .regex(/[A-Z]/, 'A senha deve conter pelo menos uma letra maiúscula')
+  .regex(/[0-9]/, 'A senha deve conter pelo menos um número')
+  .regex(/[^a-zA-Z0-9]/, 'A senha deve conter pelo menos um caractere especial');

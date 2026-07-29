@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { document } from './common.js';
+import { document, strongPasswordSchema } from './common.js';
 import { isValidCpfOrCnpj } from '../utils/validators.js';
 
 /**
@@ -20,7 +20,7 @@ export const onboardingSchema = z.object({
   cnpj: document.refine((val) => isValidCpfOrCnpj(val), { message: 'CPF ou CNPJ inválido' }),
   adminName: z.string().trim().min(2, 'Nome do responsável obrigatório'),
   email: z.string().trim().toLowerCase().email('E-mail inválido'),
-  password: z.string().min(8, 'Senha deve ter ao menos 8 caracteres'),
+  password: strongPasswordSchema,
 });
 export type OnboardingInput = z.infer<typeof onboardingSchema>;
 

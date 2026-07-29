@@ -103,14 +103,18 @@
   Onda 2026-07-28/2026-07-28b em §11. **`main` e `origin/main` estão em
   sincronia em `388c213`.**
   ✅ **`feature/public-onboarding` (frontend da Frente 1 — Tela Pública de
-  Onboarding + compliance LGPD + validação matemática de CPF/CNPJ)** —
-  `OnboardingPage.tsx` (React Hook Form + Zod, primeira tela do projeto
-  nesse padrão, aprovado pelo Comandante como novo padrão a manter),
-  máscara de CNPJ/CPF, modais Padrão Ouro de Termos de Uso/Política de
-  Privacidade (`components/legal/`) para o checkbox de consentimento nunca
-  apontar para um link morto, e `packages/shared/src/utils/validators.ts`
-  (dígito verificador Módulo 11, empilhado só no `cnpj` do onboarding) —
-  ver Onda 2026-07-28c/2026-07-28d em §11. Push para `origin` autorizado
+  Onboarding + compliance LGPD + validação matemática de CPF/CNPJ +
+  política de senha forte)** — `OnboardingPage.tsx` (React Hook Form +
+  Zod, primeira tela do projeto nesse padrão, aprovado pelo Comandante como
+  novo padrão a manter), máscara de CNPJ/CPF, modais Padrão Ouro de Termos
+  de Uso/Política de Privacidade (`components/legal/`) para o checkbox de
+  consentimento nunca apontar para um link morto,
+  `packages/shared/src/utils/validators.ts` (dígito verificador Módulo 11,
+  empilhado só no `cnpj` do onboarding), e `strongPasswordSchema`
+  (`schemas/common.ts`, Módulo 11 do lado da senha: mínimo 8 + maiúscula +
+  minúscula + número + especial) propagado para onboarding, criação e
+  edição de usuário (não para login, de propósito) — ver Onda
+  2026-07-28c/2026-07-28d/2026-07-28e em §11. Push para `origin` autorizado
   pelo Comandante — aguardando abertura do PR.
   ⚠️ **Padrão observado na rodada de correções de impressão (PRs #14→#16)**: cada uma das 3 PRs
   seguidas (#14→#16) tentou resolver o mesmo sintoma relatado pelo Comandante (página em
@@ -910,6 +914,14 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   `type="email"` no frontend desde antes; único gap real encontrado (2026-07-12)
   era uma pré-checagem fraca (`email.includes('@')`) no `submit()` do
   `UserFormModal`, substituída por `createUserSchema.shape.email.safeParse(...)`.
+  **Política de senha forte** (2026-07-28, ver Onda 2026-07-28e em §11):
+  `UserFormModal.submit()` trocou o length-check manual (`password.trim().
+  length < 8`) por `strongPasswordSchema.safeParse(password)` — mesmo
+  padrão já usado para e-mail nessa função —, então a mensagem de erro
+  exibida agora é a específica da regra que falhou (maiúscula/minúscula/
+  número/especial), não mais um genérico "ao menos 8 caracteres". Na
+  edição, campo vazio (`password.trim()` falsy) continua pulando a
+  validação por completo — "deixar em branco para manter" intacto.
 - ✅ **Recibo térmico** 58/80mm e **comprovante A4** (§4.7): `ThermalReceipt` renderiza
   cabeçalho completo (nome, endereço, cidade, tel) + itens + totais + pagamento.
   `SaleReceipt` (componente unificado) entrega cupom térmico ou folha A4 estilizada com
@@ -996,6 +1008,14 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   continua só validando tamanho, de propósito. Como o schema é
   compartilhado, o RHF no frontend passou a exibir "CPF ou CNPJ inválido"
   automaticamente sem nenhuma mudança em `OnboardingPage.tsx`.
+  **Política de senha forte** — ver Onda 2026-07-28e em §11:
+  `onboardingSchema.password` passou de `z.string().min(8)` para
+  `strongPasswordSchema` (`schemas/common.ts`) — mesma zero-mudança-de-
+  frontend do CPF/CNPJ acima, o RHF já exibe as mensagens específicas por
+  regra (maiúscula/minúscula/número/especial) sem tocar em
+  `OnboardingPage.tsx`. Placeholder e texto de apoio abaixo do campo
+  atualizados para descrever a regra real (antes só diziam "mínimo 8
+  caracteres").
 
 ---
 
@@ -3366,6 +3386,69 @@ mesclada na `main`.
     (confirma que o `.refine()` novo não introduziu falso-negativo em
     documento real). Empresa + usuário de teste removidos ao final via
     script descartável; `LEFTOVER_COMPANIES=0` confirmado.
+  `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros**.
+
+- ✅ **Onda 2026-07-28e — Política de Senha Forte universal (Módulo 11 da
+  senha)** (2026-07-28): mesma branch `feature/public-onboarding`. Pedido
+  de segurança levantado pelo Caio depois da validação de CPF/CNPJ — a
+  criptografia de dados sensíveis (Frente 2 LGPD) não protege nada se a
+  porta de entrada aceitar qualquer senha fraca.
+  - **`strongPasswordSchema`** (novo, `packages/shared/src/schemas/
+    common.ts`, ao lado de `document`): mínimo 8 caracteres + regex para
+    minúscula/maiúscula/número/caractere especial, cada regra com sua
+    própria mensagem em português (Zod acumula todas as regras que
+    falharem na mesma resposta, não só a primeira — confirmado ao vivo,
+    ver teste abaixo). `strongPasswordSchema` exportado na raiz do pacote
+    via `export * from './schemas/common.js'` (já existia).
+  - **Aplicado em exatamente 3 lugares** (confirmado por grep antes de
+    codar — `grep -rn "password.*min(8"` no monorepo achou só estes 3, sem
+    nenhum quarto lugar escondido): `onboardingSchema.password` e
+    `createUserSchema.password` (ambos em `@exodus/shared`, trocados
+    diretamente por `strongPasswordSchema`); `updateUserSchema.password`
+    — **achado de premissa**: a missão presumia que `updateUserSchema`
+    também vivia em `@exodus/shared` (o cabeçalho do plano dizia "no
+    monorepo `@exodus/shared`"), mas na verdade é definido localmente em
+    `apps/api/src/routes/auth.ts` (nunca foi exportado para o pacote
+    compartilhado). Em vez de mover o schema para `shared` (refactor não
+    pedido, fora de escopo), só importei `strongPasswordSchema` de lá e
+    apliquei no campo local: `password: strongPasswordSchema.or(z.literal
+    ('')).optional()` — aceita `undefined` (campo omitido) e `''` (campo
+    deixado em branco no formulário) como "não mudar a senha", e só aplica
+    a política forte quando uma senha de verdade é enviada. O handler já
+    fazia `if (password) data.passwordHash = ...` — `''` já era falsy,
+    então nenhuma mudança de lógica foi necessária ali.
+  - **Deliberadamente NÃO aplicado em `loginSchema.password`**: login
+    valida a senha digitada contra o hash já salvo, que pode ter sido
+    criado sob uma política mais fraca no passado — os próprios usuários
+    seed locais (`admin12345`/`caixa12345`) não teriam maiúscula nem
+    caractere especial. Aplicar a política atual ali travaria contas
+    antigas fora do sistema até troca forçada de senha (fora de escopo
+    desta missão). Documentado como comentário no próprio
+    `strongPasswordSchema`, não só aqui.
+  - **`UserFormModal.submit()` corrigido** (`SettingsPage.tsx`, Configurações
+    → Usuários): a missão pediu para "verificar" esse modal, e havia um gap
+    real — ele nunca usou nenhum schema Zod para senha, só um length-check
+    manual (`password.trim().length < 8`) que não saberia das novas regras.
+    Trocado por `strongPasswordSchema.safeParse(password)`, mesmo padrão já
+    usado nessa função para e-mail (`createUserSchema.shape.email.
+    safeParse(...)`) — a mensagem de erro exibida agora é a específica da
+    regra que falhou. Placeholder e texto de apoio do campo também
+    atualizados (e o mesmo texto de apoio adicionado em
+    `OnboardingPage.tsx`, que antes só dizia "Mínimo de 8 caracteres").
+  - **Testado ao vivo contra a API real** (`dev:api` rodando local), 6
+    cenários: (1) `POST /api/onboarding` com senha fraca (`senhafraca`) →
+    `400`, com as 3 mensagens específicas que faltavam (maiúscula, número,
+    especial) na mesma resposta; (2) mesmo endpoint com senha forte
+    (`SenhaForte#123`) → `201`; (3) `PUT /api/auth/users/:id` com
+    `password: ""` → `200`, sem erro de validação (confirma que campo
+    vazio não aciona a política forte); (4) mesmo endpoint com senha fraca
+    (`fraca123`) → `400`; (5) mesmo endpoint com senha forte nova
+    (`NovaSenha#456`) → `200`; (6) **login com a senha nova** → token JWT
+    emitido normalmente, prova de ponta a ponta que o hash foi realmente
+    atualizado no banco (não só que a rota retornou 200). Usuário e
+    empresas de teste removidos ao final (via `DELETE /api/auth/users/:id`
+    para o usuário, script descartável via Prisma para a empresa do
+    onboarding); nenhum resíduo.
   `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros**.
 
 ---

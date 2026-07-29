@@ -271,10 +271,13 @@ export function OnboardingPage() {
                       className="input pl-11"
                       type="password"
                       autoComplete="new-password"
-                      placeholder="Mínimo de 8 caracteres"
+                      placeholder="Crie uma senha forte"
                       {...register('password')}
                     />
                   </div>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Mínimo 8 caracteres, com maiúscula, minúscula, número e caractere especial.
+                  </p>
                   {errors.password && (
                     <span className="mt-1 block text-xs font-medium text-rose-500">
                       {errors.password.message}
