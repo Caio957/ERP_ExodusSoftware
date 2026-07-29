@@ -102,20 +102,33 @@
   de troca de token no Zustand (`impersonateLogin`/`exitImpersonate`) — ver
   Onda 2026-07-28/2026-07-28b em §11. **`main` e `origin/main` estão em
   sincronia em `388c213`.**
-  ✅ **`feature/public-onboarding` (frontend da Frente 1 — Tela Pública de
-  Onboarding + compliance LGPD + validação matemática de CPF/CNPJ +
-  política de senha forte)** — `OnboardingPage.tsx` (React Hook Form +
-  Zod, primeira tela do projeto nesse padrão, aprovado pelo Comandante como
-  novo padrão a manter), máscara de CNPJ/CPF, modais Padrão Ouro de Termos
-  de Uso/Política de Privacidade (`components/legal/`) para o checkbox de
-  consentimento nunca apontar para um link morto,
-  `packages/shared/src/utils/validators.ts` (dígito verificador Módulo 11,
-  empilhado só no `cnpj` do onboarding), e `strongPasswordSchema`
-  (`schemas/common.ts`, Módulo 11 do lado da senha: mínimo 8 + maiúscula +
-  minúscula + número + especial) propagado para onboarding, criação e
-  edição de usuário (não para login, de propósito) — ver Onda
-  2026-07-28c/2026-07-28d/2026-07-28e em §11. Push para `origin` autorizado
-  pelo Comandante — aguardando abertura do PR.
+  ✅ **`feature/public-onboarding` mesclada na `main` via PR #27** —
+  frontend da Frente 1 (Tela Pública de Onboarding + compliance LGPD +
+  validação matemática de CPF/CNPJ + política de senha forte):
+  `OnboardingPage.tsx` (React Hook Form + Zod, primeira tela do projeto
+  nesse padrão, aprovado pelo Comandante como novo padrão a manter),
+  máscara de CNPJ/CPF, modais Padrão Ouro de Termos de Uso/Política de
+  Privacidade (`components/legal/`) para o checkbox de consentimento nunca
+  apontar para um link morto, `packages/shared/src/utils/validators.ts`
+  (dígito verificador Módulo 11, empilhado só no `cnpj` do onboarding), e
+  `strongPasswordSchema` (`schemas/common.ts`, Módulo 11 do lado da senha:
+  mínimo 8 + maiúscula + minúscula + número + especial) propagado para
+  onboarding, criação e edição de usuário (não para login, de propósito) —
+  ver Onda 2026-07-28c/2026-07-28d/2026-07-28e em §11.
+  ✅ **`fix/separacao-admin` mesclada na `main` via PR #28** (`71a95fd`) —
+  script `apps/api/prisma/extract-admin.ts`: cria a empresa dedicada
+  "Exodus Software (Sede)" e move o super admin (`SUPER_ADMIN_EMAIL`) pra
+  lá, tirando-o de dentro do tenant de um cliente real onde ele estava
+  preso — rodado com sucesso em produção pelo Comandante.
+  ✅ **`fix/acesso-impersonate` mesclada na `main` via PR #29** (`38131e8`)
+  — script `apps/api/prisma/normalize-legacy-company-id.ts`: normaliza o
+  `Company.id` legado `"0001"` ("Loja Matriz", cliente real) para um UUID
+  de verdade, numa transação única que move as 16 tabelas filhas + o
+  `AuditLog` antes de apagar a linha antiga — rodado com sucesso em
+  produção (dry-run conferido antes), dados do cliente preservados
+  integralmente. Ver Onda 2026-07-28f em §11 para o relato completo do
+  diagnóstico (incluindo a hipótese inicial rejeitada de afrouxar
+  `impersonateSchema` via regex).
   ⚠️ **Padrão observado na rodada de correções de impressão (PRs #14→#16)**: cada uma das 3 PRs
   seguidas (#14→#16) tentou resolver o mesmo sintoma relatado pelo Comandante (página em
   branco/layout quebrado ao imprimir no Android) com uma causa raiz diferente — cada
@@ -3450,6 +3463,113 @@ mesclada na `main`.
     para o usuário, script descartável via Prisma para a empresa do
     onboarding); nenhum resíduo.
   `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros**.
+
+- ✅ **Onda 2026-07-28f — Super admin preso no tenant do cliente + ID legado
+  "0001" na "Loja Matriz" (dois incidentes de produção, resolvidos com
+  migrações cirúrgicas)** (2026-07-28/29): duas branches curtas, ambas a
+  partir da `main` já com o pacote de onboarding mesclado.
+  - **`fix/separacao-admin`** (PR #28, `71a95fd`): o Comandante identificou
+    que o super admin (`SUPER_ADMIN_EMAIL`) estava com `companyId` apontando
+    para o tenant de um cliente real em produção — consequência colateral
+    de como a conta foi criada nos primórdios do multi-tenant, antes de
+    existir qualquer noção de "empresa própria da Exodus". Script
+    `apps/api/prisma/extract-admin.ts` (mesmo padrão dry-run-friendly dos
+    scripts irmãos): cria a `Company` **"Exodus Software (Sede)"** (`ACTIVE`
+    desde o nascimento) e move só o `User.companyId` do super admin pra lá —
+    não toca em nenhum dado do cliente. Rodado com sucesso em produção
+    (relatado pelo Comandante).
+  - **`fix/acesso-impersonate`** (PR #29, `38131e8`): ao testar o botão
+    "Acessar Loja" contra a "Loja Matriz" (empresa real, poucos dados,
+    cliente pagante), o Comandante recebeu `400 Bad Request` /
+    "Dados inválidos" de `POST /api/admin/impersonate`. **A causa sugerida
+    inicialmente (pelo Gemini, consultado em paralelo pelo Comandante) foi
+    que o backend precisava aceitar "IDs legados numéricos de um sistema
+    antigo"**, com a correção proposta sendo afrouxar `impersonateSchema.
+    targetCompanyId` de `z.string().uuid()` para uma união aceitando
+    também `z.string().regex(/^\d+$/)`.
+    - **Essa causa foi investigada e rejeitada antes de qualquer código ser
+      alterado** — não porque a premissa fosse implausível à primeira
+      vista, mas porque contradizia diretamente a história documentada
+      deste projeto: `Company` só passou a existir na Onda 2026-07-19
+      (migração multi-tenant), e nasceu **já** com `id String @id @default
+      (uuid())` — nunca existiu uma "era pré-padronização" com IDs
+      numéricos de empresa neste sistema. `grep` em todo o backend por
+      `.uuid()` relacionado a empresa/tenant confirmou só 4 ocorrências,
+      nenhuma delas compatível com a hipótese.
+    - **Verificação ao vivo, em 3 camadas, antes de aceitar qualquer
+      correção**: (1) inspeção da aba **Payload** do DevTools confirmou que
+      o frontend realmente envia `{targetCompanyId: "0001"}` — o código do
+      `AdminContractsPage.tsx` já estava correto, batendo exatamente com
+      `impersonateSchema`; (2) a aba **Resposta** confirmou o Zod rejeitando
+      com `"Invalid uuid"`; (3) uma consulta `SELECT * FROM "Company"` via
+      pgAdmin **inicialmente rodou contra o banco `postgres` errado** (não
+      o `railway`, que é onde a API realmente lê/escreve — visível pelo
+      título da aba da Query Tool, `exodus_dev/postgres@...`) e não achou
+      nem "Loja Matriz" nem `id="0001"` — reforçando a suspeita por mais um
+      round. Só depois de reapontar a Query Tool para o banco `railway`
+      correto (mesmo servidor, banco diferente) é que a linha real apareceu:
+      `id="0001"`, `name="Loja Matriz"`, `status=ACTIVE`, `createdAt=
+      2026-07-21`. **A essa altura a premissa estava provada — não por
+      confiança na sugestão do Gemini, mas por evidência direta reproduzida
+      3 vezes de formas diferentes.**
+    - **Levantamento de blast radius antes de decidir a correção**: `grep`
+      em `schema.prisma` por `companyId` mapeou as 16 tabelas com FK para
+      `Company` (`onDelete: Restrict` em todas — o banco já recusa fisicamente
+      apagar uma empresa com dados vinculados). Verificado também que
+      `jwtPayloadSchema.companyId: z.string().uuid()` — que a princípio
+      pareceria bloquear login/uso normal da "Loja Matriz" — **na prática
+      nunca é executado em runtime**: `plugins/auth.ts` só chama `req.
+      jwtVerify()` (verifica assinatura, não roda o schema Zod contra o
+      payload decodificado); o tipo `JwtPayload` só existe para checagem
+      estática do TypeScript no momento de montar o payload antes de
+      assinar. Conclusão real: o dia a dia da cliente (login, PDV, vendas,
+      etc.) **nunca esteve em risco** — só duas rotas exclusivas do painel
+      de Super Admin (`impersonate` e `PATCH .../status`) quebravam, porque
+      só ali o Zod valida de verdade a cada requisição.
+    - **Duas opções apresentadas ao Comandante, com recomendação explícita**:
+      (A) allowlist exata (`z.literal('0001')`) nos dois pontos afetados —
+      rápido, zero risco de dado, mas deixa uma exceção permanente cravada
+      na rota de maior privilégio do sistema, sem garantia de que não
+      exista um terceiro ponto igual ainda não descoberto; (B) normalizar
+      o `Company.id` de `"0001"` para um UUID de verdade, numa migração
+      transacional — mais trabalho, mas elimina o problema de vez, sem
+      abrir exceção nenhuma no schema de segurança. **Recomendei
+      explicitamente a opção B**, justificada pelo próprio timing (poucos
+      dados ainda cadastrados — quanto mais a cliente usa o sistema, mais
+      arriscada a migração fica depois). O Comandante escolheu a opção B.
+    - **`normalize-legacy-company-id.ts`** (mesmo padrão dry-run +
+      `CONFIRM_MIGRATION=1` dos scripts irmãos): dentro de **uma única
+      transação**, (1) cria a `Company` nova com UUID novo, preservando
+      `name`/`document`/`status`/`createdAt` originais; (2) move as 16
+      tabelas filhas (`User`, `Product`, `ProductVariant`, `Person`,
+      `Invoice`, `InvoiceItem`, `SupplierProductMapping`, `CashRegister`,
+      `CashTransaction`, `Sale`, `SaleItem`, `SalePayment`, `StockMovement`,
+      `Setting`, `FinancialAccount`, `AccountSettlement`) + `AuditLog.
+      targetCompanyId` (sem FK, atualizado só por completude do histórico)
+      para o `companyId` novo — **nessa ordem**, depois de criar a empresa
+      nova e antes de apagar a antiga, pra nunca violar a proteção
+      `onDelete: Restrict` em nenhum momento intermediário; (3) só então
+      apaga a linha `id="0001"`. Conta linhas antes/depois de cada tabela e
+      aborta com erro se alguma contagem não bater.
+    - **Testado localmente antes de qualquer execução em produção**:
+      simulação completa da "Loja Matriz" (empresa + usuário + produto/
+      variante + pessoa + configuração + caixa + registro de auditoria)
+      criada no banco de dev; dry-run conferido; execução real conferida
+      (contagens batendo, dados originais intactos linha a linha — e-mail
+      do usuário, SKU/preço da variante, documento da pessoa, tudo
+      idêntico, só `companyId` mudando); idempotência confirmada (rodar de
+      novo depois de já migrado detecta "nada a fazer" e sai limpo, sem
+      erro). Dados de teste removidos ao final.
+    - **Execução real em produção** (Comandante, via console SSH do
+      serviço `exodus-web` no Railway, depois do merge da PR #29 e deploy
+      concluído): dry-run primeiro (66 produtos, 66 variantes, 88
+      movimentações de estoque, 11 vendas, 14 caixas, entre outras —
+      cliente real com uso de verdade do sistema, não só cadastro vazio),
+      depois `CONFIRM_MIGRATION=1` — todas as contagens bateram antes/depois,
+      novo UUID confirmado, `id="0001"` confirmado removido. **Sucesso,
+      sem nenhuma perda de dado.**
+  `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros** em
+  ambas as branches.
 
 ---
 
