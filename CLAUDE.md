@@ -3568,6 +3568,21 @@ mesclada na `main`.
       depois `CONFIRM_MIGRATION=1` — todas as contagens bateram antes/depois,
       novo UUID confirmado, `id="0001"` confirmado removido. **Sucesso,
       sem nenhuma perda de dado.**
+    - **Teste de aceitação final, no navegador, em produção** (Comandante,
+      confirmado em duas rodadas): (1) "Acessar Loja" para a Loja Matriz
+      funcionando normalmente depois da migração — fecha o ciclo do
+      sintoma original (o 400 em `POST /api/admin/impersonate`) de ponta a
+      ponta, não só a correção no banco; (2) **Bloquear/Reativar também
+      confirmados** — mesmo `:id` UUID-only de `PATCH /admin/companies/
+      :id/status` que antes quebrava para essa empresa, agora funciona.
+      Teste foi além do clique no painel: com a empresa `BLOCKED`, uma
+      tentativa de login real de um usuário da Loja Matriz foi barrada
+      com a mensagem de contato esperada (`COMPANY_NOT_ACTIVE`); depois de
+      `Reativar`, o login voltou a funcionar normalmente — confirma que a
+      normalização do ID não quebrou nada na cadeia completa
+      status-da-empresa → guarda de login, não só as duas rotas
+      administrativas. **Incidente encerrado, sem nenhuma pendência
+      restante.**
   `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros** em
   ambas as branches.
 
