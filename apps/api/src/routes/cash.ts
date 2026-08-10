@@ -269,6 +269,75 @@ export async function cashRoutes(app: FastifyInstance) {
     },
   );
 
+  // Reabre um caixa fechado — ele volta a ser o caixa ativo do operador para
+  // aquele tipo. `findFirst` (tenantDb) já fecha o IDOR de referenciar um
+  // caixa de outra empresa. Só o dono ou ADMIN pode reabrir (mesma regra do
+  // fechamento). Trava principal: o DONO não pode ter outro caixa OPEN do
+  // mesmo tipo — checagem inline por (userId, status, type), o mesmo padrão
+  // do `/open` (não há dois livros abertos do mesmo tipo). `CashRegister` não
+  // tem coluna `difference` (o valor é calculado sob demanda no fechamento),
+  // então só zeramos `closedAt`/`finalCash` e reabrimos o status.
+  r.post(
+    '/registers/:id/reopen',
+    { preHandler: app.authenticate, schema: { params: idParam } },
+    async (req) => {
+      const { db } = tenantDb(req);
+      const register = await db.cashRegister.findFirst({ where: { id: req.params.id } });
+      if (!register) throw new NotFoundError('Caixa');
+      if (register.userId !== req.user.sub && req.user.role !== 'ADMIN') {
+        throw new ForbiddenError('Você só pode reabrir o seu próprio caixa');
+      }
+      if (register.status === 'OPEN') throw new BusinessError('Este caixa já está aberto');
+
+      const alreadyOpen = await db.cashRegister.findFirst({
+        where: { userId: register.userId, status: 'OPEN', type: register.type },
+      });
+      if (alreadyOpen) {
+        throw new AppError(400, 'Feche o caixa atual deste tipo antes de reabrir um histórico.');
+      }
+
+      const updated = await db.cashRegister.update({
+        where: { id: register.id },
+        data: { status: 'OPEN', closedAt: null, finalCash: null },
+      });
+      return serializeDecimals(updated);
+    },
+  );
+
+  // Exclui um caixa SEM movimentações (o "vazio" da regra de negócio: só tem o
+  // valor de abertura, que é a coluna `initialCash` de CashRegister, não uma
+  // CashTransaction). Trava de segurança: se houver QUALQUER venda ou
+  // transação (sangria/suprimento/baixa) vinculada, recusa — o operador tem de
+  // remover as movimentações na origem primeiro. Só o dono ou ADMIN pode
+  // excluir. Com contagem 0, o delete é seguro (nenhuma FK filha para
+  // violar o `onDelete: Restrict`).
+  r.delete(
+    '/registers/:id',
+    { preHandler: app.authenticate, schema: { params: idParam } },
+    async (req, reply) => {
+      const { db } = tenantDb(req);
+      const register = await db.cashRegister.findFirst({ where: { id: req.params.id } });
+      if (!register) throw new NotFoundError('Caixa');
+      if (register.userId !== req.user.sub && req.user.role !== 'ADMIN') {
+        throw new ForbiddenError('Você só pode excluir o seu próprio caixa');
+      }
+
+      const [txCount, saleCount] = await Promise.all([
+        db.cashTransaction.count({ where: { cashRegisterId: register.id } }),
+        db.sale.count({ where: { cashRegisterId: register.id } }),
+      ]);
+      if (txCount + saleCount > 0) {
+        throw new AppError(
+          400,
+          'Caixa possui movimentações. Exclua as vendas e lançamentos antes de excluir o caixa.',
+        );
+      }
+
+      await db.cashRegister.delete({ where: { id: register.id } });
+      return reply.status(204).send();
+    },
+  );
+
   // Relatório periódico (extrato consolidado): unifica os movimentos de todos
   // os caixas do período (vendas + sangrias/suprimentos) e resume por forma de
   // pagamento + movimentação física da gaveta. RBAC igual ao /registers:

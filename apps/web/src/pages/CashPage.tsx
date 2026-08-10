@@ -17,10 +17,12 @@ import {
   Printer,
   FileBarChart,
   Landmark,
+  RotateCcw,
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../store/auth';
 import { CashReceipt } from '../components/CashReceipt';
+import { DeleteEmptyRegisterModal } from '../components/DeleteEmptyRegisterModal';
 import { printElementViaIframe } from '../lib/iframePrint';
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -125,12 +127,25 @@ function CurrentCash({ registerType }: { registerType: CashRegisterType }) {
   const [initialCash, setInitialCash] = useState('');
   const [txModal, setTxModal] = useState<{ type: 'SUPPLY' | 'BLEED' } | null>(null);
   const [closing, setClosing] = useState(false);
+  const [deletingEmpty, setDeletingEmpty] = useState(false);
   const [closeResult, setCloseResult] = useState<{ expectedCash: number; difference: number } | null>(null);
 
   const { data: register, isLoading } = useQuery({
     queryKey: ['cash-current', registerType],
     queryFn: () => api.get<CashRegister | null>(`/api/cash/current?type=${registerType}`),
   });
+
+  // Mesma queryKey que RegisterMovements/CashPrintButton usam — o React Query
+  // deduplica, então isto NÃO faz uma chamada extra à rede; só serve para o
+  // CurrentCash saber se o caixa está "vazio" (sem venda nem sangria/
+  // suprimento) e liberar a exclusão. `enabled` evita rodar antes do caixa
+  // atual resolver.
+  const { data: movementsData } = useQuery({
+    queryKey: ['cash-movements', register?.id],
+    queryFn: () => api.get<{ movements: Movement[] }>(`/api/cash/${register!.id}/movements`),
+    enabled: !!register,
+  });
+  const isEmpty = (movementsData?.movements.length ?? 0) === 0;
 
   const open = useMutation({
     mutationFn: () => api.post('/api/cash/open', { initialCash: Number(initialCash), type: registerType }),
@@ -219,6 +234,17 @@ function CurrentCash({ registerType }: { registerType: CashRegisterType }) {
         <Lock className="h-5 w-5" /> Fechar caixa
       </button>
 
+      {/* Caixa vazio (só o valor de abertura, sem venda/sangria/suprimento):
+          libera a exclusão, com alerta claro no modal sobre o impacto. */}
+      {isEmpty && (
+        <button
+          className="btn-ghost w-full border border-rose-200 text-rose-600 hover:bg-rose-50"
+          onClick={() => setDeletingEmpty(true)}
+        >
+          <Trash2 className="h-5 w-5" /> Excluir caixa
+        </button>
+      )}
+
       <RegisterSummary registerId={register.id} />
       <CashPrintButton register={register} />
       <RegisterMovements registerId={register.id} canEdit onChanged={refresh} />
@@ -244,6 +270,15 @@ function CurrentCash({ registerType }: { registerType: CashRegisterType }) {
             setCloseResult(result);
             refresh();
           }}
+        />
+      )}
+
+      {deletingEmpty && (
+        <DeleteEmptyRegisterModal
+          registerId={register.id}
+          initialCash={register.initialCash}
+          onClose={() => setDeletingEmpty(false)}
+          onDone={() => setDeletingEmpty(false)}
         />
       )}
 
@@ -529,6 +564,7 @@ function CashPrintButton({ register }: { register: CashRegister }) {
 
 // ---------------------------------------------------------------------------
 function CashHistory({ registerType }: { registerType: CashRegisterType }) {
+  const qc = useQueryClient();
   const [selected, setSelected] = useState<CashRegister | null>(null);
   // Volta para a lista ao trocar o toggle — evita ficar preso no detalhe de um
   // registro do tipo anterior enquanto a lista de fundo já mudou de filtro.
@@ -539,13 +575,39 @@ function CashHistory({ registerType }: { registerType: CashRegisterType }) {
     queryFn: () => api.get<CashRegister[]>(`/api/cash/registers?type=${registerType}`),
   });
 
+  const reopen = useMutation({
+    mutationFn: (id: string) => api.post(`/api/cash/registers/${id}/reopen`, {}),
+    onSuccess: () => {
+      // Recarrega o caixa atual (o reaberto agora é o ativo) e o histórico.
+      qc.invalidateQueries({ queryKey: ['cash-current'] });
+      qc.invalidateQueries({ queryKey: ['cash-registers'] });
+      setSelected(null);
+    },
+    onError: (e) => window.alert(e instanceof ApiError ? e.message : 'Falha ao reabrir o caixa'),
+  });
+
   if (isLoading) return <div className="grid h-40 place-items-center text-slate-500">Carregando...</div>;
   if (selected) {
     return (
       <div className="space-y-4">
-        <button className="btn-ghost" onClick={() => setSelected(null)}>
-          ← Voltar ao histórico
-        </button>
+        <div className="flex items-center justify-between gap-2">
+          <button className="btn-ghost" onClick={() => setSelected(null)}>
+            ← Voltar ao histórico
+          </button>
+          {selected.status !== 'OPEN' && (
+            <button
+              className="btn-ghost text-brand-700"
+              disabled={reopen.isPending}
+              onClick={() => {
+                if (window.confirm('Deseja reabrir este caixa? Ele se tornará o caixa ativo no momento.')) {
+                  reopen.mutate(selected.id);
+                }
+              }}
+            >
+              <RotateCcw className="h-5 w-5" /> Reabrir caixa
+            </button>
+          )}
+        </div>
         <div className="card">
           <div className="flex items-center justify-between">
             <div>
