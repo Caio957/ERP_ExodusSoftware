@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-07-28
+- **Última atualização:** 2026-07-29
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -520,6 +520,27 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   `CashTransaction` real gravada (evita dupla dedução), só um recurso visual
   para o operador entender por que o saldo caiu quando o financeiro de uma
   venda é excluído.
+  **Reabertura e exclusão de caixa** (onda 2026-07-29 — ver §11):
+  **`POST /cash/registers/:id/reopen`** reabre um caixa fechado (vira o
+  caixa ativo do operador para aquele tipo) — `findFirst` via `tenantDb`
+  (fecha IDOR), guard de posse (só dono ou ADMIN, espelha o `/close`),
+  bloqueia se já estiver aberto, e trava principal: recusa com
+  `AppError(400, 'Feche o caixa atual deste tipo antes de reabrir um
+  histórico.')` se o **dono** já tiver outro caixa `OPEN` do mesmo `type`
+  (checagem inline por `(userId, status, type)`, mesmo padrão do `/open`);
+  zera `closedAt`/`finalCash` e volta `status: 'OPEN'` — **não** mexe em
+  `difference` porque `CashRegister` não tem essa coluna (a diferença é
+  calculada sob demanda no fechamento, nunca persistida — achado que
+  evitaria um erro de Prisma se seguido o plano à risca).
+  **`DELETE /cash/registers/:id`** exclui um caixa "vazio" (só o valor de
+  abertura, que é a coluna `initialCash`, não uma `CashTransaction`): mesmo
+  guard de posse, e **trava de segurança** — conta `cashTransaction` +
+  `sale` com aquele `cashRegisterId`; se a soma for `> 0`, recusa com
+  `AppError(400, 'Caixa possui movimentações. Exclua as vendas e
+  lançamentos antes de excluir o caixa.')`; com contagem 0 o `delete` é
+  seguro (nenhuma FK filha para violar o `onDelete: Restrict`). Nenhuma das
+  duas rotas exigiu schema novo no `@exodus/shared` — só o `idParam` já
+  existente.
 - ✅ **Financeiro**: listar com **filtros avançados** — `orderBy`
   (`code`/`description`/`dueDate`/`amount`) + `orderDir`, e `statusFilter` semântico
   (`ALL`/`OPEN`/`OVERDUE`/`NOT_OVERDUE`/`PARTIAL`/`PAID`, este último com
@@ -801,6 +822,24 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   `type === 'BLEED'` explícito para também casar com `REVERSAL`, e trocar o
   rótulo fixo "Sangria" pela própria descrição do lançamento — "Estorno: Venda
   #X" — nesse caso específico).
+  **Reabrir / Excluir caixa** (onda 2026-07-29 — ver §11): na aba
+  **Histórico** (`CashHistory`), o detalhe de um caixa fechado ganhou o
+  botão **"Reabrir caixa"** (ícone `RotateCcw`, `window.confirm`) que chama
+  `POST /cash/registers/:id/reopen` e, no sucesso, invalida `cash-current` +
+  `cash-registers` e volta pra lista (o caixa reaberto vira o ativo). Na aba
+  **Caixa Atual** (`CurrentCash`), quando o caixa não tem nenhuma
+  movimentação (só o valor de abertura — detectado por uma query
+  `['cash-movements', id]` compartilhada/deduplicada com
+  `RegisterMovements`, sem chamada extra à rede), aparece um botão ghost
+  vermelho **"Excluir caixa"** que abre o **`DeleteEmptyRegisterModal`**
+  (novo em `components/`, Padrão Ouro via `createPortal`). O modal explica o
+  impacto (o valor de abertura, formatado, sai dos relatórios) e dá três
+  saídas: **Cancelar**; **"Não, manter e fechar caixa"** (fecha com
+  `finalCash = initialCash` → diferença R$ 0,00, preserva o histórico);
+  **"Sim, excluir definitivamente"** (chama `DELETE /cash/registers/:id`).
+  As mutations ficam encapsuladas nos componentes que as usam (modal e
+  `CashHistory`), mesmo padrão de `CloseModal`/`TransactionModal`, e
+  invalidam `cash-current` + `cash-registers`.
 - ✅ **Compras**: **aba "Sugestão de compra"** (`PurchaseSuggestion`, componente
   próprio) com filtros (marca/grupo/subgrupo/janela/reposição), **paginação
   client-side** + **scroll-to-top**, produto exibido como `#código - nome` com a
@@ -3585,6 +3624,50 @@ mesclada na `main`.
       restante.**
   `npm run typecheck` + `npm run build` (shared+api+web) → **0 erros** em
   ambas as branches.
+
+- ✅ **Onda 2026-07-29 — Reabertura de caixa + exclusão segura de caixa
+  vazio** (2026-07-29): branch `feature/reabertura-exclusao-caixa` (a
+  partir da `main`). Refinamento de UX pedido pelo Caio para o fluxo de
+  limpeza do caixa de teste da cliente: ela reabre o caixa, apaga as
+  vendas/manuais na origem, e ao final o caixa fica só com o valor de
+  abertura (`initialCash`) — tecnicamente "vazio" de movimentações. Nesse
+  ponto, liberamos a exclusão, com alerta claro e uma opção de
+  auto-fechamento caso desista.
+  - **Achado de premissa (evitou quebra)**: o plano pedia setar
+    `difference: null` na reabertura, mas `CashRegister` **não tem coluna
+    `difference`** (a diferença é calculada sob demanda no `/:id/close`,
+    nunca persistida). Incluir isso no `update` quebraria o typecheck/
+    Prisma — omitido; a reabertura zera só `closedAt`/`finalCash` e volta
+    `status: 'OPEN'`.
+  - **Backend** (`routes/cash.ts`): `POST /cash/registers/:id/reopen`
+    (findFirst tenant-scoped → IDOR fechado; guard de posse dono/ADMIN
+    espelhando `/close`; bloqueia se já aberto; trava por
+    `(userId, status, type)` — não pode ter dois livros abertos do mesmo
+    tipo, mesmo padrão do `/open`, o "ou similar" do `requireRegisterOfType`
+    citado no plano). `DELETE /cash/registers/:id` (mesmo guard; trava de
+    segurança conta `cashTransaction` + `sale` do caixa, recusa com 400 se
+    `> 0`; `delete` só com contagem 0, sem violar `onDelete: Restrict`).
+    Sem schema novo no shared — só o `idParam` já existente.
+  - **Frontend** (`CashPage.tsx` + `components/DeleteEmptyRegisterModal.tsx`
+    novo): botão "Reabrir caixa" (`RotateCcw` + `window.confirm`) no detalhe
+    do Histórico só para caixas fechados; botão ghost vermelho "Excluir
+    caixa" no Caixa Atual quando `movements.length === 0` (detectado por
+    uma query `['cash-movements', id]` deduplicada com `RegisterMovements`,
+    sem chamada extra); `DeleteEmptyRegisterModal` (Padrão Ouro,
+    `createPortal`) com os três botões: Cancelar / "Não, manter e fechar
+    caixa" (fecha com `finalCash = initialCash`, diferença R$ 0,00) / "Sim,
+    excluir definitivamente". Mutations encapsuladas nos componentes
+    (padrão de `CloseModal`/`TransactionModal`), invalidando
+    `cash-current` + `cash-registers`.
+  - **Decisão além do plano**: guards de posse (dono/ADMIN) nas duas rotas
+    por simetria com `/close`, evitando um CASHIER reabrir/excluir o caixa
+    de outro operador.
+  - **Homologação**: testes de aceitação confirmados pelo Comandante —
+    reabertura, bloqueio de tipo duplo, auto-fechamento e exclusão limpa,
+    todos funcionando. `npm run typecheck` + `npm run build`
+    (shared+api+web) → **0 erros**. (Teste HTTP ao vivo automatizado não
+    rodou nesta sessão — Docker/Postgres local estava parado; validado via
+    homologação manual do Comandante.)
 
 ---
 
