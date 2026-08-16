@@ -3,7 +3,7 @@ import { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { serializeDecimals } from '../lib/serialize.js';
 import { NotFoundError } from '../lib/errors.js';
 import { tenantDb } from '../lib/tenant.js';
-import { diffDaysBr } from '../lib/dates.js';
+import { computeBillingFlags } from '../lib/billing-guard.js';
 
 /**
  * Faturamento SaaS — visão do TENANT (Pilar 2). Deliberadamente SOMENTE
@@ -12,52 +12,12 @@ import { diffDaysBr } from '../lib/dates.js';
  * `setNotFoundHandler` (plugins/error-handler.ts) devolve 404 JSON para
  * qualquer POST/PUT/PATCH/DELETE sob este prefixo, já que o fallback de SPA só
  * vale para GET fora de `/api`.
- */
-
-interface BillingSettings {
-  billingReminderDays: number;
-  billingBlockGraceDays: number;
-  billingExempt: boolean;
-}
-
-/**
- * Sinais que o frontend (Pilar 3) usa para decidir entre não mostrar nada,
- * mostrar o aviso amigável, ou bloquear a loja. A regra de inadimplência é
- * calculada SÓ aqui — o cliente nunca recomputa datas.
  *
- * `daysUntilDue`/`daysOverdue` acompanham as flags de propósito: sem eles, o
- * frontend teria que refazer aritmética de fuso para escrever "vence em 3
- * dias", que é exatamente o cálculo que centralizamos no servidor.
+ * A regra que deriva as flags (`computeBillingFlags`) nasceu aqui e foi movida
+ * para `lib/billing-guard.ts` no Pilar 2b, quando a guarda de bloqueio real
+ * virou o 2º consumidor — esta rota (consultiva) e a guarda (que recusa de
+ * fato) precisam concordar sempre.
  */
-function computeBillingFlags(dueDate: Date | null, settings: BillingSettings) {
-  // Sem fatura em aberto não há o que avisar nem o que bloquear.
-  if (!dueDate) {
-    return {
-      shouldShowReminder: false,
-      isOverdue: false,
-      isBlocked: false,
-      daysUntilDue: null,
-      daysOverdue: 0,
-    };
-  }
-
-  // Positivo = faltam N dias · 0 = vence hoje · negativo = venceu há N dias.
-  const daysUntilDue = diffDaysBr(dueDate);
-  const isOverdue = daysUntilDue < 0;
-  const daysOverdue = isOverdue ? -daysUntilDue : 0;
-
-  return {
-    // Janela de cortesia ANTES do vencimento (inclui o próprio dia: 0).
-    shouldShowReminder: !isOverdue && daysUntilDue <= settings.billingReminderDays,
-    isOverdue,
-    // `>` e não `>=`: com carência 3, só bloqueia no 4º dia de atraso.
-    // `billingExempt` neutraliza SÓ o bloqueio — o lojista isento continua
-    // vendo que está em atraso, mas nunca perde o acesso.
-    isBlocked: isOverdue && daysOverdue > settings.billingBlockGraceDays && !settings.billingExempt,
-    daysUntilDue,
-    daysOverdue,
-  };
-}
 
 export async function billingRoutes(app: FastifyInstance) {
   const r = app.withTypeProvider<ZodTypeProvider>();

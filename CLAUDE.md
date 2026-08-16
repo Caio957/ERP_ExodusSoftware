@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-08-14
+- **Última atualização:** 2026-08-16
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -578,10 +578,11 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
 - ✅ **Dashboard** (§novo, ADMIN): `GET /dashboard?from&to` — agrega vendas, recebimentos
   por forma, série diária e situação de contas a pagar/receber.
 - ✅ **Sugestão de compra** (§4.6): média de vendas na janela × lead time.
-- 🟡 **Faturamento SaaS — Pilares 1 e 2 (schema + criptografia + rotas)**
-  (Módulo de Mensalidade/Inadimplência, ondas 2026-08-14 e 2026-08-14b — ver
-  §11): fundação de dados **+ API completa**; falta só o frontend (Pilar 3) e
-  a guarda de bloqueio efetiva (ver §14.0). `Company` ganhou três campos de
+- 🟡 **Faturamento SaaS — Pilares 1, 2 e 2b (schema + criptografia + rotas +
+  bloqueio efetivo)**
+  (Módulo de Mensalidade/Inadimplência, ondas 2026-08-14, 2026-08-14b e
+  2026-08-16 — ver §11): fundação de dados **+ API completa + enforcement
+  real**; falta só o frontend (Pilar 3, ver §14.0). `Company` ganhou três campos de
   controle: `billingReminderDays Int @default(5)` (dias ANTES do vencimento
   em que o aviso amigável aparece), `billingBlockGraceDays Int @default(3)`
   (carência DEPOIS do vencimento antes de bloquear) e `billingExempt Boolean
@@ -623,6 +624,34 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   para o front nunca refazer aritmética de fuso). Nenhum verbo de escrita é
   declarado nesse prefixo: o `setNotFoundHandler` já devolve 404 JSON (o
   fallback de SPA só vale para GET fora de `/api`).
+  **Guarda de bloqueio (Pilar 2b, onda 2026-08-16)** — o bloqueio agora é
+  **efetivo no backend, não mais só de UI**: até aqui `isBlocked` era uma flag
+  puramente consultiva, e um tenant inadimplente que chamasse `/api/sales`
+  direto na API era atendido normalmente. `plugins/billing-guard.ts` registra
+  um `preHandler` **global** (`fp`, registrado em `app.ts` depois do
+  `authPlugin` e **antes** de `registerRoutes` — hook só vale para rotas
+  registradas depois dele) que recusa as rotas de negócio com
+  `403 / code: 'BILLING_BLOCKED'` (código próprio, para o Pilar 3 distinguir
+  "sem permissão de papel" de "empresa em atraso" e abrir a tela de cobrança —
+  mesmo precedente do `NO_TENANT`). A regra saiu de dentro de `routes/billing.ts`
+  para `lib/billing-guard.ts` e virou **fonte única** (`computeBillingFlags`
+  pura + `getTenantBillingStatus(companyId)`), para a tela consultiva e a
+  guarda nunca divergirem. **Allowlist** (`/api/auth/`, `/api/billing/current`,
+  `/api/admin/`, `/api/onboarding`): sem `/auth` o lojista não loga nem carrega
+  a sessão, sem `/billing/current` não vê o PIX para pagar, sem `/admin` o
+  suporte não o destrava — bloquear qualquer um seria um beco sem saída. O CRUD
+  de usuários (`/api/auth/users`) fica **deliberadamente fora do bloqueio** por
+  morar sob `/auth`: gerenciar operador não move dinheiro, e o bloqueado segue
+  sem vender, comprar, baixar título ou ver relatório. **Exceções de
+  identidade**: `isImpersonating` (o suporte precisa entrar justamente na loja
+  bloqueada) e `SUPER_ADMIN_EMAIL`. O casamento é feito contra
+  `req.routeOptions.url` (o **padrão registrado**, ex.: `/api/products/:id`),
+  nunca a URL crua — a allowlist é o lado permissivo da regra, então não pode
+  ser decidida por string controlada pelo cliente (`/api/auth/../products`).
+  A query é 1 `findUnique` com relação aninhada `take: 1`, com `prisma` cru e
+  `companyId` explícito (o valor vem do JWT já verificado) — **sem cache** por
+  decisão consciente; se o volume crescer, o ponto natural de otimização é um
+  cache em memória de 30–60s por `companyId`.
   Próximo pilar: frontend — ver §14.0.
 
 ### Frontend
@@ -3833,6 +3862,79 @@ mesclada na `main`.
   - **Validação**: `npm run typecheck` + `npm run build` (shared+api+web) →
     **0 erros**.
 
+- ✅ **Onda 2026-08-16 — Faturamento SaaS, Pilar 2b (guarda REAL de bloqueio
+  por inadimplência)** (2026-08-16): mesma branch `feature/tenant-billing-schema`.
+  Fecha o gap que a própria Onda 2026-08-14b registrou como ressalva: `isBlocked`
+  era só uma flag consultiva, então o bloqueio existia apenas se a UI decidisse
+  respeitá-lo — e UI é contornável (bastava chamar `/api/sales` direto).
+  - **🐛 Defeito do Pilar 2 encontrado e corrigido**: `routes/index.ts`
+    **importava** `billingRoutes` mas **nunca o registrava** — não havia
+    `app.register(billingRoutes, { prefix: '/billing' })`. Ou seja,
+    `GET /api/billing/current` respondia **404** desde o commit `2434d8b`, e
+    o `typecheck` não pegou porque nenhum `tsconfig` do monorepo liga
+    `noUnusedLocals` (um import não usado passa batido). Não era um extra: a
+    allowlist isenta essa rota justamente para o lojista bloqueado ver o PIX e
+    se regularizar — com ela em 404, o bloqueio viraria um beco sem saída.
+    **Lição**: import presente ≠ rota registrada; typecheck verde não prova
+    que uma rota existe. Coberto agora por uma asserção em `printRoutes()`.
+  - **⚠️ Achado de ordem de hooks do Fastify (definiu o desenho)**:
+    `app.authenticate` é um `preHandler` **de rota**, e no Fastify os hooks de
+    instância (`addHook`) rodam **antes** dos preHandlers da rota — então,
+    dentro de um hook global, `req.user` ainda está `undefined`. Uma
+    implementação ingênua lendo `req.user.isImpersonating` não seria um no-op:
+    quebraria com `TypeError` em **toda** requisição do sistema. A guarda
+    portanto chama `req.jwtVerify()` por conta própria, em try/catch — token
+    ausente/inválido é 401 do `authenticate` da rota, não 403 daqui.
+  - **`lib/billing-guard.ts`** (novo): a regra saiu de dentro de
+    `routes/billing.ts` (onde nasceu privada) e virou fonte única, mesmo
+    precedente de `calcWeightedAverageCost`/`apportionLandedCost`/`todayStartBr`
+    — duplicá-la seria a pior divergência possível neste módulo (tela dizendo
+    "em dia" enquanto a API bloqueia, ou pior, o inverso). Exporta
+    `computeBillingFlags` (pura, movida *verbatim* — `/billing/current`
+    responde byte a byte igual) e `getTenantBillingStatus(companyId)`.
+    Esta usa o `prisma` **cru** com `companyId` explícito no `where`, não
+    `withTenant`: o isolamento é o mesmo (o valor vem do JWT verificado, nunca
+    do corpo), mas sem alocar duas extensões de Prisma a cada requisição do
+    sistema inteiro — e nenhum campo cifrado é lido aqui (só `dueDate`), então
+    `withEncryption` também não teria o que fazer. **Erro de banco não é
+    capturado de propósito**: a exceção sobe e vira 500, negando a requisição
+    (*fail-closed*); engolir a falha e devolver `isBlocked: false`
+    transformaria uma instabilidade de banco em liberação geral de acesso.
+  - **`plugins/billing-guard.ts`** (novo) + registro em `app.ts` — ver §5
+    (bullet Faturamento SaaS) para allowlist, exceções e a nota de cache.
+  - **✅ Migração `add_tenant_billing` aplicada e validada pela primeira vez**:
+    escrita à mão em 2026-08-14 com o Docker parado, **nunca tinha sido
+    aplicada em lugar nenhum** — se o SQL estivesse malformado, só quebraria no
+    deploy do Railway. Nesta sessão o `docker ps` continuava falhando (pipe do
+    Docker Desktop fora), mas o **Postgres local em `localhost:5432` estava no
+    ar**: `prisma migrate status` acusou a migração pendente e
+    `prisma migrate deploy` a aplicou **sem erro** em `exodus_dev`.
+  - **Testado ao vivo, ponta a ponta** (2 scripts descartáveis via
+    `app.inject()`, apagados ao final; `git status` conferido, zero resíduo).
+    **18 asserções sem banco** (guarda com a query stubada): bloqueio em
+    `/sales`+`/products`+`/cash/current`; allowlist não bloqueia; impersonate,
+    super admin e sessão sem `companyId` passam; borda da carência (3 dias com
+    carência 3 **não** bloqueia, 4 dias bloqueia — o `>` está certo);
+    requisição sem `Authorization` continua 401 do `authenticate` (a guarda não
+    interfere) e `/health` intacto. **30 asserções COM banco real** — a
+    primeira validação de verdade dos Pilares 1 e 2, que as duas ondas
+    anteriores não conseguiram fazer: `POST /api/admin/billing` → 201 nascendo
+    `PENDING`, `amount` serializado como number, `dueDate` gravada em
+    `2026-08-01T03:00:00.000Z` (a âncora de fuso funcionando de verdade contra
+    o banco); **`pixPayload` confirmado cifrado em repouso** — lido com
+    `$queryRaw` cru veio `encgcm1:...` e o texto claro do PIX **não** aparece
+    na tabela, enquanto a rota devolve legível; guarda bloqueando com
+    `BILLING_BLOCKED` e `/billing/current` continuando acessível **com o PIX
+    decifrado** (o caminho de saída do bloqueio, comprovado); `billingExempt`
+    liberando o acesso e mantendo `isOverdue: true`; remover a isenção volta a
+    bloquear; baixar a fatura (`PAID`) libera; baixar de novo → 422 (estado
+    terminal); `ADMIN` comum de tenant → 403 no painel admin; e os 6 registros
+    de `AuditLog` esperados (`BILLING_CREATE`, `BILLING_SETTINGS_UPDATE` ×2,
+    `BILLING_EXEMPT_ON`/`OFF`, `BILLING_STATUS_PAID`). Empresa/faturas/logs de
+    teste removidos ao final, com contagem conferida.
+  - **Validação**: `npm run typecheck` + `npm run build` (shared+api+web) →
+    **0 erros**.
+
 ---
 
 ## 12. Pendências, bloqueios e dívidas técnicas
@@ -3986,19 +4088,16 @@ Módulo de Mensalidade e Controle de Inadimplência, entregue por pilares:
   (`GET /api/billing/current`, somente leitura), com auditoria obrigatória e
   o cálculo de "dias para vencer/bloquear" no fuso da loja. Ver §5 e Onda
   2026-08-14b em §11.
-  ⚠️ **Ressalva de escopo**: a versão anterior desta seção listava a "guarda
-  de bloqueio por inadimplência" como parte do Pilar 2, mas a missão executada
-  definiu `/billing/current` como **consultivo** — a rota expõe a flag
-  `isBlocked`, e nada ainda impede um tenant bloqueado de usar a API chamando-a
-  direto. Enquanto a guarda não existir, o bloqueio é só de UI e é
-  contornável. Decidir em que pilar ela entra (ver item abaixo).
-- ⬜ **Pilar 2b — Guarda de bloqueio (enforcement)**: um `preHandler`/
-  `onRequest` global que recuse rotas de negócio quando o tenant está
-  bloqueado, derivando do mesmo cálculo de `routes/billing.ts` (extrair a
-  regra para um helper compartilhado em vez de duplicá-la). Precisa de uma
-  lista de exceções — `/auth/*`, `/billing/current` e o próprio pagamento não
-  podem ser bloqueados, senão o cliente fica sem como se regularizar.
-  **Ainda não iniciado.**
+- ✅ **Pilar 2b — Guarda de bloqueio (enforcement)** (concluído, onda
+  2026-08-16): `preHandler` global (`plugins/billing-guard.ts`) que recusa as
+  rotas de negócio com `403 / BILLING_BLOCKED` quando o tenant está bloqueado,
+  derivando da mesma regra de `/billing/current` — extraída para
+  `lib/billing-guard.ts` como fonte única, em vez de duplicada. Allowlist
+  (`/auth/*`, `/billing/current`, `/admin/*`, `/onboarding`) para o cliente
+  nunca ficar sem como se regularizar, e exceções para impersonate e super
+  admin. **O bloqueio agora é efetivo no backend, não só de UI.** Corrigiu
+  junto um defeito do Pilar 2 (`billingRoutes` importado mas nunca registrado
+  — `/api/billing/current` respondia 404). Ver §5 e Onda 2026-08-16 em §11.
 - ⬜ **Pilar 3 — Frontend**: painel do Super Admin para gerir mensalidades +
   aviso amigável/tela de bloqueio no ERP do lojista — **ainda não iniciado**.
   A API já entrega `daysUntilDue`/`daysOverdue` prontos para o front nunca

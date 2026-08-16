@@ -28,4 +28,7 @@ export async function registerRoutes(app: FastifyInstance) {
   await app.register(purchaseSuggestionRoutes, { prefix: '/purchase-suggestions' });
   await app.register(settingsRoutes, { prefix: '/settings' });
   await app.register(dashboardRoutes, { prefix: '/dashboard' });
+  // Faturamento SaaS — visão do tenant (somente leitura). Emitir/baixar fatura
+  // é exclusivo do Super Admin, em `adminRoutes`.
+  await app.register(billingRoutes, { prefix: '/billing' });
 }
