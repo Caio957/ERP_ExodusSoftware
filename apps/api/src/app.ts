@@ -10,6 +10,7 @@ import {
 } from 'fastify-type-provider-zod';
 import { env } from './env.js';
 import { authPlugin } from './plugins/auth.js';
+import { billingGuardPlugin } from './plugins/billing-guard.js';
 import { errorHandlerPlugin } from './plugins/error-handler.js';
 import { registerRoutes } from './routes/index.js';
 
@@ -41,6 +42,12 @@ export function buildApp() {
   // Infra: tratamento global de erros + autenticação/RBAC
   app.register(errorHandlerPlugin);
   app.register(authPlugin);
+  /**
+   * Guarda de inadimplência (Faturamento SaaS, Pilar 2b). Depende do
+   * @fastify/jwt registrado pelo `authPlugin` e precisa vir ANTES de
+   * `registerRoutes`: um hook só se aplica às rotas registradas depois dele.
+   */
+  app.register(billingGuardPlugin);
 
   // Healthcheck
   app.get('/health', async () => ({ status: 'ok', ts: new Date().toISOString() }));

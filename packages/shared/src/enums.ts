@@ -48,3 +48,12 @@ export type FinancialAccountType = z.infer<typeof FinancialAccountType>;
 // PARTIAL = baixa parcial. "Vencido" é derivado (dueDate < hoje e status != PAID).
 export const FinancialAccountStatus = z.enum(['PENDING', 'PARTIAL', 'PAID']);
 export type FinancialAccountStatus = z.infer<typeof FinancialAccountStatus>;
+
+/**
+ * Status de uma fatura de mensalidade SaaS (TenantBilling).
+ * PENDING   = aguardando pagamento
+ * PAID      = baixada (manual ou automática)
+ * CANCELLED = cancelada pelo Super Admin
+ */
+export const TenantBillingStatus = z.enum(['PENDING', 'PAID', 'CANCELLED']);
+export type TenantBillingStatus = z.infer<typeof TenantBillingStatus>;

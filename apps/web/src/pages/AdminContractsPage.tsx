@@ -14,10 +14,13 @@ import {
   RotateCcw,
   LogIn,
   Mail,
+  SlidersHorizontal,
   type LucideIcon,
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../store/auth';
+import { AdminNav } from '../components/admin/AdminNav';
+import { BillingSettingsModal } from '../components/billing/BillingSettingsModal';
 
 interface CompanyAdminUser {
   id: string;
@@ -32,6 +35,10 @@ interface CompanyRow {
   status: CompanyStatus;
   createdAt: string;
   users: CompanyAdminUser[];
+  /** Política de cobrança (Faturamento SaaS) — editada pelo modal "Cobrança". */
+  billingReminderDays: number;
+  billingBlockGraceDays: number;
+  billingExempt: boolean;
 }
 
 type TabKey = CompanyStatus | 'ALL';
@@ -71,6 +78,7 @@ export function AdminContractsPage() {
   const [tab, setTab] = useState<TabKey>('PENDING');
   const [search, setSearch] = useState('');
   const [toast, setToast] = useState<string | null>(null);
+  const [billingOf, setBillingOf] = useState<CompanyRow | null>(null);
 
   const flash = (msg: string) => {
     setToast(msg);
@@ -152,6 +160,8 @@ export function AdminContractsPage() {
           <p className="text-sm text-slate-500">Gestão de contratos — Back-Office exclusivo da Exodus.</p>
         </div>
       </div>
+
+      <AdminNav />
 
       <div className="flex items-start gap-2 rounded-xl border border-accent-300 bg-accent-50 px-4 py-2.5 text-xs font-semibold text-accent-800">
         <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
@@ -250,10 +260,23 @@ export function AdminContractsPage() {
                     </td>
                     <td className="text-slate-500">{fmtDate(c.createdAt)}</td>
                     <td>
-                      <span className={meta.badge}>{meta.label}</span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className={meta.badge}>{meta.label}</span>
+                        {/* A isenção desliga o bloqueio por inadimplência —
+                            visível na grade para não ficar escondida atrás de
+                            um modal. */}
+                        {c.billingExempt && <span className="badge-neutral">Isento de bloqueio</span>}
+                      </div>
                     </td>
                     <td>
                       <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-200"
+                          title="Aviso prévio, carência e isenção de bloqueio"
+                          onClick={() => setBillingOf(c)}
+                        >
+                          <SlidersHorizontal className="h-3.5 w-3.5" /> Cobrança
+                        </button>
                         {c.status === 'PENDING' && (
                           <>
                             <button
@@ -329,6 +352,20 @@ export function AdminContractsPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {billingOf && (
+        <BillingSettingsModal
+          companyId={billingOf.id}
+          companyName={billingOf.name}
+          current={{
+            billingReminderDays: billingOf.billingReminderDays,
+            billingBlockGraceDays: billingOf.billingBlockGraceDays,
+            billingExempt: billingOf.billingExempt,
+          }}
+          onClose={() => setBillingOf(null)}
+          onSaved={flash}
+        />
       )}
 
       {toast && (

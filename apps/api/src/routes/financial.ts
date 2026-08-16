@@ -13,6 +13,7 @@ import {
 import { serializeDecimals } from '../lib/serialize.js';
 import { AppError, BusinessError, NotFoundError } from '../lib/errors.js';
 import { tenantDb, type TenantClient } from '../lib/tenant.js';
+import { todayStartBr } from '../lib/dates.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -36,17 +37,6 @@ type FinancialTxClient = {
     }): Promise<{ cashRegister: { type: string } } | null>;
   };
 };
-
-/**
- * Meia-noite de hoje no horário da loja (America/Sao_Paulo, UTC-3) — não usa
- * `new Date().setHours(0,0,0,0)` porque em produção (Railway) o processo roda
- * em UTC, não no fuso da loja; mesmo raciocínio já documentado em
- * `routes/cash.ts` (relatório periódico).
- */
-function todayStartBr(): Date {
-  const localDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
-  return new Date(`${localDateStr}T00:00:00.000-03:00`);
-}
 
 /**
  * Garante que o operador logado tem, especificamente, o caixa do tipo

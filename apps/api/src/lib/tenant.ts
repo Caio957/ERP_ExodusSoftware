@@ -24,6 +24,7 @@ const TENANT_SCOPED_MODELS = new Set([
   'Setting',
   'FinancialAccount',
   'AccountSettlement',
+  'TenantBilling',
 ]);
 
 // Operações em que dá para injetar `companyId` de forma segura e direta no

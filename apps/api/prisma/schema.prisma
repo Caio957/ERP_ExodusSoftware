@@ -73,6 +73,11 @@ model Company {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Controle de faturamento SaaS (mensalidade)
+  billingReminderDays   Int     @default(5) // quantos dias ANTES do vencimento o aviso amigável aparece
+  billingBlockGraceDays Int     @default(3) // quantos dias DEPOIS do vencimento o sistema ainda tolera antes de bloquear
+  billingExempt         Boolean @default(false) // chave mestra de exceção: se true, o tenant nunca é bloqueado por atraso
+
   users                   User[]
   products                Product[]
   productVariants         ProductVariant[]
@@ -89,6 +94,7 @@ model Company {
   settings                Setting[]
   financialAccounts       FinancialAccount[]
   accountSettlements      AccountSettlement[]
+  tenantBillings          TenantBilling[]
 }
 
 // 0b. AUDITORIA (Plano Mestre V2.0, Frente 4 — Impersonate) ------------------
@@ -107,6 +113,33 @@ model AuditLog {
 
   @@index([adminUserId])
   @@index([targetCompanyId])
+}
+
+// ============================================================================
+// FATURAMENTO SAAS — Histórico de mensalidades dos tenants
+// ============================================================================
+// O campo `pixPayload` contém o PIX Copia e Cola e é cifrado em repouso
+// via a extensão `withEncryption` (AES-256-GCM, mesmo esquema de
+// Person.email / Person.phone). Nunca deve ser exposto em listagens
+// comuns de tenant — apenas via rotas específicas de billing.
+model TenantBilling {
+  id         String    @id @default(uuid())
+  companyId  String
+  company    Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  amount     Decimal   @db.Decimal(10, 2)
+  dueDate    DateTime
+  pixPayload String    // PIX Copia e Cola — cifrado (GCM)
+  status     String    @default("PENDING") // PENDING | PAID | CANCELLED  (validado por TenantBillingStatus no shared)
+  paidAt     DateTime?
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([companyId])
+  @@index([status])
+  @@index([dueDate])
+  @@index([companyId, status])
 }
 
 // 1. USUÁRIOS E RBAC ---------------------------------------------------------

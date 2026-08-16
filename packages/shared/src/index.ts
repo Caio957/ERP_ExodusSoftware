@@ -13,3 +13,4 @@ export * from './schemas/financial.js';
 export * from './schemas/settings.js';
 export * from './schemas/admin.js';
 export * from './schemas/onboarding.js';
+export * from './schemas/billing.js';
