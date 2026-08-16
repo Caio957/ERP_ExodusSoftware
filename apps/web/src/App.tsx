@@ -15,6 +15,7 @@ import { RegistrationsPage } from './pages/RegistrationsPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { StockAdjustPage } from './pages/StockAdjustPage';
 import { AdminContractsPage } from './pages/AdminContractsPage';
+import { AdminBillingPage } from './pages/AdminBillingPage';
 
 export function App() {
   return (
@@ -45,6 +46,7 @@ export function App() {
                 separado do RBAC por papel (role) do tenant, ver SuperAdminRoute. */}
             <Route element={<SuperAdminRoute />}>
               <Route path="/admin/contratos" element={<AdminContractsPage />} />
+              <Route path="/admin/faturamento" element={<AdminBillingPage />} />
             </Route>
           </Route>
         </Route>

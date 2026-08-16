@@ -1,5 +1,6 @@
 import { tokenStore } from './token';
 import { useAuth } from '../store/auth';
+import { queryClient } from './queryClient';
 
 /** URL base da API. Em dev usamos o proxy do Vite ('/api'). */
 const BASE_URL = import.meta.env.VITE_API_URL ?? '';
@@ -67,6 +68,16 @@ export async function apiFetch<T = unknown>(
           if (result.ok) window.location.href = '/login';
           else window.alert(result.message);
         });
+    }
+    // BILLING_BLOCKED: a guarda de inadimplência (Pilar 2b) recusou uma rota
+    // de negócio. Em vez de deixar a tela mostrar um erro genérico de "acesso
+    // negado", refaz a leitura de /billing/current — que está na allowlist da
+    // guarda e portanto continua acessível — para o `BillingGate` reagir à
+    // flag nova e subir a tela de bloqueio com o PIX.
+    // Diferente de NO_TENANT, NÃO desloga nem limpa o token: a sessão é
+    // válida; o que falta é pagamento, não autenticação.
+    if (code === 'BILLING_BLOCKED') {
+      void queryClient.invalidateQueries({ queryKey: ['billing', 'current'] });
     }
     throw new ApiError(res.status, message, code, data);
   }

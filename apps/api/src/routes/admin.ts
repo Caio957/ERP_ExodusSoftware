@@ -123,6 +123,13 @@ export async function adminRoutes(app: FastifyInstance) {
           document: true,
           status: true,
           createdAt: true,
+          // Política de cobrança (Faturamento SaaS): o painel precisa exibir o
+          // valor ATUAL antes de deixar editar — em especial `billingExempt`,
+          // que desliga o bloqueio por atraso. Sem isto o Super Admin editaria
+          // às cegas e poderia sobrescrever uma carência customizada.
+          billingReminderDays: true,
+          billingBlockGraceDays: true,
+          billingExempt: true,
           users: {
             where: { role: 'ADMIN' },
             select: { id: true, name: true, email: true },

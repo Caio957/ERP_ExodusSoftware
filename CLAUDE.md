@@ -578,11 +578,10 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
 - ✅ **Dashboard** (§novo, ADMIN): `GET /dashboard?from&to` — agrega vendas, recebimentos
   por forma, série diária e situação de contas a pagar/receber.
 - ✅ **Sugestão de compra** (§4.6): média de vendas na janela × lead time.
-- 🟡 **Faturamento SaaS — Pilares 1, 2 e 2b (schema + criptografia + rotas +
-  bloqueio efetivo)**
-  (Módulo de Mensalidade/Inadimplência, ondas 2026-08-14, 2026-08-14b e
-  2026-08-16 — ver §11): fundação de dados **+ API completa + enforcement
-  real**; falta só o frontend (Pilar 3, ver §14.0). `Company` ganhou três campos de
+- ✅ **Faturamento SaaS — módulo completo (Pilares 1, 2, 2b e 3)**
+  (Módulo de Mensalidade/Inadimplência, ondas 2026-08-14, 2026-08-14b,
+  2026-08-16 e 2026-08-16b — ver §11): schema + criptografia + API +
+  enforcement real + frontend das duas faces. `Company` ganhou três campos de
   controle: `billingReminderDays Int @default(5)` (dias ANTES do vencimento
   em que o aviso amigável aparece), `billingBlockGraceDays Int @default(3)`
   (carência DEPOIS do vencimento antes de bloquear) e `billingExempt Boolean
@@ -652,7 +651,8 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   `companyId` explícito (o valor vem do JWT já verificado) — **sem cache** por
   decisão consciente; se o volume crescer, o ponto natural de otimização é um
   cache em memória de 30–60s por `companyId`.
-  Próximo pilar: frontend — ver §14.0.
+  **Frontend (Pilar 3, onda 2026-08-16b)** — ver o bullet "Faturamento SaaS
+  (frontend)" logo abaixo, na seção Frontend.
 
 ### Frontend
 - ✅ **Shell**: ErrorBoundary, Layout touch, ProtectedRoute (RBAC), StatusBadge
@@ -1143,6 +1143,49 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
   `OnboardingPage.tsx`. Placeholder e texto de apoio abaixo do campo
   atualizados para descrever a regra real (antes só diziam "mínimo 8
   caracteres").
+- ✅ **Faturamento SaaS — frontend (Pilar 3, onda 2026-08-16b)**: duas faces.
+  **(A) Back-Office do Super Admin** — nova rota `/admin/faturamento`
+  (`AdminBillingPage.tsx`), página **irmã** de `/admin/contratos` sob o mesmo
+  `<SuperAdminRoute>` (não uma aba dentro dela: aquela página já usa abas para
+  filtrar EMPRESAS por status, e faturas são outra entidade — duas dimensões de
+  aba na mesma barra confundiriam). `AdminNav.tsx` (pílula segmentada) liga as
+  duas; nenhuma entra em `navItems` do `Layout` (essa lista é filtrada por
+  `canAccess`, RBAC de tenant, que não se aplica ao super admin) — a entrada
+  continua sendo o ícone `ShieldCheck` do header. Lista faturas com abas por
+  status + filtro por empresa, rótulo `badge-danger` "Vencido há N dias",
+  modais Padrão Ouro de **Lançar mensalidade** e **Ver PIX**, e Baixar/Cancelar
+  por linha (só em `PENDING`, com `window.confirm`). A **política de cobrança**
+  por empresa (`BillingSettingsModal`) fica em `/admin/contratos`, junto da
+  listagem de empresas — é lá que `Company` vive; a grade também ganhou um
+  badge "Isento de bloqueio" para a chave-mestra não ficar escondida atrás de
+  um modal.
+  **(B) UX progressiva do lojista** — `useBillingStatus` (`queryKey`
+  `['billing','current']`, estável, deduplicada pelo React Query: qualquer
+  componente consome sem requisição extra, sem precisar de Context) alimenta o
+  `BillingGate`, montado uma vez no `Layout`. Três estágios: **lembrete**
+  (`shouldShowReminder`, modal amigável, "Lembrar mais tarde"), **aviso de
+  atraso** (`isOverdue && !isBlocked`, mesmo componente em tom âmbar, botão
+  "Estou ciente de que o acesso poderá ser bloqueado") e **bloqueio total**
+  (`isBlocked`, `BillingBlockedScreen` — tela cheia, **sem** botão de fechar,
+  sem Esc, sem clique no fundo; a única ação é "Sair", senão o operador ficaria
+  preso sem conseguir nem trocar de usuário no tablet). `PixPanel` (QR via
+  `qrcode.react`/`QRCodeSVG` + Copia e Cola + "Copiar PIX" com fallback de
+  `execCommand` para WebView antigo) é compartilhado pelos três estágios e pelo
+  "Ver PIX" do admin.
+  **Decisões de UX registradas**: (1) a dispensa é **por sessão e por fatura**
+  (`sessionStorage`, chave `exodus_billing_dismissed:{tom}:{billingId}`) —
+  sobrevive a um F5 dentro da aba (em tablet de balcão, reabrir o aviso a cada
+  recarga vira ruído), mas uma fatura nova volta a avisar e **escalar de
+  lembrete para atraso reabre** mesmo que o lembrete já tenha sido dispensado;
+  (2) o **bloqueio ignora qualquer dispensa** — não é aviso, é o estado do
+  acesso; (3) o overlay é **suprimido em impersonate e para o super admin** —
+  a guarda do Pilar 2b libera o suporte justamente para ele entrar numa loja
+  bloqueada, e a UI não pode contradizer o backend.
+  **Datas formatadas com `timeZone: 'UTC'`** de propósito: o vencimento é
+  gravado às 03:00Z (`dueDateBr`) para o dia de calendário bater em UTC e em
+  Brasília — ler no fuso do dispositivo exibiria o dia anterior no Acre
+  (UTC-5). O front **não** recalcula atraso: `daysUntilDue`/`daysOverdue` vêm
+  prontos do servidor.
 
 ---
 
@@ -3935,6 +3978,54 @@ mesclada na `main`.
   - **Validação**: `npm run typecheck` + `npm run build` (shared+api+web) →
     **0 erros**.
 
+- ✅ **Onda 2026-08-16b — Faturamento SaaS, Pilar 3 (frontend completo) —
+  MÓDULO ENCERRADO** (2026-08-16): mesma branch `feature/tenant-billing-schema`.
+  Fecha o módulo de Mensalidade/Inadimplência: até aqui ele funcionava só via
+  API (o Super Admin precisaria de Postman para emitir uma fatura, e o lojista
+  inadimplente batia num `403 BILLING_BLOCKED` cru, sem saber quanto devia nem
+  como pagar). Ver §5 (bullets Faturamento SaaS, backend e frontend) para o
+  detalhamento de componentes e decisões de UX.
+  - **Exceção deliberada ao "não altere backend" (aprovada pelo Comandante
+    antes de codar)**: `GET /api/admin/companies` **não** devolvia
+    `billingReminderDays`/`billingBlockGraceDays`/`billingExempt` — só o
+    `PATCH .../billing-settings` os retornava, **depois** de salvar. O painel
+    editaria às cegas, inclusive `billingExempt`, que é a chave-mestra que
+    desliga o bloqueio por atraso. Corrigido com 3 linhas no `select`
+    (aditivo, somente leitura, sem schema/guarda/contrato novo) — a única
+    mudança de backend desta onda.
+  - **`lib/queryClient.ts` extraído** (pré-requisito): o `queryClient` era uma
+    const local de `main.tsx`, invisível de fora, mas `lib/api.ts` precisa dele
+    para reagir ao `BILLING_BLOCKED` — e esse módulo roda **fora** da árvore
+    React, sem acesso a hooks. Módulo próprio importado pelos dois, sem ciclo.
+  - **Interceptação do `BILLING_BLOCKED`** (`lib/api.ts`, ao lado do
+    `NO_TENANT` já existente): invalida `['billing','current']` — rota que está
+    na allowlist da guarda e portanto continua respondendo 200 mesmo com o
+    tenant bloqueado (confirmado ao vivo) —, o que faz o `BillingGate` subir a
+    tela de bloqueio sozinho. **Não desloga nem limpa o token**, diferente do
+    `NO_TENANT`: a sessão é válida, o que falta é pagamento.
+  - **Dependência nova**: `qrcode.react@4.2.0` (peer aceita React 18; sem deps
+    externas). Precache do PWA foi de **847,67 KiB → 892,04 KiB** (+44 KiB).
+  - **Testado ao vivo contra o banco local** (script descartável via
+    `app.inject()`, apagado ao final; `git status` conferido, zero resíduo) —
+    **38 asserções**, focadas nos CONTRATOS que a UI assume (o projeto não tem
+    suíte de testes de UI, então renderização/interação seguem para
+    homologação manual no navegador): os 3 campos de billing agora presentes em
+    `GET /companies`; `POST /admin/billing` aceitando o payload **exato** do
+    formulário (`dueDate` como `'YYYY-MM-DD'` do `<input type="date">`) e
+    reancorando em `03:00Z`, sem off-by-one; **todos os 15 campos** de
+    `billing`/`flags`/`settings` que os tipos do `useBillingStatus` declaram,
+    presentes na resposta; `amount` como `number` (senão `brl()` quebraria);
+    PIX chegando decifrado ao `PixPanel`; e os **três estágios** exercitados
+    movendo o vencimento (+10d → nenhum modal · +3d → lembrete com
+    `daysUntilDue: 3` · −2d com carência 3 → aviso com `daysOverdue: 2` · −10d
+    → bloqueio); `403 BILLING_BLOCKED` numa rota de negócio com
+    `/billing/current` ainda em 200; impersonate operando normalmente na loja
+    bloqueada (o backend libera, o front suprime o overlay); baixa manual
+    (`PAID`) zerando as flags e liberando o acesso; e `PATCH billing-settings`
+    com payload parcial preservando os campos não enviados.
+  - **Validação**: `npm run typecheck` + `npm run build` (shared+api+web) →
+    **0 erros**.
+
 ---
 
 ## 12. Pendências, bloqueios e dívidas técnicas
@@ -4025,9 +4116,11 @@ mesclada na `main`.
     (`routes/admin.ts`, commit `b056a42`) estão todos em `main`. Reconciliação
     completa com `withTenant`/`withEncryption`/`AuditLog` documentada na
     Onda 2026-07-27 em §11. A arquitetura multi-tenant já tem porta de
-    entrada real disponível — falta só o frontend consumir (ver §14.1d: o
-    Back-Office/Painel de Contratos já foi construído em 2026-07-28, a
-    tela pública de onboarding continua deliberadamente adiada).
+    entrada real disponível, e o frontend já a consome por completo (ver
+    §14.1d: Back-Office/Painel de Contratos, impersonate e a tela pública
+    `/onboarding` foram todos entregues em 2026-07-28, PRs #26 e #27 — a
+    ressalva de "tela pública adiada" registrada aqui ficou desatualizada
+    até esta correção).
 20. ~~**Criptografia LGPD (Frente 2): configurar `ENCRYPTION_KEY` no
     Railway + rodar o backfill em produção**~~ **RESOLVIDO (2026-07-23)**:
     ambas as ações confirmadas — `ENCRYPTION_KEY` configurada no Railway,
@@ -4098,10 +4191,17 @@ Módulo de Mensalidade e Controle de Inadimplência, entregue por pilares:
   admin. **O bloqueio agora é efetivo no backend, não só de UI.** Corrigiu
   junto um defeito do Pilar 2 (`billingRoutes` importado mas nunca registrado
   — `/api/billing/current` respondia 404). Ver §5 e Onda 2026-08-16 em §11.
-- ⬜ **Pilar 3 — Frontend**: painel do Super Admin para gerir mensalidades +
-  aviso amigável/tela de bloqueio no ERP do lojista — **ainda não iniciado**.
-  A API já entrega `daysUntilDue`/`daysOverdue` prontos para o front nunca
-  refazer aritmética de fuso.
+- ✅ **Pilar 3 — Frontend** (concluído, onda 2026-08-16b): Back-Office do Super
+  Admin (`/admin/faturamento` + política de cobrança por empresa em
+  `/admin/contratos`) e UX progressiva do lojista (lembrete → aviso de atraso →
+  bloqueio total), com PIX Copia e Cola + QR Code em todos os estágios. Ver §5
+  (bullet Faturamento SaaS — frontend) e Onda 2026-08-16b em §11.
+
+**✅ MÓDULO DE FATURAMENTO SAAS ENCERRADO** — schema, criptografia, rotas,
+bloqueio efetivo no backend e frontend das duas faces. Resíduo conhecido, não
+bloqueante: `GET /api/admin/billing` não tem paginação (`take: 500`), mesma
+dívida já registrada para `GET /api/admin/companies` — irrelevante no volume
+atual, revisitar se a base de tenants crescer.
 
 ### 14.1 Concluído — pedido explícito do Comandante (PRIORIDADE)
 

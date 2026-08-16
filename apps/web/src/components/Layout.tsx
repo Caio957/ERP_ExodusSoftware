@@ -20,6 +20,7 @@ import {
 import { useAuth } from '../store/auth';
 import { StatusBadge } from './StatusBadge';
 import { ImpersonateBanner } from './ImpersonateBanner';
+import { BillingGate } from './billing/BillingGate';
 
 const navItems: { to: string; label: string; icon: LucideIcon; pageKey: string }[] = [
   { to: '/dashboard', label: 'Dashboard', icon: LineChart, pageKey: 'dashboard' },
@@ -68,6 +69,12 @@ export function Layout() {
 
   return (
     <div className="flex min-h-screen flex-col">
+      {/* Cobrança de mensalidade (Faturamento SaaS, Pilar 3): lembrete, aviso
+          de atraso ou tela de bloqueio, conforme as flags de
+          /api/billing/current. Renderiza via portal, então a posição aqui não
+          afeta o layout — só precisa estar dentro do shell autenticado. */}
+      <BillingGate />
+
       {/* Header (+ faixa de impersonate, quando ativa) — os dois vivem num
           único wrapper sticky: dois irmãos `sticky top-0` se sobrepõem em
           vez de empilhar, então o header perdeu a própria stickiness e
