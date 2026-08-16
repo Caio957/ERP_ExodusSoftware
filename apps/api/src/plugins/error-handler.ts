@@ -9,6 +9,30 @@ import { AppError } from '../lib/errors.js';
  * Captura QUALQUER erro não tratado, registra rota + payload + erro exato
  * e devolve uma resposta JSON padronizada — sem vazar stack em produção.
  */
+/**
+ * Campos que NUNCA podem chegar ao log, mesmo em erro. `pixPayload` (PIX Copia
+ * e Cola de uma fatura de mensalidade) é cifrado em repouso pela extensão
+ * `withEncryption` — logar o corpo cru de um `POST /admin/billing` que falhou
+ * gravaria exatamente esse dado em texto claro no stream de logs do Railway,
+ * anulando a criptografia. `password` entra pela mesma razão (onboarding e
+ * criação de usuário trafegam a senha em claro no corpo).
+ */
+const SENSITIVE_BODY_FIELDS = ['pixPayload', 'password'] as const;
+
+function redactBody(body: unknown): unknown {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return body;
+  const source = body as Record<string, unknown>;
+  let redacted: Record<string, unknown> | null = null;
+  for (const field of SENSITIVE_BODY_FIELDS) {
+    if (field in source) {
+      redacted ??= { ...source };
+      redacted[field] = '[REDACTED]';
+    }
+  }
+  // Sem campo sensível, devolve o objeto original (não paga cópia à toa).
+  return redacted ?? body;
+}
+
 export const errorHandlerPlugin = fp(async (app) => {
   app.setErrorHandler((error, request, reply) => {
     const base = {
@@ -16,7 +40,7 @@ export const errorHandlerPlugin = fp(async (app) => {
       url: request.url,
       params: request.params,
       query: request.query,
-      body: request.body,
+      body: redactBody(request.body),
     };
 
     // 1. Erros de validação (Zod via fastify-type-provider-zod)

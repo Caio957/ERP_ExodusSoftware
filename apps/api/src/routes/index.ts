@@ -11,6 +11,7 @@ import { financialRoutes } from './financial.js';
 import { purchaseSuggestionRoutes } from './purchase-suggestions.js';
 import { settingsRoutes } from './settings.js';
 import { dashboardRoutes } from './dashboard.js';
+import { billingRoutes } from './billing.js';
 
 /** Registra todos os grupos de rotas sob seus respectivos prefixos. */
 export async function registerRoutes(app: FastifyInstance) {

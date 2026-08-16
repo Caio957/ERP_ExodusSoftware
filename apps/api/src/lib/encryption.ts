@@ -129,6 +129,7 @@ export function decryptField(value: string | null): string | null {
 
 function encryptWritableData(data: Record<string, unknown>): Record<string, unknown> {
   const next = { ...data };
+  // Person
   if (typeof next.document === 'string' && next.document !== '') {
     next.document = encryptDeterministic(next.document);
   }
@@ -137,6 +138,13 @@ function encryptWritableData(data: Record<string, unknown>): Record<string, unkn
   }
   if (typeof next.phone === 'string' && next.phone !== '') {
     next.phone = encryptRandom(next.phone);
+  }
+  // TenantBilling — PIX Copia e Cola (não-determinístico, GCM: não precisa de
+  // busca por igualdade). O helper é compartilhado entre os dois models; cada
+  // um só tem os campos que tem, então Person nunca vê `pixPayload` e
+  // TenantBilling nunca vê document/email/phone — sem contaminação cruzada.
+  if (typeof next.pixPayload === 'string' && next.pixPayload !== '') {
+    next.pixPayload = encryptRandom(next.pixPayload);
   }
   return next;
 }
@@ -241,6 +249,28 @@ export function withEncryption(client: typeof prisma = prisma) {
           return query(a);
         },
       },
+
+      // TenantBilling — cifra `pixPayload` nas escritas. Só mexe em `data`/
+      // `create`/`update`; NÃO há `encryptWhere` porque `pixPayload` é GCM
+      // (não-determinístico) e nenhuma rota busca por igualdade nesse campo.
+      tenantBilling: {
+        async $allOperations({ operation, args, query }) {
+          const a = args as Record<string, unknown>;
+
+          if (WRITE_OPS_WITH_DATA.has(operation) && a.data) {
+            a.data = Array.isArray(a.data)
+              ? a.data.map((d) => encryptWritableData(d as Record<string, unknown>))
+              : encryptWritableData(a.data as Record<string, unknown>);
+          }
+
+          if (operation === 'upsert') {
+            if (a.create) a.create = encryptWritableData(a.create as Record<string, unknown>);
+            if (a.update) a.update = encryptWritableData(a.update as Record<string, unknown>);
+          }
+
+          return query(a);
+        },
+      },
     },
     result: {
       person: {
@@ -260,6 +290,17 @@ export function withEncryption(client: typeof prisma = prisma) {
           needs: { phone: true },
           compute(person: { phone: string | null }) {
             return decryptField(person.phone);
+          },
+        },
+      },
+
+      // Decifra `pixPayload` de forma transparente ao ler qualquer TenantBilling
+      // (também em relações aninhadas, ex.: `Company.tenantBillings` via include).
+      tenantBilling: {
+        pixPayload: {
+          needs: { pixPayload: true },
+          compute(billing: { pixPayload: string | null }) {
+            return decryptField(billing.pixPayload);
           },
         },
       },

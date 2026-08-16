@@ -9,7 +9,7 @@
 > construído, as decisões tomadas e os pontos onde queremos sua análise. As
 > perguntas direcionadas estão na seção **§13 — Pedidos de avaliação**.
 
-- **Última atualização:** 2026-07-29
+- **Última atualização:** 2026-08-14
 - **Idioma do projeto:** Português (pt-BR) em toda comunicação e documentação.
 - **Equipe:** Caio e Helom (sócios). O repositório é a fonte única; ambos importam
   o código em suas máquinas, então **este CLAUDE.md é o registro de onde paramos** —
@@ -578,6 +578,52 @@ Legenda: ✅ implementado e validado · 🟡 implementado parcial · ⬜ não in
 - ✅ **Dashboard** (§novo, ADMIN): `GET /dashboard?from&to` — agrega vendas, recebimentos
   por forma, série diária e situação de contas a pagar/receber.
 - ✅ **Sugestão de compra** (§4.6): média de vendas na janela × lead time.
+- 🟡 **Faturamento SaaS — Pilares 1 e 2 (schema + criptografia + rotas)**
+  (Módulo de Mensalidade/Inadimplência, ondas 2026-08-14 e 2026-08-14b — ver
+  §11): fundação de dados **+ API completa**; falta só o frontend (Pilar 3) e
+  a guarda de bloqueio efetiva (ver §14.0). `Company` ganhou três campos de
+  controle: `billingReminderDays Int @default(5)` (dias ANTES do vencimento
+  em que o aviso amigável aparece), `billingBlockGraceDays Int @default(3)`
+  (carência DEPOIS do vencimento antes de bloquear) e `billingExempt Boolean
+  @default(false)` (chave-mestra: `true` = tenant nunca bloqueado por atraso).
+  Novo model **`TenantBilling`** (camada de plataforma, logo após `AuditLog`
+  no schema): histórico de faturas de mensalidade — `companyId` (FK
+  `onDelete: Restrict`, escopado por `withTenant` — `'TenantBilling'` entrou
+  na `TENANT_SCOPED_MODELS`), `amount Decimal(10,2)`, `dueDate`, `pixPayload`
+  (PIX Copia e Cola), `status` (`String`, validado por `TenantBillingStatus`
+  = `z.enum(['PENDING','PAID','CANCELLED'])` no shared), `paidAt?`, índices em
+  `companyId`/`status`/`dueDate`/`[companyId,status]`. **`pixPayload` é
+  cifrado em repouso** pela extensão `withEncryption` — esquema
+  não-determinístico (AES-256-GCM, prefixo `encgcm1:`), o mesmo de
+  `Person.email`/`phone`, porque não há busca por igualdade nesse campo
+  (deliberadamente sem `encryptWhere`). O helper `encryptWritableData` é
+  compartilhado entre `person` e `tenantBilling` — cada model só tem os
+  campos que tem, sem contaminação cruzada. Migração aditiva
+  `20260814022348_add_tenant_billing` (escrita à mão — Docker/Postgres local
+  parado nesta sessão; aplicada no deploy via `prisma migrate deploy`).
+  **Rotas (Pilar 2, onda 2026-08-14b)** — Super Admin (`routes/admin.ts`,
+  atrás do mesmo `assertSuperAdmin`, sempre com
+  `const db = withEncryption(prisma)` para o PIX ser cifrado; nunca
+  `withTenant`, atravessam tenants de propósito): `GET /api/admin/billing`
+  (lista com filtro opcional por empresa/status, inclui dados do tenant,
+  `take: 500`), `POST /api/admin/billing` (emite; nasce `PENDING` pelo
+  default), `PATCH /api/admin/billing/:id/status` (baixa `PAID` com `paidAt`
+  ou cancela `CANCELLED`; estado terminal — recusa se já não estiver
+  `PENDING`) e `PATCH /api/admin/companies/:id/billing-settings` (os 3
+  parâmetros de cobrança; usa `prisma` cru, `Company` não tem campo cifrado).
+  Toda mudança grava `AuditLog` **antes** de aplicar, na mesma transação
+  (`BILLING_CREATE`, `BILLING_STATUS_PAID|CANCELLED`,
+  `BILLING_SETTINGS_UPDATE`, + `BILLING_EXEMPT_ON|OFF` quando a isenção é
+  tocada — é a chave-mestra que desliga o bloqueio, merece rastro próprio e
+  greppável). Tenant (`routes/billing.ts`, novo, prefixo `/billing`):
+  **`GET /api/billing/current`**, somente leitura, via `tenantDb(req)` —
+  devolve a fatura `PENDING` de vencimento mais antigo (a que pauta o
+  bloqueio), os 3 settings da empresa e as flags já calculadas no servidor
+  (`shouldShowReminder`/`isOverdue`/`isBlocked` + `daysUntilDue`/`daysOverdue`,
+  para o front nunca refazer aritmética de fuso). Nenhum verbo de escrita é
+  declarado nesse prefixo: o `setNotFoundHandler` já devolve 404 JSON (o
+  fallback de SPA só vale para GET fora de `/api`).
+  Próximo pilar: frontend — ver §14.0.
 
 ### Frontend
 - ✅ **Shell**: ErrorBoundary, Layout touch, ProtectedRoute (RBAC), StatusBadge
@@ -3669,6 +3715,124 @@ mesclada na `main`.
     rodou nesta sessão — Docker/Postgres local estava parado; validado via
     homologação manual do Comandante.)
 
+- 🟡 **Onda 2026-08-14 — Faturamento SaaS, Pilar 1 (Schema + Criptografia +
+  Enum)** (2026-08-14): branch `feature/tenant-billing-schema` (a partir da
+  `main`). Fundação de dados do módulo de Mensalidade/Inadimplência —
+  **escopo estrito, sem rotas nem frontend** (missão explícita do Comandante:
+  só schema + criptografia + enum nesta rodada).
+  - **`schema.prisma`**: `Company` ganhou `billingReminderDays Int
+    @default(5)`, `billingBlockGraceDays Int @default(3)` e `billingExempt
+    Boolean @default(false)` (defaults ⇒ empresas existentes herdam sem
+    backfill), mais a relação `tenantBillings TenantBilling[]`. Novo model
+    `TenantBilling` posicionado na camada de plataforma (logo após
+    `AuditLog`, antes dos models de negócio) — `companyId` FK
+    `onDelete: Restrict`, `amount Decimal(10,2)`, `dueDate`, `pixPayload`,
+    `status`, `paidAt?`, `createdAt`/`updatedAt`, e 4 índices
+    (`companyId`, `status`, `dueDate`, `[companyId, status]`). **`status`
+    recebeu `@default("PENDING")`** (correção pós-implementação, antes do
+    commit) por consistência com o resto do projeto (`Company.status` etc.
+    também têm default) e porque toda fatura sempre nasce `PENDING` — evita
+    criar fatura sem status por erro humano. A migração foi ajustada no
+    mesmo arquivo (`"status" TEXT NOT NULL DEFAULT 'PENDING'`), sem criar
+    migração nova.
+  - **Criptografia** (`lib/encryption.ts`): `pixPayload` cifrado com o
+    esquema não-determinístico (`encryptRandom`/AES-256-GCM/prefixo
+    `encgcm1:`), o mesmo de `email`/`phone` — de propósito **sem**
+    `encryptWhere`, porque não há busca por igualdade nesse campo. Adicionado
+    ao helper compartilhado `encryptWritableData` (Person e TenantBilling
+    reaproveitam o mesmo helper; cada model só tem os campos que possui, sem
+    contaminação cruzada) + novos blocos `tenantBilling` em `query`
+    (cifra nas escritas) e `result` (decifra na leitura, inclusive em
+    relações aninhadas via `Company.tenantBillings`).
+  - **Isolamento** (`lib/tenant.ts`): `'TenantBilling'` entrou na
+    `TENANT_SCOPED_MODELS` — como todo model de negócio, o `withTenant`
+    injeta `companyId` nas leituras/escritas em massa; escritas por seletor
+    único continuam protegidas pelo padrão findFirst-primeiro já
+    estabelecido. Composição preservada: `withEncryption` por baixo de
+    `withTenant`.
+  - **Enum** (`packages/shared/src/enums.ts`): `TenantBillingStatus =
+    z.enum(['PENDING','PAID','CANCELLED'])` — `String` no Prisma, validado
+    por `z.enum` na borda, mesma convenção de `CompanyStatus`/`CashRegisterType`.
+  - **Migração**: `20260814022348_add_tenant_billing` (aditiva). Escrita à
+    mão porque o Docker/Postgres local estava parado — `prisma migrate dev`
+    não roda sem banco, e rodá-lo às cegas contra qualquer DATABASE_URL real
+    seria risco (a missão proíbe tocar produção). SQL segue o formato exato
+    das migrações Prisma existentes (conferido contra `add_audit_log`/
+    `add_company_status`: `ALTER TABLE ADD COLUMN ... DEFAULT`, `CREATE
+    TABLE`, índices `Table_col_idx`, FK `ON DELETE RESTRICT ON UPDATE
+    CASCADE`). Será aplicada no deploy via `prisma migrate deploy`.
+  - **`prisma generate`**: os **tipos** do client foram regenerados com
+    sucesso (typecheck valida os nomes de model no `$extends` — se
+    `tenantBilling` não existisse no client, o `withEncryption` daria erro
+    de tipo; passou 0 erros). O único erro foi `EPERM` no rename do engine
+    DLL de runtime (`query_engine-windows.dll.node`) — o clássico lock do
+    Windows quando um `dev:api`/`tsx watch` ainda está de pé (documentado em
+    ondas anteriores); irrelevante para typecheck/build (que não usam o
+    engine) e resolvido de vez no build do Railway (container Linux limpo).
+  - **Validação**: `npm run typecheck` + `npm run build` (shared+api+web) →
+    **0 erros**.
+
+- 🟡 **Onda 2026-08-14b — Faturamento SaaS, Pilar 2 (Backend / Rotas)**
+  (2026-08-14): mesma branch `feature/tenant-billing-schema`. Expõe a API do
+  módulo em duas superfícies com privilégios separados — **sem frontend e sem
+  a guarda de bloqueio efetiva** (escopo explícito da missão).
+  - **`packages/shared/src/schemas/billing.ts`** (novo, + linha no barrel):
+    `createTenantBillingSchema`, `updateTenantBillingStatusSchema`
+    (só `PAID`/`CANCELLED` — não se "despaga" fatura),
+    `updateCompanyBillingSettingsSchema` (3 campos opcionais + `.refine()`
+    recusando corpo vazio, que seria um UPDATE sem efeito gravando auditoria à
+    toa) e `listTenantBillingsQuerySchema`.
+  - **🐛 Bug de fuso encontrado e corrigido DENTRO desta onda** (o achado mais
+    importante): o plano inicial usava `dueDate: z.coerce.date()` e normalizava
+    o fuso só na leitura. Isso **não** elimina o off-by-one — `z.coerce.date()`
+    transforma `'2026-08-20'` em `2026-08-20T00:00:00Z`, que em
+    America/Sao_Paulo é **19/08 às 21h**; a fatura apareceria vencida um dia
+    antes e, com carência 0, bloquearia o cliente indevidamente. Corrigido
+    ancorando no **schema**: `z.coerce.date().transform(...)` regrava o
+    instante em meia-noite de Brasília (**03:00Z**), que cai no mesmo dia de
+    calendário lido em UTC **e** em Brasília — imune ao off-by-one dos dois
+    lados. Continua aceitando `'2026-08-20'`, `'...Z'` e `'...-03:00'`
+    (`z.string().datetime()` sem `{offset:true}` rejeitaria o terceiro).
+  - **`apps/api/src/lib/dates.ts`** (novo): `startOfDayBr(instant)`,
+    `todayStartBr()` e `diffDaysBr(target, reference?)` (dias de calendário no
+    fuso da loja, `Math.round` para sobreviver a um eventual retorno do
+    horário de verão). Extraído de `routes/financial.ts` (onde `todayStartBr`
+    nasceu privado) ao surgir o 2º consumidor — mesmo precedente de
+    `calcWeightedAverageCost`/`apportionLandedCost`; `financial.ts` agora
+    importa de lá (refactor puro, sem mudança de comportamento).
+  - **Rotas** — ver §5 (bullet Faturamento SaaS) para a lista completa. Duas
+    decisões que valem registro: (a) `const db = withEncryption(prisma)` no
+    topo de `adminRoutes` — usar o `prisma` cru em qualquer rota que grave
+    `TenantBilling` gravaria o PIX **em texto claro**, falha silenciosa que só
+    apareceria inspecionando a tabela; (b) todas as transações são **inline**
+    no handler, nunca passando `tx` para helper — evita de vez o problema de
+    branding de tipo do Prisma que obrigou `FinancialTxClient`/
+    `SettingCapableClient` em outros arquivos.
+  - **🔒 Vazamento de PIX nos logs, encontrado e corrigido**
+    (`plugins/error-handler.ts`): o handler global loga `request.body` em toda
+    falha (validação, `AppError` — inclusive um 404 comum — e 500). Como
+    `POST /admin/billing` carrega o `pixPayload` **em texto claro** no corpo,
+    qualquer erro gravaria no stream de logs do Railway exatamente o dado que
+    ciframos em repouso. Adicionado `redactBody()` com uma allowlist mínima
+    (`pixPayload`, `password` — este último pelo mesmo motivo, onboarding e
+    criação de usuário trafegam senha em claro). Não copia o objeto quando não
+    há campo sensível.
+  - **Testado sob `TZ=UTC`** (script descartável, apagado ao final): 22 casos
+    cobrindo o transform de data (os 3 formatos de entrada convergindo para o
+    mesmo instante), `diffDaysBr` (vence hoje às 00h05 e às 23h55 → ambos 0) e
+    as flags nas bordas (carência 3: `-3` não bloqueia, `-4` bloqueia;
+    `billingExempt` neutraliza só `isBlocked`, nunca `isOverdue`). O caso 1
+    documenta o bug antigo com prova, e o 6 confirma o cenário crítico: fatura
+    criada com a data de hoje **nunca nasce vencida**. Rodar em `TZ=UTC` é
+    essencial — a máquina local é `America/Sao_Paulo` e o Railway é UTC, então
+    uma regressão de fuso passaria despercebida localmente.
+  - **NÃO testado ao vivo via HTTP** — Docker/Postgres local parado nesta
+    sessão. Falta validar contra banco: que o `pixPayload` sai `encgcm1:` na
+    tabela (lendo com Prisma cru) enquanto a rota devolve legível, o 403 para
+    ADMIN comum, e o isolamento entre tenants.
+  - **Validação**: `npm run typecheck` + `npm run build` (shared+api+web) →
+    **0 erros**.
+
 ---
 
 ## 12. Pendências, bloqueios e dívidas técnicas
@@ -3804,6 +3968,41 @@ Gostaríamos de análise crítica especialmente sobre:
 ---
 
 ## 14. Próximos passos sugeridos (ordem proposta)
+
+### 14.0 Faturamento SaaS / Inadimplência (em andamento — pedido do Comandante)
+
+Módulo de Mensalidade e Controle de Inadimplência, entregue por pilares:
+
+- ✅ **Pilar 1 — Schema + Criptografia + Enum** (concluído, onda 2026-08-14,
+  branch `feature/tenant-billing-schema`): campos de billing em `Company`,
+  model `TenantBilling`, `pixPayload` cifrado (GCM), `TenantBillingStatus` no
+  shared, `TenantBilling` escopado por `withTenant`. Ver §5 (bullet
+  Faturamento SaaS) e Onda 2026-08-14 em §11. Migração aditiva escrita à mão
+  (aplicada no deploy).
+- ✅ **Pilar 2 — Backend (rotas)** (concluído, onda 2026-08-14b): as 4 rotas
+  administrativas (`GET/POST /api/admin/billing`,
+  `PATCH /api/admin/billing/:id/status`,
+  `PATCH /api/admin/companies/:id/billing-settings`) + a do tenant
+  (`GET /api/billing/current`, somente leitura), com auditoria obrigatória e
+  o cálculo de "dias para vencer/bloquear" no fuso da loja. Ver §5 e Onda
+  2026-08-14b em §11.
+  ⚠️ **Ressalva de escopo**: a versão anterior desta seção listava a "guarda
+  de bloqueio por inadimplência" como parte do Pilar 2, mas a missão executada
+  definiu `/billing/current` como **consultivo** — a rota expõe a flag
+  `isBlocked`, e nada ainda impede um tenant bloqueado de usar a API chamando-a
+  direto. Enquanto a guarda não existir, o bloqueio é só de UI e é
+  contornável. Decidir em que pilar ela entra (ver item abaixo).
+- ⬜ **Pilar 2b — Guarda de bloqueio (enforcement)**: um `preHandler`/
+  `onRequest` global que recuse rotas de negócio quando o tenant está
+  bloqueado, derivando do mesmo cálculo de `routes/billing.ts` (extrair a
+  regra para um helper compartilhado em vez de duplicá-la). Precisa de uma
+  lista de exceções — `/auth/*`, `/billing/current` e o próprio pagamento não
+  podem ser bloqueados, senão o cliente fica sem como se regularizar.
+  **Ainda não iniciado.**
+- ⬜ **Pilar 3 — Frontend**: painel do Super Admin para gerir mensalidades +
+  aviso amigável/tela de bloqueio no ERP do lojista — **ainda não iniciado**.
+  A API já entrega `daysUntilDue`/`daysOverdue` prontos para o front nunca
+  refazer aritmética de fuso.
 
 ### 14.1 Concluído — pedido explícito do Comandante (PRIORIDADE)
 
